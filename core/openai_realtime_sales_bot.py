@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
 OpenAI Realtime Sales Bot - Enhanced Production Version with Multi-Sample Rate Support
-Bridges Exotel WebSocket with OpenAI Realtime API for natural conversations
-New Features: 16kHz/24kHz support, variable chunk sizes, enhanced mark/clear events
+Supports both:
+1. Exotel WebSocket streaming (via Voicebot Applet) - Traditional approach
+2. Direct SIP Trunking (cost-effective, no applet needed) - New approach
+
+Bridges Exotel communication with OpenAI Realtime API for natural conversations
+New Features: 16kHz/24kHz support, variable chunk sizes, enhanced mark/clear events, SIP trunk support
 
 Security Notice: This code uses environment variables for sensitive configuration.
 Set OPENAI_API_KEY environment variable before running.
@@ -61,12 +65,22 @@ class OpenAIRealtimeSalesBot:
         self.variable_chunk_support = Config.EXOTEL_VARIABLE_CHUNK_SUPPORT
         self.dynamic_chunk_sizing = Config.DYNAMIC_CHUNK_SIZING
         
+        # Integration mode (WebSocket Applet or SIP Trunk)
+        self.use_sip_trunk = Config.USE_SIP_TRUNK
+        self.sip_server = None
+        
         logger.info("🤖 Enhanced OpenAI Realtime Sales Bot initialized!")
         logger.info(f"🎵 Multi-sample rate support: {Config.SUPPORTED_SAMPLE_RATES} Hz")
         logger.info(f"📦 Variable chunk sizes: {self.min_chunk_size_ms}ms - {Config.MAX_CHUNK_SIZE_MS}ms")
         logger.info(f"✨ Enhanced Exotel events: {self.exotel_enhanced_events}")
         logger.info(f"🏢 Company: {Config.COMPANY_NAME}")
         logger.info(f"👤 Sales Rep: {Config.SALES_REP_NAME}")
+        
+        # Display integration mode
+        if self.use_sip_trunk:
+            logger.info("📡 MODE: Direct SIP Trunking (cost-effective, no applet needed)")
+        else:
+            logger.info("📡 MODE: WebSocket + Exotel Voicebot Applet (traditional)")
 
     async def handle_exotel_websocket(self, websocket, path=None):
         """Handle incoming WebSocket connection from Exotel with enhanced sample rate detection"""
@@ -440,9 +454,10 @@ class OpenAIRealtimeSalesBot:
             ]
             
             # Connect to OpenAI Realtime API with enhanced SSL context
+            # Note: additional_headers not supported in websockets.connect, use header parameter instead
             openai_ws = await websockets.connect(
                 url, 
-                additional_headers=headers,
+                extra_headers=dict(headers),  # Convert list of tuples to dict
                 ssl=ssl_context,
                 ping_interval=20,  # Enhanced connection stability
                 ping_timeout=10
@@ -989,10 +1004,22 @@ class OpenAIRealtimeSalesBot:
 
 
     async def start_server(self):
-        """Start the WebSocket server"""
+        """Start the server in configured mode (WebSocket Applet or SIP Trunk)"""
         try:
-            logger.info(f'🚀 Starting Enhanced Sales Bot Server on {Config.SERVER_HOST}:{Config.SERVER_PORT}')
-            logger.info('📞 Ready for Enhanced Exotel streaming connections!')
+            if self.use_sip_trunk:
+                await self._start_sip_server()
+            else:
+                await self._start_websocket_server()
+                
+        except Exception as e:
+            logger.error(f'❌ Server Error: {e}')
+            raise
+    
+    async def _start_websocket_server(self):
+        """Start WebSocket server for Exotel Voicebot Applet connections"""
+        try:
+            logger.info(f'🚀 Starting WebSocket Server on {Config.SERVER_HOST}:{Config.SERVER_PORT}')
+            logger.info('📞 Ready for Exotel Voicebot Applet connections!')
             logger.info('🎵 Multi-sample rate support: 8kHz, 16kHz, 24kHz')
             logger.info('📦 Variable chunk sizes: minimum 20ms')
             logger.info('✨ Enhanced mark/clear event handling')
@@ -1004,13 +1031,53 @@ class OpenAIRealtimeSalesBot:
                 Config.SERVER_HOST,
                 Config.SERVER_PORT
             ):
-                logger.info(f'✅ Enhanced Sales Bot Server running at ws://{Config.SERVER_HOST}:{Config.SERVER_PORT}')
-                logger.info('🎯 Ready for enhanced calls with multi-sample rate support...')
+                logger.info(f'✅ WebSocket Server running at ws://{Config.SERVER_HOST}:{Config.SERVER_PORT}')
+                logger.info('🎯 Ready for calls from Exotel Voicebot Applet...')
                 await asyncio.Future()  # Run forever
                 
         except Exception as e:
-            logger.error(f'❌ Enhanced Server Error: {e}')
+            logger.error(f'❌ WebSocket Server Error: {e}')
             raise
+    
+    async def _start_sip_server(self):
+        """Start SIP server for direct Exotel SIP trunking"""
+        try:
+            logger.info(f'🚀 Starting SIP Server on {Config.SIP_SERVER_HOST}:{Config.SIP_SERVER_PORT}')
+            logger.info('📞 Ready for direct Exotel SIP trunk connections!')
+            logger.info('💰 Cost-effective mode: No Voicebot Applet needed')
+            logger.info('🎵 Multi-sample rate support: 8kHz, 16kHz, 24kHz')
+            logger.info('🔐 Using SIP authentication from environment')
+            
+            # Import SIP server
+            from core.sip_server import SIPServer
+            
+            # Create and start SIP server
+            self.sip_server = SIPServer(openai_bot=self)
+            
+            # Initialize PJSUA (may take a moment)
+            logger.info("⏳ Initializing PJSUA2 SIP stack...")
+            self.sip_server.initialize_pjsua()
+            
+            # Start SIP server
+            await self.sip_server.start()
+            
+            logger.info(f'✅ SIP Server running at sip://{Config.SIP_SERVER_HOST}:{Config.SIP_SERVER_PORT}')
+            logger.info(f'🎯 Exotel SIP Trunk: {Config.EXOTEL_OUTBOUND_PROXY}')
+            logger.info('📞 Waiting for incoming SIP calls...')
+            
+            # Keep running
+            await asyncio.Future()  # Run forever
+            
+        except ImportError as e:
+            logger.error(f'❌ SIP libraries not installed: {e}')
+            logger.error('💡 Install with: pip install pjsua2-py PyAudio')
+            raise
+        except Exception as e:
+            logger.error(f'❌ SIP Server Error: {e}')
+            raise
+        finally:
+            if self.sip_server:
+                await self.sip_server.stop()
 
     async def handle_exotel_dtmf(self, message: Dict[str, Any], stream_id: str):
         """Handle DTMF events from Exotel"""
@@ -1026,6 +1093,36 @@ class OpenAIRealtimeSalesBot:
             
         except Exception as e:
             logger.error(f'❌ Error handling DTMF: {e}')
+    
+    async def send_audio_to_openai(self, call_id: str, audio_chunk: bytes, sample_rate: int = 16000):
+        """
+        Public method for SIP server to send RTP audio to OpenAI
+        This bridges incoming RTP audio packets with OpenAI Realtime API
+        
+        Args:
+            call_id: SIP call identifier
+            audio_chunk: PCM16 audio data
+            sample_rate: Audio sample rate (8000, 16000, 24000)
+        """
+        try:
+            # Map call_id to stream_id for compatibility with existing methods
+            stream_id = call_id
+            
+            # Ensure OpenAI connection exists
+            if stream_id not in self.openai_connections:
+                logger.warning(f"⚠️ No OpenAI connection for SIP call {call_id}")
+                return
+            
+            # Initialize sample rate tracking if needed
+            if stream_id not in self.connection_sample_rates:
+                self.connection_sample_rates[stream_id] = sample_rate
+            
+            # Send audio to OpenAI via existing method
+            await self._send_audio_to_openai(stream_id, audio_chunk, sample_rate)
+            
+        except Exception as e:
+            logger.error(f"❌ Error sending RTP audio to OpenAI for {call_id}: {e}")
+
     async def cleanup_connections(self, stream_id: str):
         """Enhanced cleanup of both Exotel and OpenAI connections"""
         try:
