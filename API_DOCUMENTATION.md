@@ -309,7 +309,67 @@ For heavy volume/production systems, bypassing the WebSockets applet and using a
 
 ---
 
-## 🤝 4. HubSpot & CRM Integration Example
+## ⚙️ 4. Dynamic Bot Configuration & Telemetry APIs
+
+The system exposes high-fidelity administrative endpoints to inspect real-time connection telemetry and hot-reload voice configurations instantly without causing call interruptions.
+
+### A. Query Bot Telemetry
+* **Endpoint:** `GET /api/v1/bot/status`
+* **Response Payload (200 OK):**
+```json
+{
+  "success": true,
+  "bot_name": "Sarah",
+  "company_name": "TechSolutions Inc.",
+  "active_stream_calls": 0,
+  "openai_settings": {
+    "model": "gpt-4o-realtime-preview-2024-12-17",
+    "voice": "coral",
+    "temperature": 0.7
+  },
+  "audio_settings": {
+    "sample_rate": 24000,
+    "chunk_size_ms": 10,
+    "buffer_size_ms": 160
+  },
+  "telephony_mode": {
+    "use_sip_trunk": false,
+    "sip_server_host": "0.0.0.0",
+    "sip_server_port": 5060,
+    "sip_public_endpoint": "localhost"
+  }
+}
+```
+
+### B. Dynamically Hot-Reload Configurations
+* **Endpoint:** `POST /api/v1/bot/config`
+* **Request Payload (JSON):**
+```json
+{
+  "sales_bot_name": "Elena",
+  "company_name": "Global Retail Group",
+  "openai_voice": "shimmer",
+  "openai_temperature": 0.8
+}
+```
+* **Response Payload (200 OK):**
+```json
+{
+  "success": true,
+  "updated_fields": ["sales_bot_name", "company_name", "openai_voice", "openai_temperature"],
+  "current_config": {
+    "sales_bot_name": "Elena",
+    "company_name": "Global Retail Group",
+    "openai_model": "gpt-4o-realtime-preview-2024-12-17",
+    "openai_voice": "shimmer",
+    "openai_temperature": 0.8
+  }
+}
+```
+
+---
+
+## 🤝 5. HubSpot & CRM Integration Example
 
 Below is a simple guide showing how your HubSpot CRM can consume these APIs to automate customer contact processes.
 

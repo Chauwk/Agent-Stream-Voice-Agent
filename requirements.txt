@@ -4,6 +4,9 @@
 python-dotenv
 openai
 websockets
+fastapi
+uvicorn
+aiohttp
 
 # Audio processing
 pydub

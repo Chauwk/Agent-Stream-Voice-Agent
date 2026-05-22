@@ -41,27 +41,15 @@ def main():
         print('💡 Edit .env file with your settings')
         sys.exit(1)
     
-    # Start the bot
+    # Start the unified FastAPI bot gateway and concurrent SIP trunking engine
     try:
         print()
-        print('🤖 Starting bot...')
-        asyncio.run(bot_main())
+        print('🤖 Starting Unified Bot Gateway & Web API Server...')
+        from main_api import main as api_main
+        api_main()
     except KeyboardInterrupt:
         print()
         print('👋 Bot stopped')
-    except ImportError as e:
-        if 'pjsua' in str(e) or 'SIP' in str(e):
-            print()
-            print(f'❌ Error: {e}')
-            print()
-            print('💡 For SIP Trunk mode, install SIP libraries:')
-            print('   pip install pjsua2-py PyAudio')
-            print()
-            print('💡 Or switch to WebSocket mode by setting:')
-            print('   USE_SIP_TRUNK=false')
-        else:
-            print(f'❌ Error: {e}')
-        sys.exit(1)
     except Exception as e:
         print()
         print(f'❌ Error: {e}')

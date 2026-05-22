@@ -28,5 +28,5 @@ EXPOSE 5060/tcp
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python -c "import socket; s = socket.socket(); s.connect(('localhost', 5060)); s.close()" || exit 1
 
-# Start bot
-CMD ["python", "main.py"]
+# Start bot gateway
+CMD ["python", "main_api.py"]
