@@ -1,10 +1,9 @@
 FROM python:3.10-slim
 
-# Install SIP dependencies
+# Install audio dependencies
 RUN apt-get update && apt-get install -y \
-    libpjproject2.x \
-    libpjproject2-dev \
     portaudio19-dev \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -19,14 +18,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy bot code
 COPY . .
 
-# Expose WebSockets and SIP ports
-EXPOSE 5000/tcp
-EXPOSE 5060/udp
-EXPOSE 5060/tcp
+# Expose API port
+EXPOSE 5002/tcp
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import socket; s = socket.socket(); s.connect(('localhost', 5060)); s.close()" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5002/health')" || exit 1
 
 # Start bot gateway
 CMD ["python", "main_api.py"]
