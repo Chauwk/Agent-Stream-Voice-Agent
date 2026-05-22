@@ -19,7 +19,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy bot code
 COPY . .
 
-# Expose SIP port
+# Expose WebSockets and SIP ports
+EXPOSE 5000/tcp
 EXPOSE 5060/udp
 EXPOSE 5060/tcp
 
