@@ -1,17 +1,19 @@
-# Voice AI Bot Dependencies - SIP ONLY MODE
+# Voice AI Bot Dependencies
 
 # Core dependencies
 python-dotenv
 openai
-asyncio
+websockets
 
 # Audio processing
 pydub
 numpy
 
-# SIP Trunking Support (REQUIRED for SIP mode)
-pjsua2
-PyAudio
+# SIP Trunking Support (ONLY needed if USE_SIP_TRUNK=true)
+# NOTE: PyAudio and pjsua2 require C++ compilers / build tools to install on Windows.
+# Comment out if you are only using the default WebSocket mode.
+# pjsua2
+# PyAudio
 
 # Optional: for better audio quality
 # librosa
