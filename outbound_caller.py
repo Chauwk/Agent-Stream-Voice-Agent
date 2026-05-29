@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Outbound Call Maker - Trigger outbound calls from the SIP Server
-Allows you to initiate callbacks to customers
+Outbound Call Maker - Trigger outbound calls via REST API
+Use Exotel REST API to initiate customer callbacks
 """
 
 import asyncio
@@ -11,77 +11,66 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config import Config
-from core.openai_realtime_sales_bot import OpenAIRealtimeSalesBot
+from core.exotel_outbound_api import ExotelOutboundAPI
 
 async def make_callback_call(phone_number: str, customer_name: str = "Customer"):
     """
-    Make an outbound callback to a customer
+    Make an outbound callback to a customer via REST API
     
     Args:
         phone_number: Customer phone number
         customer_name: Customer name for greeting
     """
     try:
-        # Initialize bot
-        bot = OpenAIRealtimeSalesBot()
-        
-        print(f"\n📱 Initiating outbound call...")
+        print(f"\n📱 Initiating outbound call via REST API...")
         print(f"📞 Target: {phone_number}")
         print(f"👤 Customer: {customer_name}")
         
-        # Start SIP server in background
-        sip_task = asyncio.create_task(bot._start_sip_server())
-        
-        # Give SIP server time to initialize
-        await asyncio.sleep(3)
+        # Initialize REST API client
+        api = ExotelOutboundAPI()
         
         # Make the outbound call
-        if bot.sip_server:
-            call_id = await bot.sip_server.make_outbound_call(
-                phone_number=phone_number,
-                context={
-                    "customer_name": customer_name,
-                    "greeting": f"Hi {customer_name}, this is Sarah calling from our sales team. How are you doing?"
-                }
-            )
-            
-            if call_id:
-                print(f"\n✅ Call initiated successfully!")
-                print(f"🆔 Call ID: {call_id}")
-                print(f"⏱️  Call duration: check logs for details")
-                
-                # Keep the call running
-                await asyncio.sleep(120)  # Run for 2 minutes
-            else:
-                print(f"\n❌ Failed to initiate call")
+        call_sid = await api.make_outbound_call(
+            phone_number=phone_number,
+            custom_data=f"customer_name={customer_name}"
+        )
+        
+        if call_sid:
+            print(f"\n✅ Call initiated successfully!")
+            print(f"🆔 Call SID: {call_sid}")
+            print(f"💡 Call will route back to your SIP server when answered")
+        else:
+            print(f"\n❌ Failed to initiate call")
         
     except Exception as e:
         print(f"❌ Error: {e}")
-    finally:
-        print("\n👋 Ending call")
 
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="Make outbound calls via SIP")
+    parser = argparse.ArgumentParser(description="Make outbound calls via Exotel REST API")
     parser.add_argument("phone", help="Phone number to call (e.g., +919876543210)")
     parser.add_argument("--name", default="Customer", help="Customer name")
     
     args = parser.parse_args()
     
-    print("🚀 Outbound Call Initiator")
+    print("🚀 Outbound Call Initiator (REST API)")
     print("=" * 50)
-    print(f"🌐 Mode: {('SIP Trunking' if Config.USE_SIP_TRUNK else 'WebSocket')}")
-    print(f"📤 Outbound: {'✅ ENABLED' if Config.OUTBOUND_SIP_ENABLED else '❌ DISABLED'}")
     
-    if not Config.OUTBOUND_SIP_ENABLED:
-        print("\n⚠️  Outbound SIP is not enabled in .env")
-        print("Set: OUTBOUND_SIP_ENABLED=true")
+    # Check required config
+    if not Config.EXOTEL_API_TOKEN or not Config.EXOTEL_ACCOUNT_SID:
+        print("\n⚠️  REST API credentials not configured")
+        print("Set EXOTEL_API_TOKEN and EXOTEL_ACCOUNT_SID in .env")
         sys.exit(1)
     
-    if not Config.SIP_USERNAME or not Config.SIP_PASSWORD:
-        print("\n⚠️  SIP credentials not configured")
-        print("Set SIP_USERNAME and SIP_PASSWORD in .env")
+    if not Config.EXOTEL_FROM_NUMBER:
+        print("\n⚠️  Outbound number not configured")
+        print("Set EXOTEL_FROM_NUMBER in .env")
         sys.exit(1)
+    
+    print(f"✅ REST API configured")
+    print(f"📤 From: {Config.EXOTEL_FROM_NUMBER}")
+    print(f"🎯 To: {args.phone}")
+    print()
     
     asyncio.run(make_callback_call(args.phone, args.name))

@@ -46,24 +46,18 @@ class Config:
     EXOTEL_VARIABLE_CHUNK_SUPPORT = os.getenv('EXOTEL_VARIABLE_CHUNK_SUPPORT', 'true').lower() == 'true'
     DYNAMIC_CHUNK_SIZING = os.getenv('DYNAMIC_CHUNK_SIZING', 'true').lower() == 'true'
     
-    # ===== EXOTEL OUTBOUND API (for REST-based outbound calls) =====
+    # ===== EXOTEL OUTBOUND API (for REST-based outbound calls only) =====
     EXOTEL_API_TOKEN = os.getenv('EXOTEL_API_TOKEN', '')  # Get from Exotel dashboard
     EXOTEL_ACCOUNT_SID = os.getenv('EXOTEL_ACCOUNT_SID', '')  # Your Account SID
     EXOTEL_FROM_NUMBER = os.getenv('EXOTEL_FROM_NUMBER', '')  # Your virtual number
-    USE_SIP_TRUNK = os.getenv('USE_SIP_TRUNK', 'false').lower() == 'true'
+    
+    # ===== SIP SERVER CONFIGURATION =====
     SIP_SERVER_HOST = os.getenv('SIP_SERVER_HOST', '0.0.0.0')
     SIP_SERVER_PORT = int(os.getenv('SIP_SERVER_PORT', '5060'))
     SIP_PUBLIC_IP = os.getenv('SIP_PUBLIC_IP', '')  # Public IP - REQUIRED for incoming calls
     
-    # ===== INBOUND vSIP (IP-based auth) =====
+    # ===== INBOUND ONLY (IP-based auth, no SIP credentials needed) =====
     INBOUND_SIP_ENABLED = os.getenv('INBOUND_SIP_ENABLED', 'true').lower() == 'true'
-    
-    # ===== OUTBOUND SIP (Digest auth with credentials) =====
-    OUTBOUND_SIP_ENABLED = os.getenv('OUTBOUND_SIP_ENABLED', 'false').lower() == 'true'
-    SIP_USERNAME = os.getenv('SIP_USERNAME', '')  # For outbound calling (digest auth)
-    SIP_PASSWORD = os.getenv('SIP_PASSWORD', '')  # For outbound calling
-    SIP_REALM = os.getenv('SIP_REALM', 'exotel.com')
-    EXOTEL_OUTBOUND_PROXY = os.getenv('EXOTEL_OUTBOUND_PROXY', 'proxy.exotel.in:5060')
 
     
     # ===== BOT PERSONALITY =====
