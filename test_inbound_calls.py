@@ -164,19 +164,26 @@ class InboundCallTester:
         else:
             print(f"✅ Bot Name: {Config.SALES_BOT_NAME}")
         
-        # Check SIP configuration if SIP trunk mode
-        if Config.USE_SIP_TRUNK:
-            print("\n📡 SIP Trunk Mode:")
-            if not Config.SIP_PUBLIC_IP:
-                errors.append("❌ SIP_PUBLIC_IP not set (required for inbound SIP calls)")
-            else:
-                print(f"✅ Public IP: {Config.SIP_PUBLIC_IP}")
-            
-            print(f"✅ SIP Port: {Config.SIP_SERVER_PORT}")
+        # Check SIP configuration (now mandatory - only mode)
+        print("\n📡 SIP Trunk Mode (Inbound Only):")
+        if not Config.SIP_PUBLIC_IP:
+            errors.append("❌ SIP_PUBLIC_IP not set (required for inbound SIP calls)")
         else:
-            print("\n🌐 WebSocket Mode (Voicebot Applet):")
-            print(f"✅ Server: {Config.SERVER_HOST}:{Config.SERVER_PORT}")
-            print(f"✅ Bot Name: {Config.SALES_BOT_NAME}")
+            print(f"✅ Public IP: {Config.SIP_PUBLIC_IP}")
+        
+        if not Config.INBOUND_SIP_ENABLED:
+            errors.append("❌ INBOUND_SIP_ENABLED not set")
+        else:
+            print(f"✅ Inbound SIP: Enabled")
+        
+        print(f"✅ SIP Port: {Config.SIP_SERVER_PORT}")
+        
+        # Check REST API for outbound
+        print("\n📤 REST API (Outbound Only):")
+        if Config.EXOTEL_API_TOKEN:
+            print(f"✅ Exotel REST API: Configured")
+        else:
+            print(f"ℹ️  Exotel REST API: Not configured (optional for outbound)")
         
         if errors:
             print("\n" + "=" * 60)

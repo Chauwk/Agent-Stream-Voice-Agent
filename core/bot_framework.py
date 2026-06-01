@@ -638,17 +638,13 @@ class BotManager:
         return None
     
     async def start_bot(self, bot_id: str, host: str = "0.0.0.0", port: int = None):
-        """Start a bot server"""
+        """Start a bot server (SIP trunking only)"""
         config = self.bot_configs.get(bot_id)
         if not config:
             config = self.load_bot_config(bot_id)
             if not config:
                 raise ValueError(f"Bot configuration not found: {bot_id}")
             self.bot_configs[bot_id] = config
-        
-        # Use config-specific port or auto-assign
-        if port is None:
-            port = 5000 + len(self.active_bots)
         
         # Import and create the enhanced bot class
         from openai_realtime_sales_bot import OpenAIRealtimeSalesBot
@@ -665,25 +661,8 @@ class BotManager:
             "server_task": None
         }
         
-        # Start WebSocket server
-        import websockets
-        server_coro = websockets.serve(
-            bot_instance.handle_websocket,
-            host,
-            port
-        )
-        
-        server_task = asyncio.create_task(server_coro)
-        self.active_bots[bot_id]["server_task"] = server_task
-        
-        logger.info(f"🚀 Started bot {bot_id} on {host}:{port}")
-        
-        # Print WebSocket endpoints
-        logger.info(f"📞 WebSocket endpoints for {bot_id}:")
-        for rate in config.sample_rates:
-            logger.info(f"   • ws://{host}:{port}/?sample-rate={rate}")
-        
-        return server_task
+        logger.info(f"🚀 Started bot {bot_id} (SIP trunking mode)")
+        logger.info(f"📞 SIP endpoint: {host}:{Config.SIP_PORT}")
     
     async def stop_bot(self, bot_id: str):
         """Stop a running bot"""
@@ -743,10 +722,7 @@ class BotManager:
             info["active"] = True
             info["host"] = bot_info["host"]
             info["port"] = bot_info["port"]
-            info["endpoints"] = [
-                f"ws://{bot_info['host']}:{bot_info['port']}/?sample-rate={rate}"
-                for rate in bot_info["config"].sample_rates
-            ]
+            info["sip_endpoint"] = f"sip:{bot_info['host']}:{Config.SIP_PORT}"
         else:
             info["active"] = False
         
@@ -792,7 +768,7 @@ class BotManager:
         self.observer.join()
 
 class DynamicBot:
-    """Dynamic bot that can be reconfigured on-the-fly"""
+    """Dynamic bot that can be reconfigured on-the-fly (SIP trunking only)"""
     
     def __init__(self, config: BotConfiguration):
         self.config = config
@@ -818,18 +794,6 @@ class DynamicBot:
             logger.info(f"   Temperature: {old_config.temperature} → {new_config.temperature}")
         if old_config.personality != new_config.personality:
             logger.info(f"   Personality: {old_config.personality.value} → {new_config.personality.value}")
-    
-    async def handle_websocket(self, websocket, path=None):
-        """Handle WebSocket connections with dynamic configuration"""
-        # Create a temporary enhanced bot instance with current config
-        temp_bot = self.bot_class()
-        
-        # Override configuration
-        temp_bot.openai_voice = self.config.voice
-        temp_bot.openai_model = self.config.model
-        
-        # Handle connection
-        await temp_bot.handle_exotel_websocket(websocket, path)
 
 # CLI Interface for bot management
 def create_cli_interface():
