@@ -19,6 +19,23 @@ try:
     import pjsua2 as pj
 except ImportError:
     pj = None
+
+# If pjsua2 is not installed, define dummy classes so the module can be imported without errors
+if pj is not None:
+    AudioMediaPortBase = pj.AudioMediaPort
+    CallBase = pj.Call
+    AccountBase = pj.Account
+    LogWriterBase = pj.LogWriter
+    INVALID_ID = pj.PJSUA_INVALID_ID
+else:
+    class DummyClass:
+        def __init__(self, *args, **kwargs):
+            pass
+    AudioMediaPortBase = DummyClass
+    CallBase = DummyClass
+    AccountBase = DummyClass
+    LogWriterBase = DummyClass
+    INVALID_ID = -1
     
 from config import Config
 
@@ -38,7 +55,7 @@ class SIPCallState:
     sample_rate: int = 16000
     rtp_port: int = 0
 
-class OpenAIAudioPort(pj.AudioMediaPort):
+class OpenAIAudioPort(AudioMediaPortBase):
     """Custom AudioMediaPort subclass that captures raw audio from PJSIP and routes to OpenAI"""
     
     def __init__(self, call_id: str, sip_server):
@@ -89,10 +106,10 @@ class OpenAIAudioPort(pj.AudioMediaPort):
         except Exception as e:
             logger.error(f"❌ Error in onFrameRequested: {e}")
 
-class MyCall(pj.Call):
+class MyCall(CallBase):
     """Subclass of pj.Call to manage individual call states and media connections"""
     
-    def __init__(self, acc, sip_server, call_id=pj.PJSUA_INVALID_ID):
+    def __init__(self, acc, sip_server, call_id=INVALID_ID):
         super().__init__(acc, call_id)
         self.sip_server = sip_server
         self.media_port = None
@@ -175,7 +192,7 @@ class MyCall(pj.Call):
     def onDtmfDigit(self, prm):
         logger.info(f"🔢 DTMF Digit received: {prm.digit}")
 
-class MyAccount(pj.Account):
+class MyAccount(AccountBase):
     """Subclass of pj.Account to handle inbound SIP calls"""
     
     def __init__(self, sip_server):
@@ -198,7 +215,7 @@ class MyAccount(pj.Account):
         except Exception as e:
             logger.error(f"❌ Error answering call: {e}")
 
-class MyLogWriter(pj.LogWriter):
+class MyLogWriter(LogWriterBase):
     """Bridges PJSUA2 internal native logs into Python's logging module"""
     
     def write(self, entry):
