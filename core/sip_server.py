@@ -18,24 +18,16 @@ from dataclasses import dataclass
 try:
     import pjsua2 as pj
 except ImportError:
-    pj = None
+    raise ImportError(
+        "❌ pjsua2 is not installed! Since the bot is running in SIP-Only mode, "
+        "pjsua2 is required. Install it using: pip install pjsua2-py"
+    )
 
-# If pjsua2 is not installed, define dummy classes so the module can be imported without errors
-if pj is not None:
-    AudioMediaPortBase = pj.AudioMediaPort
-    CallBase = pj.Call
-    AccountBase = pj.Account
-    LogWriterBase = pj.LogWriter
-    INVALID_ID = pj.PJSUA_INVALID_ID
-else:
-    class DummyClass:
-        def __init__(self, *args, **kwargs):
-            pass
-    AudioMediaPortBase = DummyClass
-    CallBase = DummyClass
-    AccountBase = DummyClass
-    LogWriterBase = DummyClass
-    INVALID_ID = -1
+AudioMediaPortBase = pj.AudioMediaPort
+CallBase = pj.Call
+AccountBase = pj.Account
+LogWriterBase = pj.LogWriter
+INVALID_ID = pj.PJSUA_INVALID_ID
     
 from config import Config
 

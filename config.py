@@ -58,7 +58,7 @@ class Config:
     
     # ===== INBOUND ONLY (IP-based auth, no SIP credentials needed) =====
     INBOUND_SIP_ENABLED = os.getenv('INBOUND_SIP_ENABLED', 'true').lower() == 'true'
-    USE_SIP_TRUNK = os.getenv('USE_SIP_TRUNK', 'false').lower() == 'true'
+    USE_SIP_TRUNK = os.getenv('USE_SIP_TRUNK', 'true').lower() == 'true'
     
     # ===== BOT PERSONALITY =====
     SALES_BOT_NAME = os.getenv('SALES_BOT_NAME', 'Sarah')

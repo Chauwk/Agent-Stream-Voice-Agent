@@ -10,7 +10,10 @@ from config import Config
 
 logger = logging.getLogger(__name__)
 
-# Track active streaming connections globally (incremented on WebSocket accept, decremented on disconnect)
+# Track active bot instance to retrieve SIP server telemetry dynamically
+active_bot_instance = None
+
+# Track active streaming connections globally (deprecated in SIP-only mode)
 _active_connections_counter = 0
 
 def increment_active_connections():
@@ -35,11 +38,15 @@ async def get_active_bot_telemetry() -> Dict[str, Any]:
     """
     logger.info("📊 [BotController] Harvesting bot runtime telemetry statistics")
     
+    active_calls = 0
+    if active_bot_instance and active_bot_instance.sip_server and active_bot_instance.sip_server.pjsua_initialized:
+        active_calls = len(active_bot_instance.sip_server.sip_calls)
+    
     return {
         "success": True,
         "bot_name": Config.SALES_BOT_NAME,
         "company_name": Config.COMPANY_NAME,
-        "active_stream_calls": _active_connections_counter,
+        "active_stream_calls": active_calls,
         "openai_settings": {
             "model": Config.OPENAI_MODEL,
             "voice": Config.OPENAI_VOICE,
