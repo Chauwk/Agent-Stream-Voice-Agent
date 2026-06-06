@@ -139,26 +139,15 @@ class FastAPIWebSocketAdapter:
 @app.websocket("/stream")
 async def websocket_stream_endpoint(websocket: WebSocket):
     """
-    Bidirectional streaming WebSocket endpoint for Exotel Voicebot Applets.
-    Bridges telephony raw audio frames dynamically with the core Sales Bot.
+    WebSocket endpoint - DISABLED in SIP-only mode.
     """
     await websocket.accept()
-    bot_controller.increment_active_connections()
-    logger.info(f"🔌 [Gateway] Accepted new WebSocket stream connection from {websocket.client.host if websocket.client else 'telephony gateway'}")
-    
-    # Wrap connection using our adapter to ensure seamless audio flow
-    adapter = FastAPIWebSocketAdapter(websocket)
-    
+    logger.warning(f"🔌 [Gateway] Rejected WebSocket stream connection from {websocket.client.host if websocket.client else 'telephony gateway'} (SIP-Only mode active)")
     try:
-        # Route standard streaming payloads to the underlying sales bot engine
-        await sales_bot_engine.handle_exotel_websocket(adapter)
-    except WebSocketDisconnect:
-        logger.info("🔚 [Gateway] Telephony client disconnected from WebSocket stream")
-    except Exception as e:
-        logger.error(f"❌ [Gateway] Stream encountered an error: {e}")
-    finally:
-        bot_controller.decrement_active_connections()
-        logger.info("🧹 [Gateway] Telephony stream cleaned up and connection removed")
+        await websocket.send_json({"error": "WebSocket streaming is disabled. This server is configured for SIP-Only mode."})
+    except Exception:
+        pass
+    await websocket.close(code=1008) # Policy Violation
 
 
 # ==============================================================================
@@ -358,11 +347,11 @@ async def home_dashboard():
                 </div>
                 <div class="stat-card">
                     <div class="label">Telephony Mode</div>
-                    <div class="value">{"Direct SIP Trunking" if Config.USE_SIP_TRUNK else "WebSocket Applet"}</div>
+                    <div class="value">Direct SIP Trunking (SIP Only)</div>
                 </div>
                 <div class="stat-card">
-                    <div class="label">Active Streaming Calls</div>
-                    <div class="value" style="color: var(--accent);">{bot_controller._active_connections_counter}</div>
+                    <div class="label">Active SIP Calls</div>
+                    <div class="value" style="color: var(--accent);">{len(sales_bot_engine.sip_server.sip_calls) if (sales_bot_engine.sip_server and sales_bot_engine.sip_server.pjsua_initialized) else 0}</div>
                 </div>
             </div>
             
@@ -387,4 +376,5 @@ async def home_dashboard():
 @app.get("/health", include_in_schema=False)
 async def health_check():
     """Health check for container orchestration and uptime analytics."""
-    return {"status": "healthy", "service": "Voice AI Agent Gateway", "concurrency_load": bot_controller._active_connections_counter}
+    sip_calls_count = len(sales_bot_engine.sip_server.sip_calls) if (sales_bot_engine.sip_server and sales_bot_engine.sip_server.pjsua_initialized) else 0
+    return {"status": "healthy", "service": "Voice AI Agent Gateway", "concurrency_load": sip_calls_count}

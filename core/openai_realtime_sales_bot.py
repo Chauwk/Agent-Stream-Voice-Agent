@@ -62,6 +62,10 @@ class OpenAIRealtimeSalesBot:
         
         self.sip_server = None
         
+        # Register bot instance for telemetry queries
+        from controllers import bot_controller
+        bot_controller.active_bot_instance = self
+        
         logger.info("🤖 Enhanced OpenAI Realtime Sales Bot initialized!")
         logger.info(f"🎵 Multi-sample rate support: {Config.SUPPORTED_SAMPLE_RATES} Hz")
         logger.info(f"📦 Variable chunk sizes: {self.min_chunk_size_ms}ms - {Config.MAX_CHUNK_SIZE_MS}ms")
