@@ -672,6 +672,87 @@ class OpenAIRealtimeSalesBot:
         except Exception as e:
             logger.error(f"❌ Error sending RTP audio to OpenAI for {call_id}: {e}")
 
+    async def _send_audio_to_openai(self, stream_id: str, chunk: bytes, sample_rate: int):
+        """Send audio chunk to OpenAI with proper format and sample rate handling"""
+        try:
+            openai_config = self.openai_connections[stream_id]
+            input_format = openai_config.get("input_format", "g711_ulaw")
+            
+            processed_audio = chunk
+            
+            if input_format == "g711_ulaw":
+                # Exotel/OpenAI expects 8kHz u-law.
+                # If incoming is 16kHz PCM16, resample to 8kHz PCM16 first.
+                if sample_rate != 8000:
+                    processed_audio = self._resample_audio(processed_audio, sample_rate, 8000)
+                # Convert 8kHz PCM16 to 8kHz u-law
+                openai_audio = self.convert_pcm_to_ulaw(processed_audio)
+            elif input_format == "pcm16":
+                # OpenAI expects 24kHz PCM16.
+                # If incoming is 16kHz, resample 16kHz PCM16 -> 24kHz PCM16.
+                if sample_rate != 24000:
+                    openai_audio = self._resample_audio(processed_audio, sample_rate, 24000)
+                else:
+                    openai_audio = processed_audio
+            else:
+                # Fallback
+                openai_audio = chunk
+                
+            openai_audio_b64 = base64.b64encode(openai_audio).decode()
+            
+            # Send to OpenAI Realtime API
+            openai_msg = {
+                "type": "input_audio_buffer.append",
+                "audio": openai_audio_b64
+            }
+            
+            openai_ws = openai_config["websocket"]
+            await openai_ws.send(json.dumps(openai_msg))
+            
+            logger.debug(f"📤 AUDIO SENT TO OPENAI: {len(chunk)} bytes PCM @ {sample_rate}Hz -> {len(openai_audio)} bytes {input_format}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error sending audio to OpenAI: {e}")
+
+    async def handle_openai_audio_delta_enhanced(self, stream_id: str, data: dict):
+        """Handle audio response from OpenAI and send to SIP server for playback"""
+        try:
+            if not self.sip_server:
+                logger.warning(f"⚠️ SIP Server not initialized, cannot play OpenAI audio delta")
+                return
+                
+            # Get audio from OpenAI (base64 encoded)
+            audio_delta = data.get("delta", "")
+            if not audio_delta:
+                return
+            
+            # Get connection settings
+            openai_config = self.openai_connections[stream_id]
+            output_format = openai_config.get("output_format", "g711_ulaw")
+            
+            # Decode audio
+            openai_audio = base64.b64decode(audio_delta)
+            
+            # Convert to 16kHz PCM16 Mono expected by PJSUA2
+            if output_format == "g711_ulaw":
+                # Convert 8kHz u-law to 8kHz PCM16
+                pcm_8k = self.convert_ulaw_to_pcm(openai_audio)
+                # Resample 8kHz PCM16 -> 16kHz PCM16
+                playback_audio = self._resample_audio(pcm_8k, 8000, 16000)
+            elif output_format == "pcm16":
+                # Resample 24kHz PCM16 -> 16kHz PCM16
+                playback_audio = self._resample_audio(openai_audio, 24000, 16000)
+            else:
+                # Fallback: assume already 16kHz PCM
+                playback_audio = openai_audio
+                
+            # Queue to PJSUA2 playback buffer
+            await self.sip_server.send_audio_to_rtp(stream_id, playback_audio)
+            logger.debug(f"🔊 OPENAI AUDIO DELTA ROUTED TO RTP: {len(openai_audio)} bytes {output_format} -> {len(playback_audio)} bytes PCM16 @ 16kHz")
+            
+        except Exception as e:
+            logger.error(f"❌ Error handling OpenAI audio delta: {e}")
+
     async def cleanup_connections(self, stream_id: str):
         """Clean up OpenAI connections and buffers"""
         try:
