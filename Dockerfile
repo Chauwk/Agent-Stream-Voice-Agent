@@ -34,12 +34,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy bot code
 COPY . .
 
-# Expose API ports (5000 API, 5060 SIP)
-EXPOSE 5000/tcp 5060/tcp 5060/udp
+# Expose API ports (5002 API, 5060 SIP)
+EXPOSE 5002/tcp 5060/tcp 5060/udp
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/')" || exit 1
+    CMD python -c "import urllib.request, os; port = os.getenv('SERVER_PORT', '5002'); urllib.request.urlopen(f'http://localhost:{port}/')" || exit 1
 
 # Start bot
 CMD ["python", "main.py"]

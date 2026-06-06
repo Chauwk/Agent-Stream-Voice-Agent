@@ -22,7 +22,7 @@ class Config:
     
     # ===== SERVER SETTINGS =====
     SERVER_HOST = os.getenv('SERVER_HOST', '0.0.0.0')
-    SERVER_PORT = int(os.getenv('SERVER_PORT', '5000'))
+    SERVER_PORT = int(os.getenv('SERVER_PORT', '5002'))
     WEB_DASHBOARD_PORT = int(os.getenv('WEB_DASHBOARD_PORT', '5001'))
     
     # ===== LOGGING =====
