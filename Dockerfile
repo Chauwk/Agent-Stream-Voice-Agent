@@ -3,6 +3,8 @@ FROM python:3.10-slim
 # Install audio and build dependencies
 RUN apt-get update && apt-get install -y \
     portaudio19-dev \
+    libasound2-dev \
+    libssl-dev \
     ffmpeg \
     build-essential \
     swig \
