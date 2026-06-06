@@ -13,14 +13,14 @@ RUN apt-get update && apt-get install -y \
 
 # Build PJSIP and PJSUA2 Python bindings
 WORKDIR /usr/src
-RUN wget https://github.com/pjsip/pjproject/archive/refs/tags/2.13.tar.gz && \
-    tar -xvzf 2.13.tar.gz && \
-    cd pjproject-2.13 && \
+RUN wget https://github.com/pjsip/pjproject/archive/refs/tags/2.14.tar.gz && \
+    tar -xvzf 2.14.tar.gz && \
+    cd pjproject-2.14 && \
     ./configure CFLAGS="-O2 -fPIC" && \
     make dep && make && \
     cd pjsip-apps/src/swig/python && \
     make && make install && \
-    cd /usr/src && rm -rf pjproject-2.13 2.13.tar.gz
+    cd /usr/src && rm -rf pjproject-2.14 2.14.tar.gz
 
 # Set working directory
 WORKDIR /app
