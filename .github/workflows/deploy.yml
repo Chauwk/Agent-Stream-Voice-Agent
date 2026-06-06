@@ -73,6 +73,8 @@ jobs:
             --name voice-bot-container \
             --restart always \
             -p 5002:5002 \
+            -p 5060:5060 \
+            -p 5060:5060/udp \
             -e OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
             -e OPENAI_MODEL="${{ secrets.OPENAI_MODEL }}" \
             -e OPENAI_VOICE="${{ secrets.OPENAI_VOICE }}" \
