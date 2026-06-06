@@ -16,7 +16,7 @@ WORKDIR /usr/src
 RUN wget https://github.com/pjsip/pjproject/archive/refs/tags/2.13.tar.gz && \
     tar -xvzf 2.13.tar.gz && \
     cd pjproject-2.13 && \
-    ./configure CFLAGS="-O2 -fPIC" --enable-shared && \
+    ./configure CFLAGS="-O2 -fPIC" && \
     make dep && make && \
     cd pjsip-apps/src/swig/python && \
     make && make install && \
