@@ -13,7 +13,7 @@ pydub
 numpy
 
 # SIP Trunking Support (REQUIRED)
-pjsua2-py
+# pjsua2-py (Compiled from source in Docker; run 'pip install pjsua2-py' manually on host if needed)
 PyAudio
 
 # Optional: for better audio quality
