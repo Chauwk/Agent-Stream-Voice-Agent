@@ -62,7 +62,19 @@ jobs:
         run: echo $DOCKER_PASSWORD | sudo docker login -u $DOCKER_USERNAME --password-stdin
 
       - name: Pull Docker image
-        run: sudo docker pull ${{ secrets.DOCKER_USERNAME }}/agent-stream-voice-agent:latest
+        timeout-minutes: 5
+        run: |
+          for attempt in 1 2 3; do
+            if sudo docker pull ${{ secrets.DOCKER_USERNAME }}/agent-stream-voice-agent:latest; then
+              exit 0
+            fi
+            echo "Docker pull failed (attempt ${attempt}/3)."
+            if [ "$attempt" -lt 3 ]; then
+              sleep 15
+            fi
+          done
+          echo "Docker pull failed after 3 attempts."
+          exit 1
 
       - name: Stop and remove old container
         run: sudo docker rm -f voice-bot-container || true
