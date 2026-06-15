@@ -198,6 +198,18 @@ class MyAccount(AccountBase):
             # Create a MyCall object to handle incoming call
             call = MyCall(self, self.sip_server, prm.callId)
             
+            # Keep the call object alive in Python to prevent immediate garbage collection & call drop
+            try:
+                ci = call.getInfo()
+                call_id_str = ci.callIdString
+                self.sip_server._call_objects[call_id_str] = call
+                logger.info(f"📌 Kept call reference alive for {call_id_str}")
+            except Exception as e:
+                # Fallback key if getInfo is not ready
+                temp_key = f"temp_{prm.callId}"
+                self.sip_server._call_objects[temp_key] = call
+                logger.info(f"📌 Kept call reference alive with fallback key {temp_key}: {e}")
+            
             # Answer with 200 OK status
             call_prm = pj.CallOpParam()
             call_prm.statusCode = 200
@@ -350,20 +362,34 @@ class SIPServer:
     async def cleanup_call(self, call_id: str):
         """Clean up SIP call resources"""
         try:
+            # Clean up call object reference first (essential to release memory and bindings)
+            call = None
+            if call_id in self._call_objects:
+                call = self._call_objects[call_id]
+                del self._call_objects[call_id]
+                
+            # Also clean up any temp keys or references to the same call object
+            for k, v in list(self._call_objects.items()):
+                if v == call or (call_id and getattr(v, 'sip_call_id', None) == call_id):
+                    call = v
+                    try:
+                        del self._call_objects[k]
+                    except KeyError:
+                        pass
+            
+            # Hang up call if object was resolved
+            if call:
+                try:
+                    prm = pj.CallOpParam()
+                    call.hangup(prm)
+                    logger.info(f"📞 SIP call {call_id} hung up")
+                except:
+                    pass
+
+            # Clean up media buffers and OpenAI connections
             if call_id in self.sip_calls:
                 call_state = self.sip_calls[call_id]
                 
-                # Hangup call if call object remains
-                if call_id in self._call_objects:
-                    call = self._call_objects[call_id]
-                    try:
-                        prm = pj.CallOpParam()
-                        call.hangup(prm)
-                        logger.info(f"📞 SIP call {call_id} hung up")
-                    except:
-                        pass
-                    del self._call_objects[call_id]
-                    
                 # Disconnect from OpenAI
                 if call_state.openai_connected and self.openai_bot:
                     await self.openai_bot.cleanup_connections(call_id)
@@ -373,6 +399,8 @@ class SIPServer:
                 
                 duration = time.time() - call_state.start_time
                 logger.info(f"🧹 Cleaned up SIP call {call_id} (duration: {duration:.1f}s)")
+            else:
+                logger.info(f"🧹 Cleaned up SIP call reference {call_id} (no active media session)")
         except Exception as e:
             logger.error(f"❌ Error cleaning up call: {e}")
             
