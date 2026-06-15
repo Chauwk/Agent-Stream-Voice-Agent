@@ -75,27 +75,7 @@ jobs:
             -p 5002:5002 \
             -p 5060:5060 \
             -p 5060:5060/udp \
-            -e OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
-            -e OPENAI_MODEL="${{ secrets.OPENAI_MODEL }}" \
-            -e OPENAI_VOICE="${{ secrets.OPENAI_VOICE }}" \
-            -e SERVER_HOST="0.0.0.0" \
-            -e SERVER_PORT="5002" \
-            -e COMPANY_NAME="${{ secrets.COMPANY_NAME }}" \
-            -e SALES_BOT_NAME="${{ secrets.SALES_BOT_NAME }}" \
-            -e SAMPLE_RATE="${{ secrets.SAMPLE_RATE }}" \
-            -e AUDIO_CHUNK_SIZE="${{ secrets.AUDIO_CHUNK_SIZE }}" \
-            -e LOG_LEVEL="${{ secrets.LOG_LEVEL }}" \
-            -e USE_SIP_TRUNK="${{ secrets.USE_SIP_TRUNK }}" \
-            -e INBOUND_SIP_ENABLED="${{ secrets.INBOUND_SIP_ENABLED }}" \
-            -e SIP_PUBLIC_IP="${{ secrets.SIP_PUBLIC_IP }}" \
-            -e EXOTEL_API_TOKEN="${{ secrets.EXOTEL_API_TOKEN }}" \
-            -e EXOTEL_ACCOUNT_SID="${{ secrets.EXOTEL_ACCOUNT_SID }}" \
-            -e EXOTEL_FROM_NUMBER="${{ secrets.EXOTEL_FROM_NUMBER }}" \
-            -e OUTBOUND_SIP_ENABLED="${{ secrets.OUTBOUND_SIP_ENABLED }}" \
-            -e SIP_USERNAME="${{ secrets.SIP_USERNAME }}" \
-            -e SIP_PASSWORD="${{ secrets.SIP_PASSWORD }}" \
-            -e SIP_REALM="${{ secrets.SIP_REALM }}" \
-            -e EXOTEL_OUTBOUND_PROXY="${{ secrets.EXOTEL_OUTBOUND_PROXY }}" \
+            --env-file /home/ubuntu/voice-bot.env \
             ${{ secrets.DOCKER_USERNAME }}/agent-stream-voice-agent:latest
 
       - name: Verify container is running
