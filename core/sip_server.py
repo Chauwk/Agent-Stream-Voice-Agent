@@ -113,7 +113,7 @@ class MyCall(CallBase):
             self.sip_call_id = ci.callIdString
             logger.info(f"📞 Call state: {ci.stateText} - {ci.remoteUri} (SIP ID: {self.sip_call_id})")
             
-            if ci.state == pj.PJSUA_CALL_STATE_DISCONNECTED:
+            if ci.state == pj.PJSIP_INV_STATE_DISCONNECTED:
                 logger.info(f"📞 Call disconnected: {ci.lastReason} (Status Code: {ci.lastStatusCode})")
                 asyncio.run_coroutine_threadsafe(
                     self.sip_server.cleanup_call(self.sip_call_id),
@@ -277,6 +277,13 @@ class SIPServer:
             
             # Initialize library
             self.ep.libInit(ep_cfg)
+            
+            # Set null sound device for headless environments
+            try:
+                self.ep.audDevManager().setNullDev()
+                logger.info("🔇 Configured null audio device for headless container")
+            except Exception as aud_err:
+                logger.warning(f"⚠️ Could not set null audio device: {aud_err}")
             
             # Configure Transport Settings
             tp_cfg = pj.TransportConfig()
