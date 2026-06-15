@@ -94,15 +94,20 @@ class OpenAIRealtimeSalesBot:
                 ("OpenAI-Beta", "realtime=v1")
             ]
             
-            # Connect to OpenAI Realtime API with enhanced SSL context
-            # Note: additional_headers not supported in websockets.connect, use header parameter instead
-            openai_ws = await websockets.connect(
-                url, 
-                extra_headers=dict(headers),  # Convert list of tuples to dict
-                ssl=ssl_context,
-                ping_interval=20,  # Enhanced connection stability
-                ping_timeout=10
-            )
+            # Determine correct header parameter based on websockets library version
+            import inspect
+            connect_params = inspect.signature(websockets.connect).parameters
+            connect_kwargs = {
+                "ssl": ssl_context,
+                "ping_interval": 20,
+                "ping_timeout": 10
+            }
+            if "additional_headers" in connect_params:
+                connect_kwargs["additional_headers"] = dict(headers)
+            else:
+                connect_kwargs["extra_headers"] = dict(headers)
+                
+            openai_ws = await websockets.connect(url, **connect_kwargs)
             
             # Get enhanced session configuration
             session_config = Config.get_enhanced_session_config(sample_rate, self.openai_voice)

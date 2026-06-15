@@ -88,12 +88,12 @@ class OpenAIAudioPort(AudioMediaPortBase):
                 if len(chunk) < req_size:
                     chunk += b"\x00" * (req_size - len(chunk))
                     
-                frame.buf.assign_from_bytes(chunk)
+                frame.buf[:] = chunk
                 frame.type = pj.PJMEDIA_FRAME_TYPE_AUDIO
             else:
                 # Provide comfort silence
                 silence = b"\x00" * frame.size
-                frame.buf.assign_from_bytes(silence)
+                frame.buf[:] = silence
                 frame.type = pj.PJMEDIA_FRAME_TYPE_AUDIO
         except Exception as e:
             logger.error(f"❌ Error in onFrameRequested: {e}")
