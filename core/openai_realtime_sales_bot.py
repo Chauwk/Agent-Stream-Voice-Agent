@@ -90,8 +90,7 @@ class OpenAIRealtimeSalesBot:
             
             # Enhanced headers for latest API version
             headers = [
-                ("Authorization", f"Bearer {self.openai_api_key}"),
-                ("OpenAI-Beta", "realtime=v1")
+                ("Authorization", f"Bearer {self.openai_api_key}")
             ]
             
             # Determine correct header parameter based on websockets library version
@@ -764,8 +763,19 @@ class OpenAIRealtimeSalesBot:
             # Close OpenAI connection
             if stream_id in self.openai_connections:
                 openai_ws = self.openai_connections[stream_id]["websocket"]
-                if not openai_ws.closed:
-                    await openai_ws.close()
+                try:
+                    if hasattr(openai_ws, "closed"):
+                        if not openai_ws.closed:
+                            await openai_ws.close()
+                    else:
+                        from websockets.protocol import State
+                        if openai_ws.state != State.CLOSED:
+                            await openai_ws.close()
+                except Exception:
+                    try:
+                        await openai_ws.close()
+                    except Exception:
+                        pass
                 del self.openai_connections[stream_id]
                 logger.info(f"🧹 OPENAI CONNECTION REMOVED: {stream_id}")
             
