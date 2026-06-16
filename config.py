@@ -16,7 +16,7 @@ class Config:
     
     # ===== CORE API SETTINGS =====
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
-    OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-realtime-preview-2024-12-17')
+    OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-realtime')
     OPENAI_VOICE = os.getenv('OPENAI_VOICE', 'coral')
     OPENAI_TEMPERATURE = float(os.getenv('OPENAI_TEMPERATURE', '0.7'))
     
