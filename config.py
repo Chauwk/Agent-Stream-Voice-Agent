@@ -183,12 +183,18 @@ class Config:
             'model': cls.OPENAI_MODEL,
             'output_modalities': ['audio'],
             'audio': {
+                'input': {
+                    'format': {
+                        'type': 'audio/pcmu'
+                    }
+                },
                 'output': {
+                    'format': {
+                        'type': 'audio/pcmu'
+                    },
                     'voice': voice
                 }
             },
-            'input_audio_format': 'g711_ulaw',
-            'output_audio_format': 'g711_ulaw',
             'input_audio_transcription': {'model': 'whisper-1'},
             'turn_detection': {'type': 'server_vad', 'threshold': 0.5},
             'temperature': cls.TEMPERATURE,
