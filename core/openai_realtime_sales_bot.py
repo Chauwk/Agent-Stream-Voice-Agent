@@ -191,7 +191,7 @@ class OpenAIRealtimeSalesBot:
             response_msg = {
                 "type": "response.create",
                 "response": {
-                    "modalities": ["audio"],
+                    "output_modalities": ["audio"],
                     "instructions": "Give a warm, professional greeting. Keep it concise and natural."
                 }
             }
@@ -265,9 +265,8 @@ class OpenAIRealtimeSalesBot:
             response_create = {
                 "type": "response.create",
                 "response": {
-                    "modalities": ["audio"],
+                    "output_modalities": ["audio"],
                     "instructions": "Respond naturally and conversationally. Use appropriate pauses and inflections.",
-                    "voice": self.openai_voice,
                     "temperature": Config.TEMPERATURE
                 }
             }
@@ -314,7 +313,7 @@ class OpenAIRealtimeSalesBot:
             response_msg = {
                 "type": "response.create",
                 "response": {
-                    "modalities": ["audio"],
+                    "output_modalities": ["audio"],
                     "instructions": f"Based on the function result, provide a natural response to the customer about {function_name}."
                 }
             }

@@ -181,7 +181,12 @@ class Config:
         return {
             'type': 'realtime',
             'model': cls.OPENAI_MODEL,
-            'voice': voice,
+            'output_modalities': ['audio'],
+            'audio': {
+                'output': {
+                    'voice': voice
+                }
+            },
             'input_audio_format': 'g711_ulaw',
             'output_audio_format': 'g711_ulaw',
             'input_audio_transcription': {'model': 'whisper-1'},
