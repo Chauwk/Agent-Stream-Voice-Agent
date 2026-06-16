@@ -111,17 +111,20 @@ class OpenAIRealtimeSalesBot:
             # Get enhanced session configuration
             session_config = Config.get_enhanced_session_config(sample_rate, self.openai_voice)
             
+            input_format = session_config['audio']['input']['format']['type']
+            output_format = session_config['audio']['output']['format']['type']
+            
             self.openai_connections[stream_id] = {
                 "websocket": openai_ws,
                 "start_time": time.time(),
                 "sample_rate": sample_rate,
-                "input_format": session_config["input_audio_format"],
-                "output_format": session_config["output_audio_format"],
+                "input_format": input_format,
+                "output_format": output_format,
                 "session_config": session_config
             }
             
             logger.info(f"✅ ENHANCED OPENAI CONNECTED for {stream_id} @ {sample_rate}Hz")
-            logger.info(f"🎵 Audio Format: {session_config['input_audio_format']} → {session_config['output_audio_format']}")
+            logger.info(f"🎵 Audio Format: {input_format} → {output_format}")
             
             # Configure enhanced OpenAI session
             await self.configure_openai_session_enhanced(stream_id)
@@ -154,11 +157,16 @@ class OpenAIRealtimeSalesBot:
             }
             
             await openai_ws.send(json.dumps(session_update))
+            
+            input_format = session_config['audio']['input']['format']['type']
+            output_format = session_config['audio']['output']['format']['type']
+            voice = session_config['audio']['output']['voice']
+            
             logger.info(f"🔧 ENHANCED OPENAI SESSION CONFIGURED for {stream_id}")
             logger.info(f"   🎵 Sample Rate: {sample_rate}Hz")
-            logger.info(f"   🎤 Input Format: {session_config['input_audio_format']}")
-            logger.info(f"   🔊 Output Format: {session_config['output_audio_format']}")
-            logger.info(f"   🎭 Voice: {session_config['voice']}")
+            logger.info(f"   🎤 Input Format: {input_format}")
+            logger.info(f"   🔊 Output Format: {output_format}")
+            logger.info(f"   🎭 Voice: {voice}")
             
             # Send enhanced initial greeting
             await self.send_initial_greeting_enhanced(stream_id)
@@ -683,7 +691,7 @@ class OpenAIRealtimeSalesBot:
             
             processed_audio = chunk
             
-            if input_format == "g711_ulaw":
+            if input_format in ["g711_ulaw", "audio/pcmu"]:
                 # Exotel/OpenAI expects 8kHz u-law.
                 # If incoming is 16kHz PCM16, resample to 8kHz PCM16 first.
                 if sample_rate != 8000:
@@ -737,7 +745,7 @@ class OpenAIRealtimeSalesBot:
             openai_audio = base64.b64decode(audio_delta)
             
             # Convert to 16kHz PCM16 Mono expected by PJSUA2
-            if output_format == "g711_ulaw":
+            if output_format in ["g711_ulaw", "audio/pcmu"]:
                 # Convert 8kHz u-law to 8kHz PCM16
                 pcm_8k = self.convert_ulaw_to_pcm(openai_audio)
                 # Resample 8kHz PCM16 -> 16kHz PCM16
