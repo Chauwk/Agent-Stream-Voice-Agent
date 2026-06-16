@@ -179,6 +179,7 @@ class Config:
     def get_enhanced_session_config(cls, sample_rate: int, voice: str) -> Dict[str, Any]:
         """Get enhanced session configuration"""
         return {
+            'type': 'realtime',
             'model': cls.OPENAI_MODEL,
             'voice': voice,
             'input_audio_format': 'g711_ulaw',
