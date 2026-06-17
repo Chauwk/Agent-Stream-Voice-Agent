@@ -179,10 +179,17 @@ class Config:
     @classmethod
     def get_enhanced_session_config(cls, sample_rate: int, voice: str) -> Dict[str, Any]:
         """Get enhanced session configuration"""
+        instructions = (
+            f"You are a professional sales representative named {cls.SALES_BOT_NAME} for {cls.COMPANY_NAME}. "
+            "You must speak and respond EXCLUSIVELY in English. "
+            "Even if the user speaks in another language, or if there is noise, keep your responses in English. "
+            "Keep responses very concise, short, and natural (1-2 sentences)."
+        )
         return {
             'type': 'realtime',
             'model': cls.OPENAI_MODEL,
             'output_modalities': ['audio'],
+            'instructions': instructions,
             'audio': {
                 'input': {
                     'format': {
