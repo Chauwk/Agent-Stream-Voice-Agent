@@ -111,8 +111,8 @@ class OpenAIRealtimeSalesBot:
             # Get enhanced session configuration
             session_config = Config.get_enhanced_session_config(sample_rate, self.openai_voice)
             
-            input_format = session_config.get('input_audio_format', 'g711_ulaw')
-            output_format = session_config.get('output_audio_format', 'g711_ulaw')
+            input_format = session_config['audio']['input']['format']['type']
+            output_format = session_config['audio']['output']['format']['type']
             
             self.openai_connections[stream_id] = {
                 "websocket": openai_ws,
@@ -159,9 +159,9 @@ class OpenAIRealtimeSalesBot:
             
             await openai_ws.send(json.dumps(session_update))
             
-            input_format = session_config.get('input_audio_format', 'g711_ulaw')
-            output_format = session_config.get('output_audio_format', 'g711_ulaw')
-            voice = session_config.get('voice', self.openai_voice)
+            input_format = session_config['audio']['input']['format']['type']
+            output_format = session_config['audio']['output']['format']['type']
+            voice = session_config['audio']['output']['voice']
             
             logger.info(f"🔧 ENHANCED OPENAI SESSION CONFIGURED for {stream_id}")
             logger.info(f"   🎵 Sample Rate: {sample_rate}Hz")

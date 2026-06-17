@@ -178,27 +178,34 @@ class Config:
     
     @classmethod
     def get_enhanced_session_config(cls, sample_rate: int, voice: str) -> Dict[str, Any]:
-        """Get enhanced session configuration conforming to OpenAI Realtime API spec"""
-        audio_format = cls.OPENAI_AUDIO_FORMAT.lower()
-        if audio_format not in ['g711_ulaw', 'pcm16']:
-            audio_format = 'g711_ulaw'
-            
+        """Get enhanced session configuration"""
         return {
             'type': 'realtime',
-            'modalities': ['audio', 'text'],
-            'instructions': f"You are a helpful sales assistant named {cls.SALES_BOT_NAME} for {cls.COMPANY_NAME}. Support the user with pricing and scheduling. Keep responses concise and conversational.",
-            'voice': voice,
-            'input_audio_format': audio_format,
-            'output_audio_format': audio_format,
-            'input_audio_transcription': {
-                'model': 'whisper-1'
+            'model': cls.OPENAI_MODEL,
+            'output_modalities': ['audio'],
+            'audio': {
+                'input': {
+                    'format': {
+                        'type': 'audio/pcmu'
+                    },
+                    'transcription': {
+                        'model': 'whisper-1'
+                    },
+                    'turn_detection': {
+                        'type': 'server_vad',
+                        'threshold': 0.5,
+                        'prefix_padding_ms': 300,
+                        'silence_duration_ms': 200,
+                        'create_response': True,
+                        'interrupt_response': True
+                    }
+                },
+                'output': {
+                    'format': {
+                        'type': 'audio/pcmu'
+                    },
+                    'voice': voice
+                }
             },
-            'turn_detection': {
-                'type': 'server_vad',
-                'threshold': 0.5,
-                'prefix_padding_ms': 300,
-                'silence_duration_ms': 500
-            },
-            'temperature': cls.TEMPERATURE,
-            'max_response_output_tokens': 4096
+            'max_output_tokens': 4096
         } 
