@@ -111,8 +111,8 @@ class OpenAIRealtimeSalesBot:
             # Get enhanced session configuration
             session_config = Config.get_enhanced_session_config(sample_rate, self.openai_voice)
             
-            input_format = session_config['audio']['input']['format']['type']
-            output_format = session_config['audio']['output']['format']['type']
+            input_format = session_config.get('input_audio_format', 'g711_ulaw')
+            output_format = session_config.get('output_audio_format', 'g711_ulaw')
             
             self.openai_connections[stream_id] = {
                 "websocket": openai_ws,
@@ -120,7 +120,8 @@ class OpenAIRealtimeSalesBot:
                 "sample_rate": sample_rate,
                 "input_format": input_format,
                 "output_format": output_format,
-                "session_config": session_config
+                "session_config": session_config,
+                "user_speaking": False
             }
             
             logger.info(f"✅ ENHANCED OPENAI CONNECTED for {stream_id} @ {sample_rate}Hz")
@@ -158,9 +159,9 @@ class OpenAIRealtimeSalesBot:
             
             await openai_ws.send(json.dumps(session_update))
             
-            input_format = session_config['audio']['input']['format']['type']
-            output_format = session_config['audio']['output']['format']['type']
-            voice = session_config['audio']['output']['voice']
+            input_format = session_config.get('input_audio_format', 'g711_ulaw')
+            output_format = session_config.get('output_audio_format', 'g711_ulaw')
+            voice = session_config.get('voice', self.openai_voice)
             
             logger.info(f"🔧 ENHANCED OPENAI SESSION CONFIGURED for {stream_id}")
             logger.info(f"   🎵 Sample Rate: {sample_rate}Hz")
@@ -221,7 +222,9 @@ class OpenAIRealtimeSalesBot:
                     logger.debug(f"🤖 ENHANCED OPENAI EVENT: {event_type} for {stream_id}")
                     
                     if event_type == "response.output_audio.delta":
-                        await self.handle_openai_audio_delta_enhanced(stream_id, data)
+                        openai_config = self.openai_connections.get(stream_id)
+                        if openai_config and not openai_config.get("user_speaking", False):
+                            await self.handle_openai_audio_delta_enhanced(stream_id, data)
                     elif event_type == "response.function_call_arguments.done":
                         await self.handle_openai_function_call_enhanced(stream_id, data)
                     elif event_type == "response.output_audio_transcript.delta":
@@ -230,10 +233,16 @@ class OpenAIRealtimeSalesBot:
                             logger.info(f"🗣️ SARAH SPEAKING: {transcript_delta}")
                     elif event_type == "input_audio_buffer.speech_started":
                         logger.info(f"🎤 CUSTOMER STARTED SPEAKING (enhanced) for {stream_id}")
+                        openai_config = self.openai_connections.get(stream_id)
+                        if openai_config:
+                            openai_config["user_speaking"] = True
                         # Enhanced interruption handling
                         await self._handle_customer_interruption(stream_id, openai_ws)
                     elif event_type == "input_audio_buffer.speech_stopped":
                         logger.info(f"🎤 CUSTOMER STOPPED SPEAKING (enhanced) for {stream_id}")
+                        openai_config = self.openai_connections.get(stream_id)
+                        if openai_config:
+                            openai_config["user_speaking"] = False
                         # Enhanced response generation
                         await self.trigger_openai_response_enhanced(stream_id, openai_ws)
                     elif event_type == "response.done":
@@ -261,6 +270,13 @@ class OpenAIRealtimeSalesBot:
             await openai_ws.send(json.dumps(cancel_response_msg))
             logger.info(f"🛑 ENHANCED BOT INTERRUPTED - Customer started speaking for {stream_id}")
             
+            # IMMEDIATELY clear the playback buffer in SIP Server so the bot stops speaking instantly
+            if self.sip_server and stream_id in self.sip_server.sip_calls:
+                call_state = self.sip_server.sip_calls[stream_id]
+                call_state.playback_buffer = b""
+                call_state.is_playing = False
+                logger.info(f"🔇 Cleared playback buffer for {stream_id} due to interruption")
+            
         except Exception as e:
             logger.error(f"❌ Error handling enhanced customer interruption: {e}")
 
@@ -274,8 +290,7 @@ class OpenAIRealtimeSalesBot:
                 "type": "response.create",
                 "response": {
                     "output_modalities": ["audio"],
-                    "instructions": "Respond naturally and conversationally. Use appropriate pauses and inflections.",
-                    "temperature": Config.TEMPERATURE
+                    "instructions": "Respond naturally and conversationally. Use appropriate pauses and inflections."
                 }
             }
             await openai_ws.send(json.dumps(response_create))
@@ -700,7 +715,27 @@ class OpenAIRealtimeSalesBot:
             openai_config = self.openai_connections[stream_id]
             input_format = openai_config.get("input_format", "g711_ulaw")
             
-            processed_audio = chunk
+            # Initialize buffer if not exists
+            if stream_id not in self.audio_buffers:
+                self.audio_buffers[stream_id] = b""
+                
+            # Append new chunk to buffer
+            self.audio_buffers[stream_id] += chunk
+            
+            # Calculate buffer threshold (e.g. 160ms)
+            buffer_ms = self.buffer_size_ms
+            bytes_needed = int(sample_rate * 2 * buffer_ms / 1000)
+            
+            if len(self.audio_buffers[stream_id]) < bytes_needed:
+                return  # Keep buffering
+                
+            # Extract buffered audio to process
+            processed_audio = self.audio_buffers[stream_id]
+            self.audio_buffers[stream_id] = b""  # Reset buffer
+            
+            # Apply noise suppression if enabled
+            if Config.AUDIO_ENHANCEMENT_ENABLED:
+                processed_audio = self.apply_noise_suppression(processed_audio, sample_rate)
             
             if input_format in ["g711_ulaw", "audio/pcmu"]:
                 # Exotel/OpenAI expects 8kHz u-law.
@@ -718,7 +753,7 @@ class OpenAIRealtimeSalesBot:
                     openai_audio = processed_audio
             else:
                 # Fallback
-                openai_audio = chunk
+                openai_audio = processed_audio
                 
             openai_audio_b64 = base64.b64encode(openai_audio).decode()
             
@@ -731,7 +766,7 @@ class OpenAIRealtimeSalesBot:
             openai_ws = openai_config["websocket"]
             await openai_ws.send(json.dumps(openai_msg))
             
-            logger.debug(f"📤 AUDIO SENT TO OPENAI: {len(chunk)} bytes PCM @ {sample_rate}Hz -> {len(openai_audio)} bytes {input_format}")
+            logger.debug(f"📤 AUDIO SENT TO OPENAI: {len(openai_audio)} bytes {input_format} (from {len(processed_audio)} bytes PCM @ {sample_rate}Hz)")
             
         except Exception as e:
             logger.error(f"❌ Error sending audio to OpenAI: {e}")

@@ -46,6 +46,7 @@ class SIPCallState:
     playback_buffer: bytes = b""  # Buffer to store audio coming from OpenAI
     sample_rate: int = 16000
     rtp_port: int = 0
+    is_playing: bool = False      # Track if currently playing (jitter pre-buffering active)
 
 class OpenAIAudioPort(AudioMediaPortBase):
     """Custom AudioMediaPort subclass that captures raw audio from PJSIP and routes to OpenAI"""
@@ -79,14 +80,33 @@ class OpenAIAudioPort(AudioMediaPortBase):
         """Called by PJSUA2 when PJSIP needs a playback frame to send back to the caller"""
         try:
             call_state = self.sip_server.sip_calls.get(self.call_id)
-            if call_state and call_state.openai_connected and call_state.playback_buffer:
+            if call_state and call_state.openai_connected:
                 req_size = frame.size
+                
+                # Check pre-buffering state (jitter buffer)
+                # We wait to accumulate at least 150ms of audio (4800 bytes for 16kHz PCM16 Mono)
+                # before we start playing to eliminate network/websocket jitter.
+                threshold_bytes = 4800 
+                
+                if not call_state.is_playing:
+                    if len(call_state.playback_buffer) >= threshold_bytes:
+                        call_state.is_playing = True
+                        logger.info(f"🔊 Jitter buffer filled ({len(call_state.playback_buffer)} bytes) -> Starting playback for {self.call_id}")
+                    else:
+                        # Provide comfort silence while buffering
+                        frame.buf[:] = b"\x00" * req_size
+                        frame.type = pj.PJMEDIA_FRAME_TYPE_AUDIO
+                        return
+                
+                # Retrieve frame chunk from playout buffer
                 chunk = call_state.playback_buffer[:req_size]
                 call_state.playback_buffer = call_state.playback_buffer[req_size:]
                 
                 # Pad with silence if playback buffer does not have enough bytes
                 if len(chunk) < req_size:
                     chunk += b"\x00" * (req_size - len(chunk))
+                    call_state.is_playing = False # Starved of audio, reset play status
+                    logger.debug(f"🔇 Playback buffer empty -> Pre-buffering reset for {self.call_id}")
                     
                 frame.buf[:] = chunk
                 frame.type = pj.PJMEDIA_FRAME_TYPE_AUDIO
