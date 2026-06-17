@@ -184,6 +184,7 @@ class Config:
             audio_format = 'g711_ulaw'
             
         return {
+            'type': 'realtime',
             'modalities': ['audio', 'text'],
             'instructions': f"You are a helpful sales assistant named {cls.SALES_BOT_NAME} for {cls.COMPANY_NAME}. Support the user with pricing and scheduling. Keep responses concise and conversational.",
             'voice': voice,
