@@ -512,91 +512,101 @@ class OpenAIRealtimeSalesBot:
 
     def convert_pcm_to_ulaw(self, pcm_data: bytes) -> bytes:
         """Convert 16-bit PCM to G.711 u-law (same sample rate)"""
-        # G.711 u-law encoding table (simplified)
-        samples_pcm = struct.unpack(f'<{len(pcm_data)//2}h', pcm_data)
-        ulaw_bytes = []
-        
-        for sample in samples_pcm:
-            # Simplified u-law encoding
-            # Clamp to 14-bit range
-            sample = max(-8159, min(8159, sample))
+        try:
+            import audioop
+            return audioop.lin2ulaw(pcm_data, 2)
+        except ImportError:
+            # G.711 u-law encoding table (simplified fallback)
+            samples_pcm = struct.unpack(f'<{len(pcm_data)//2}h', pcm_data)
+            ulaw_bytes = []
             
-            # Sign and magnitude
-            if sample < 0:
-                sample = -sample
-                sign = 0x80
-            else:
-                sign = 0x00
+            for sample in samples_pcm:
+                # Clamp to 14-bit range
+                sample = max(-8159, min(8159, sample))
+                
+                # Sign and magnitude
+                if sample < 0:
+                    sample = -sample
+                    sign = 0x80
+                else:
+                    sign = 0x00
+                
+                # Find the segment
+                if sample < 32:
+                    segment = 0
+                    quantized = sample >> 1
+                elif sample < 96:
+                    segment = 1
+                    quantized = (sample - 32) >> 2
+                elif sample < 224:
+                    segment = 2
+                    quantized = (sample - 96) >> 3
+                elif sample < 480:
+                    segment = 3
+                    quantized = (sample - 224) >> 4
+                elif sample < 992:
+                    segment = 4
+                    quantized = (sample - 480) >> 5
+                elif sample < 2016:
+                    segment = 5
+                    quantized = (sample - 992) >> 6
+                elif sample < 4064:
+                    segment = 6
+                    quantized = (sample - 2016) >> 7
+                else:
+                    segment = 7
+                    quantized = (sample - 4064) >> 8
+                
+                # Combine sign, segment, and quantized value
+                ulaw_value = sign | (segment << 4) | quantized
+                ulaw_bytes.append(ulaw_value ^ 0xFF)  # Complement for u-law
             
-            # Find the segment
-            if sample < 32:
-                segment = 0
-                quantized = sample >> 1
-            elif sample < 96:
-                segment = 1
-                quantized = (sample - 32) >> 2
-            elif sample < 224:
-                segment = 2
-                quantized = (sample - 96) >> 3
-            elif sample < 480:
-                segment = 3
-                quantized = (sample - 224) >> 4
-            elif sample < 992:
-                segment = 4
-                quantized = (sample - 480) >> 5
-            elif sample < 2016:
-                segment = 5
-                quantized = (sample - 992) >> 6
-            elif sample < 4064:
-                segment = 6
-                quantized = (sample - 2016) >> 7
-            else:
-                segment = 7
-                quantized = (sample - 4064) >> 8
-            
-            # Combine sign, segment, and quantized value
-            ulaw_value = sign | (segment << 4) | quantized
-            ulaw_bytes.append(ulaw_value ^ 0xFF)  # Complement for u-law
-        
-        return bytes(ulaw_bytes)
+            return bytes(ulaw_bytes)
 
     def convert_ulaw_to_pcm(self, ulaw_data: bytes) -> bytes:
         """Convert G.711 u-law to 16-bit PCM (same sample rate)"""
-        # G.711 u-law decoding table (simplified)
-        pcm_samples = []
-        
-        for ulaw_byte in ulaw_data:
-            ulaw_byte ^= 0xFF  # Un-complement
+        try:
+            import audioop
+            return audioop.ulaw2lin(ulaw_data, 2)
+        except ImportError:
+            # G.711 u-law decoding table (simplified fallback)
+            pcm_samples = []
             
-            sign = ulaw_byte & 0x80
-            segment = (ulaw_byte >> 4) & 0x07
-            quantized = ulaw_byte & 0x0F
+            for ulaw_byte in ulaw_data:
+                ulaw_byte ^= 0xFF  # Un-complement
+                
+                sign = ulaw_byte & 0x80
+                segment = (ulaw_byte >> 4) & 0x07
+                quantized = ulaw_byte & 0x0F
+                
+                # Decode based on segment
+                if segment == 0:
+                    pcm_val = (quantized << 1) + 1
+                elif segment == 1:
+                    pcm_val = ((quantized << 2) + 33)
+                elif segment == 2:
+                    pcm_val = ((quantized << 3) + 97)
+                elif segment == 3:
+                    pcm_val = ((quantized << 4) + 225)
+                elif segment == 4:
+                    pcm_val = ((quantized << 5) + 481)
+                elif segment == 5:
+                    pcm_val = ((quantized << 6) + 993)
+                elif segment == 6:
+                    pcm_val = ((quantized << 7) + 2017)
+                else:  # segment == 7
+                    pcm_val = ((quantized << 8) + 4065)
+                
+                # Apply sign
+                if sign:
+                    pcm_val = -pcm_val
+                
+                # Scale up to 16-bit range from 14-bit range (multiply by 4)
+                pcm_val = pcm_val << 2
+                
+                pcm_samples.append(pcm_val)
             
-            # Decode based on segment
-            if segment == 0:
-                pcm_val = (quantized << 1) + 1
-            elif segment == 1:
-                pcm_val = ((quantized << 2) + 33)
-            elif segment == 2:
-                pcm_val = ((quantized << 3) + 97)
-            elif segment == 3:
-                pcm_val = ((quantized << 4) + 225)
-            elif segment == 4:
-                pcm_val = ((quantized << 5) + 481)
-            elif segment == 5:
-                pcm_val = ((quantized << 6) + 993)
-            elif segment == 6:
-                pcm_val = ((quantized << 7) + 2017)
-            else:  # segment == 7
-                pcm_val = ((quantized << 8) + 4065)
-            
-            # Apply sign
-            if sign:
-                pcm_val = -pcm_val
-            
-            pcm_samples.append(pcm_val)
-        
-        return struct.pack(f'<{len(pcm_samples)}h', *pcm_samples)
+            return struct.pack(f'<{len(pcm_samples)}h', *pcm_samples)
 
 
     async def start_server(self):
