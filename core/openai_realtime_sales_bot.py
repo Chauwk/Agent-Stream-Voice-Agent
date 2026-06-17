@@ -313,6 +313,8 @@ class OpenAIRealtimeSalesBot:
                 result = await self.send_pricing_info_enhanced(arguments)
             elif function_name == "transfer_to_human":
                 result = await self.transfer_to_human_enhanced(stream_id, arguments)
+            elif function_name == "end_call":
+                result = await self.end_call_enhanced(stream_id, arguments)
             else:
                 result = {"status": "unknown_function", "error": f"Function {function_name} not implemented"}
             
@@ -330,15 +332,16 @@ class OpenAIRealtimeSalesBot:
             
             await openai_ws.send(json.dumps(function_response))
             
-            # Create enhanced response
-            response_msg = {
-                "type": "response.create",
-                "response": {
-                    "output_modalities": ["audio"],
-                    "instructions": f"Based on the function result, provide a natural response to the customer about {function_name}."
+            # Create enhanced response (only if NOT ending the call)
+            if function_name != "end_call":
+                response_msg = {
+                    "type": "response.create",
+                    "response": {
+                        "output_modalities": ["audio"],
+                        "instructions": f"Based on the function result, provide a natural response to the customer about {function_name}."
+                    }
                 }
-            }
-            await openai_ws.send(json.dumps(response_msg))
+                await openai_ws.send(json.dumps(response_msg))
             
             logger.info(f"✅ ENHANCED FUNCTION CALL COMPLETED: {function_name}")
             
@@ -424,6 +427,22 @@ class OpenAIRealtimeSalesBot:
         logger.info(f"   Urgency: {urgency}")
         
         return transfer_result
+
+    async def end_call_enhanced(self, stream_id: str, args: dict) -> dict:
+        """Hang up the call when conversation is finished"""
+        logger.info(f"📞 HANGING UP CALL via end_call tool for {stream_id}")
+        if self.sip_server:
+            # Clean up the call after a tiny delay so the function result response sends cleanly
+            asyncio.create_task(self.delayed_hangup(stream_id))
+            return {"status": "success", "message": "Call hangup initiated"}
+        else:
+            return {"status": "error", "message": "SIP Server not available"}
+
+    async def delayed_hangup(self, stream_id: str, delay_seconds: float = 0.5):
+        """Clean up the call after a short delay to let final frames play/send"""
+        await asyncio.sleep(delay_seconds)
+        if self.sip_server:
+            await self.sip_server.cleanup_call(stream_id)
 
     def _resample_audio(self, audio_data: bytes, from_rate: int, to_rate: int) -> bytes:
         """Resample audio between different sample rates"""

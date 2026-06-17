@@ -183,7 +183,8 @@ class Config:
             f"You are a professional sales representative named {cls.SALES_BOT_NAME} for {cls.COMPANY_NAME}. "
             "You must speak and respond EXCLUSIVELY in English. "
             "Even if the user speaks in another language, or if there is noise, keep your responses in English. "
-            "Keep responses very concise, short, and natural (1-2 sentences)."
+            "Keep responses very concise, short, and natural (1-2 sentences). "
+            "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
         )
         return {
             'type': 'realtime',
@@ -214,5 +215,61 @@ class Config:
                     'voice': voice
                 }
             },
+            'tools': [
+                {
+                    'type': 'function',
+                    'name': 'end_call',
+                    'description': 'Call this to hang up the call when the conversation is finished, the user says goodbye, or they want to end the call.'
+                },
+                {
+                    'type': 'function',
+                    'name': 'schedule_demo',
+                    'description': 'Schedule a product demonstration for a customer.',
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'customer_name': {'type': 'string', 'description': 'The name of the customer.'},
+                            'product_interest': {'type': 'string', 'description': 'The product they are interested in.'},
+                            'company': {'type': 'string', 'description': 'The company name.'},
+                            'contact_email': {'type': 'string', 'description': "The customer's email address."},
+                            'contact_phone': {'type': 'string', 'description': "The customer's phone number."},
+                            'preferred_date': {'type': 'string', 'description': 'Preferred date for the demo.'},
+                            'preferred_time': {'type': 'string', 'description': 'Preferred time for the demo.'},
+                            'additional_notes': {'type': 'string', 'description': 'Any additional notes.'}
+                        },
+                        'required': ['customer_name', 'product_interest']
+                    }
+                },
+                {
+                    'type': 'function',
+                    'name': 'send_pricing_info',
+                    'description': 'Send detailed pricing information to the customer.',
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'product': {'type': 'string', 'description': 'The product name.'},
+                            'company_size': {'type': 'string', 'description': 'The size/scale of the company.'},
+                            'contact_email': {'type': 'string', 'description': 'Email to send pricing to.'},
+                            'custom_requirements': {'type': 'string', 'description': 'Any custom requirements.'}
+                        },
+                        'required': ['product', 'contact_email']
+                    }
+                },
+                {
+                    'type': 'function',
+                    'name': 'transfer_to_human',
+                    'description': 'Transfer the call to a human sales agent.',
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'reason': {'type': 'string', 'description': 'Reason for the transfer.'},
+                            'customer_context': {'type': 'string', 'description': 'Context of the conversation so far.'},
+                            'urgency': {'type': 'string', 'description': 'Urgency level (low, medium, high).'}
+                        },
+                        'required': ['reason']
+                    }
+                }
+            ],
+            'tool_choice': 'auto',
             'max_output_tokens': 4096
         } 
