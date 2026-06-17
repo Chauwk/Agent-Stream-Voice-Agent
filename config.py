@@ -186,6 +186,9 @@ class Config:
                 'input': {
                     'format': {
                         'type': 'audio/pcmu'
+                    },
+                    'transcription': {
+                        'model': 'whisper-1'
                     }
                 },
                 'output': {
@@ -195,7 +198,6 @@ class Config:
                     'voice': voice
                 }
             },
-            'input_audio_transcription': {'model': 'whisper-1'},
             'turn_detection': {'type': 'server_vad', 'threshold': 0.5},
             'temperature': cls.TEMPERATURE,
             'max_response_output_tokens': 4096
