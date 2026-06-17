@@ -220,11 +220,11 @@ class OpenAIRealtimeSalesBot:
                     
                     logger.debug(f"🤖 ENHANCED OPENAI EVENT: {event_type} for {stream_id}")
                     
-                    if event_type == "response.audio.delta":
+                    if event_type == "response.output_audio.delta":
                         await self.handle_openai_audio_delta_enhanced(stream_id, data)
                     elif event_type == "response.function_call_arguments.done":
                         await self.handle_openai_function_call_enhanced(stream_id, data)
-                    elif event_type == "response.audio_transcript.delta":
+                    elif event_type == "response.output_audio_transcript.delta":
                         transcript_delta = data.get('delta', '')
                         if transcript_delta.strip():
                             logger.info(f"🗣️ SARAH SPEAKING: {transcript_delta}")
