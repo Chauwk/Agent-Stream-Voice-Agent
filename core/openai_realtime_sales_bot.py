@@ -243,8 +243,6 @@ class OpenAIRealtimeSalesBot:
                         openai_config = self.openai_connections.get(stream_id)
                         if openai_config:
                             openai_config["user_speaking"] = False
-                        # Enhanced response generation
-                        await self.trigger_openai_response_enhanced(stream_id, openai_ws)
                     elif event_type == "response.done":
                         logger.info(f"✅ SARAH FINISHED RESPONSE (enhanced) for {stream_id}")
                     elif event_type == "error":
