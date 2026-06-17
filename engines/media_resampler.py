@@ -31,7 +31,7 @@ class MediaResampler:
     def __init__(self):
         self.resampler_backend = getattr(config.Config, 'RESAMPLER_BACKEND', 'pydub')
         self.quality = getattr(config.Config, 'RESAMPLER_QUALITY', 'medium')
-        logger.info(f"MediaResampler initialized with {self.resampler_backend} backend")
+        logger.debug(f"MediaResampler initialized with {self.resampler_backend} backend")
     
     def resample_audio(
         self, 

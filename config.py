@@ -206,6 +206,5 @@ class Config:
                     'voice': voice
                 }
             },
-            'temperature': cls.TEMPERATURE,
             'max_output_tokens': 4096
         } 

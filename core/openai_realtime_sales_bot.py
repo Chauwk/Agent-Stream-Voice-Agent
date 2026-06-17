@@ -419,10 +419,11 @@ class OpenAIRealtimeSalesBot:
             
         try:
             # Use the media resampler for high-quality resampling
-            from engines.media_resampler import MediaResampler
-            resampler = MediaResampler()
+            if not hasattr(self, 'resampler') or self.resampler is None:
+                from engines.media_resampler import MediaResampler
+                self.resampler = MediaResampler()
             
-            resampled = resampler.resample_audio(
+            resampled = self.resampler.resample_audio(
                 audio_data=audio_data,
                 from_rate=from_rate,
                 to_rate=to_rate,
