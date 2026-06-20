@@ -20,6 +20,17 @@ class Config:
     OPENAI_VOICE = os.getenv('OPENAI_VOICE', 'coral')
     OPENAI_TEMPERATURE = float(os.getenv('OPENAI_TEMPERATURE', '0.7'))
     
+    # ===== MODULAR PIPELINE SETTINGS =====
+    DEEPGRAM_API_KEY = os.getenv('DEEPGRAM_API_KEY', '')
+    GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
+    CARTESIA_API_KEY = os.getenv('CARTESIA_API_KEY', '')
+    VOICE_BOT_MODE = os.getenv('VOICE_BOT_MODE', 'realtime').lower()
+    
+    DEEPGRAM_MODEL = os.getenv('DEEPGRAM_MODEL', 'nova-2-phone')
+    GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')
+    CARTESIA_MODEL = os.getenv('CARTESIA_MODEL', 'sonic-english')
+    CARTESIA_VOICE_ID = os.getenv('CARTESIA_VOICE_ID', 'a0e9987c-ab7c-4ad9-a689-9226f7435072')
+    
     # ===== SERVER SETTINGS =====
     SERVER_HOST = os.getenv('SERVER_HOST', '0.0.0.0')
     SERVER_PORT = int(os.getenv('SERVER_PORT', '5002'))
@@ -116,8 +127,16 @@ class Config:
         """Validate required configuration"""
         errors = []
         
-        if not cls.OPENAI_API_KEY:
-            errors.append("OPENAI_API_KEY is required")
+        if cls.VOICE_BOT_MODE == "modular":
+            if not cls.DEEPGRAM_API_KEY:
+                errors.append("DEEPGRAM_API_KEY is required in modular mode")
+            if not cls.GEMINI_API_KEY:
+                errors.append("GEMINI_API_KEY is required in modular mode")
+            if not cls.CARTESIA_API_KEY:
+                errors.append("CARTESIA_API_KEY is required in modular mode")
+        else:
+            if not cls.OPENAI_API_KEY:
+                errors.append("OPENAI_API_KEY is required in realtime mode")
             
         if not cls.COMPANY_NAME:
             errors.append("COMPANY_NAME is required")

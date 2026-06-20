@@ -19,3 +19,9 @@ PyAudio
 # Optional: for better audio quality
 # librosa
 # soundfile
+
+# Modular Pipeline dependencies
+deepgram-sdk
+google-generativeai
+cartesia
+

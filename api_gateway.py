@@ -18,18 +18,27 @@ from config import Config
 from routes.call_routes import router as call_router
 from routes.bot_routes import router as bot_router
 
-# Import controllers to track streaming connections
-from controllers import bot_controller
-
-# Import core sales bot
-from core.openai_realtime_sales_bot import OpenAIRealtimeSalesBot
-
 # Configure Logger
 logging.basicConfig(level=logging.INFO, format=Config.LOG_FORMAT)
 logger = logging.getLogger(__name__)
 
-# Initialize Core AI Voice Bot Engine
-sales_bot_engine = OpenAIRealtimeSalesBot()
+# Import controllers to track streaming connections
+from controllers import bot_controller
+
+# Initialize Core AI Voice Bot Engine based on configuration mode
+if Config.VOICE_BOT_MODE == "modular":
+    logger.info("🤖 Starting Voice Bot in MODULAR Mode (Deepgram + Gemini + Cartesia)")
+    try:
+        from core.modular_sales_bot import ModularSalesBot
+        sales_bot_engine = ModularSalesBot()
+    except Exception as e:
+        logger.error(f"❌ Error loading ModularSalesBot, falling back to OpenAI Realtime: {e}")
+        from core.openai_realtime_sales_bot import OpenAIRealtimeSalesBot
+        sales_bot_engine = OpenAIRealtimeSalesBot()
+else:
+    logger.info("🤖 Starting Voice Bot in REALTIME Mode (OpenAI Realtime API)")
+    from core.openai_realtime_sales_bot import OpenAIRealtimeSalesBot
+    sales_bot_engine = OpenAIRealtimeSalesBot()
 
 # Lifespan context manager to handle concurrent background services (e.g., SIP Server)
 @asynccontextmanager
