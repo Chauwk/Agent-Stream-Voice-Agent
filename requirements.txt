@@ -23,5 +23,6 @@ PyAudio
 # Modular Pipeline dependencies
 deepgram-sdk
 google-generativeai
-cartesia
+sarvamai
+
 

@@ -28,20 +28,15 @@ def check_dependencies():
     if Config.VOICE_BOT_MODE == "modular":
         required['deepgram'] = 'Deepgram STT SDK'
         required['google.generativeai'] = 'Google Gemini SDK'
-        required['cartesia'] = 'Cartesia TTS SDK'
+        required['sarvamai'] = 'Sarvam AI SDK'
     else:
         required['openai'] = 'OpenAI API'
     
     missing = []
+    import importlib
     for pkg, desc in required.items():
         try:
-            if "." in pkg:
-                parts = pkg.split(".")
-                mod = __import__(parts[0])
-                for part in parts[1:]:
-                    mod = getattr(mod, part)
-            else:
-                __import__(pkg)
+            importlib.import_module(pkg)
             print(f"[OK] {desc:30} ({pkg})")
         except ImportError:
             print(f"[FAIL] {desc:30} ({pkg})")
@@ -55,7 +50,8 @@ def check_dependencies():
             'pyaudio': 'PyAudio',
             'pydub': 'pydub',
             'google.generativeai': 'google-generativeai',
-            'deepgram': 'deepgram-sdk'
+            'deepgram': 'deepgram-sdk',
+            'sarvamai': 'sarvamai'
         }
         install_names = [install_map.get(pkg, pkg) for pkg in missing]
         print(f"   Run: pip install {' '.join(install_names)}")
@@ -78,7 +74,7 @@ def check_configuration():
     if Config.VOICE_BOT_MODE == "modular":
         checks['DEEPGRAM_API_KEY'] = 'Deepgram API Key'
         checks['GEMINI_API_KEY'] = 'Gemini API Key'
-        checks['CARTESIA_API_KEY'] = 'Cartesia API Key'
+        checks['SARVAM_API_KEY'] = 'Sarvam API Key'
     else:
         checks['OPENAI_API_KEY'] = 'OpenAI API Key'
         

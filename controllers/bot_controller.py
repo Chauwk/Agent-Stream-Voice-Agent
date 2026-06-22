@@ -56,8 +56,9 @@ async def get_active_bot_telemetry() -> Dict[str, Any]:
             "voice_bot_mode": Config.VOICE_BOT_MODE,
             "deepgram_model": Config.DEEPGRAM_MODEL,
             "gemini_model": Config.GEMINI_MODEL,
-            "cartesia_model": Config.CARTESIA_MODEL,
-            "cartesia_voice_id": Config.CARTESIA_VOICE_ID
+            "sarvam_model": Config.SARVAM_MODEL,
+            "sarvam_speaker": Config.SARVAM_SPEAKER,
+            "sarvam_language_code": Config.SARVAM_LANGUAGE_CODE
         },
         "audio_settings": {
             "sample_rate": Config.SAMPLE_RATE,
@@ -127,13 +128,17 @@ async def update_bot_runtime_config(payload: Dict[str, Any]) -> Dict[str, Any]:
         Config.GEMINI_MODEL = str(payload["gemini_model"])
         updated_fields.append("gemini_model")
 
-    if "cartesia_model" in payload:
-        Config.CARTESIA_MODEL = str(payload["cartesia_model"])
-        updated_fields.append("cartesia_model")
+    if "sarvam_model" in payload:
+        Config.SARVAM_MODEL = str(payload["sarvam_model"])
+        updated_fields.append("sarvam_model")
 
-    if "cartesia_voice_id" in payload:
-        Config.CARTESIA_VOICE_ID = str(payload["cartesia_voice_id"])
-        updated_fields.append("cartesia_voice_id")
+    if "sarvam_speaker" in payload:
+        Config.SARVAM_SPEAKER = str(payload["sarvam_speaker"])
+        updated_fields.append("sarvam_speaker")
+
+    if "sarvam_language_code" in payload:
+        Config.SARVAM_LANGUAGE_CODE = str(payload["sarvam_language_code"])
+        updated_fields.append("sarvam_language_code")
             
     logger.info(f"✅ [BotController] Dynamic reload complete. Fields modified: {updated_fields}")
     
@@ -149,7 +154,8 @@ async def update_bot_runtime_config(payload: Dict[str, Any]) -> Dict[str, Any]:
             "voice_bot_mode": Config.VOICE_BOT_MODE,
             "deepgram_model": Config.DEEPGRAM_MODEL,
             "gemini_model": Config.GEMINI_MODEL,
-            "cartesia_model": Config.CARTESIA_MODEL,
-            "cartesia_voice_id": Config.CARTESIA_VOICE_ID
+            "sarvam_model": Config.SARVAM_MODEL,
+            "sarvam_speaker": Config.SARVAM_SPEAKER,
+            "sarvam_language_code": Config.SARVAM_LANGUAGE_CODE
         }
     }

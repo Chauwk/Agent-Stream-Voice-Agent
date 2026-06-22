@@ -49,7 +49,7 @@ class BotConfigUpdateRequest(BaseModel):
     voice_bot_mode: Optional[str] = Field(
         None,
         example="modular",
-        description="Active voice bot engine mode: 'modular' (Deepgram+Gemini+Cartesia) or 'realtime' (OpenAI Realtime API)."
+        description="Active voice bot engine mode: 'modular' (Deepgram+Gemini+Sarvam) or 'realtime' (OpenAI Realtime API)."
     )
     deepgram_model: Optional[str] = Field(
         None,
@@ -61,15 +61,20 @@ class BotConfigUpdateRequest(BaseModel):
         example="gemini-1.5-flash",
         description="Active LLM model for Gemini (e.g. gemini-1.5-flash, gemini-1.5-pro)."
     )
-    cartesia_model: Optional[str] = Field(
+    sarvam_model: Optional[str] = Field(
         None,
-        example="sonic-english",
-        description="Active TTS model for Cartesia (e.g. sonic-english)."
+        example="bulbul:v3",
+        description="Active TTS model for Sarvam AI (e.g. bulbul:v3)."
     )
-    cartesia_voice_id: Optional[str] = Field(
+    sarvam_speaker: Optional[str] = Field(
         None,
-        example="a0e9987c-ab7c-4ad9-a689-9226f7435072",
-        description="Voice ID for Cartesia TTS synthesis."
+        example="shubh",
+        description="Active speaker name for Sarvam AI TTS (e.g. shubh)."
+    )
+    sarvam_language_code: Optional[str] = Field(
+        None,
+        example="hi-IN",
+        description="Language code for Sarvam AI TTS (e.g. hi-IN)."
     )
 
 # === Pydantic Output Schemas for Swagger Documentation ===
@@ -83,8 +88,9 @@ class BotModularSettings(BaseModel):
     voice_bot_mode: str = Field(..., example="modular")
     deepgram_model: str = Field(..., example="nova-2-phone")
     gemini_model: str = Field(..., example="gemini-1.5-flash")
-    cartesia_model: str = Field(..., example="sonic-english")
-    cartesia_voice_id: str = Field(..., example="a0e9987c-ab7c-4ad9-a689-9226f7435072")
+    sarvam_model: str = Field(..., example="bulbul:v3")
+    sarvam_speaker: str = Field(..., example="shubh")
+    sarvam_language_code: str = Field(..., example="hi-IN")
 
 class BotAudioSettings(BaseModel):
     sample_rate: int = Field(..., example=24000)

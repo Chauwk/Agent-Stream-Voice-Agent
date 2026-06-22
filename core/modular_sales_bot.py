@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Modular Voice Bot Client using Deepgram (STT), Gemini (LLM), and Cartesia (TTS)
+Modular Voice Bot Client using Deepgram (STT), Gemini (LLM), and Sarvam AI (TTS)
 Acts as a drop-in replacement for OpenAIRealtimeSalesBot when VOICE_BOT_MODE is set to 'modular'.
 """
 
@@ -11,12 +11,13 @@ import time
 import base64
 import websockets
 import google.generativeai as genai
+from sarvamai import SarvamAI
 from config import Config
 
 logger = logging.getLogger(__name__)
 
 class ModularSalesBot:
-    """Modular Voice AI bot integrating Deepgram, Gemini, and Cartesia with PJSIP telephony"""
+    """Modular Voice AI bot integrating Deepgram, Gemini, and Sarvam AI with PJSIP telephony"""
     
     def __init__(self):
         self.default_sample_rate = Config.DEFAULT_SAMPLE_RATE
@@ -25,11 +26,15 @@ class ModularSalesBot:
         # Connections state map: call_id -> session state
         self.connections = {}
         
+        # Initialize Sarvam Client
+        self.sarvam_client = SarvamAI(api_subscription_key=Config.SARVAM_API_KEY)
+        
         logger.info("🤖 Modular Voice Bot Engine Initialized")
         logger.info(f"   🎙️ STT Model (Deepgram): {Config.DEEPGRAM_MODEL}")
         logger.info(f"   🧠 LLM Model (Gemini): {Config.GEMINI_MODEL}")
-        logger.info(f"   🔊 TTS Model (Cartesia): {Config.CARTESIA_MODEL}")
-        logger.info(f"   🎭 TTS Voice ID (Cartesia): {Config.CARTESIA_VOICE_ID}")
+        logger.info(f"   🔊 TTS Model (Sarvam): {Config.SARVAM_MODEL}")
+        logger.info(f"   🎭 Speaker (Sarvam): {Config.SARVAM_SPEAKER}")
+        logger.info(f"   🌐 Language (Sarvam): {Config.SARVAM_LANGUAGE_CODE}")
 
     async def start_server(self):
         """Start SIP server for direct Exotel SIP trunking"""
@@ -67,7 +72,7 @@ class ModularSalesBot:
 
     async def connect_to_openai_enhanced(self, call_id: str):
         """
-        Setup modular connection endpoints (Deepgram, Gemini, Cartesia) for the call session.
+        Setup modular connection endpoints (Deepgram, Gemini, Sarvam) for the call session.
         Method name matches the SIP server interface call for backward compatibility.
         """
         logger.info(f"🔗 INITIALIZING MODULAR PIPELINE for call: {call_id}")
@@ -93,7 +98,6 @@ class ModularSalesBot:
         self.connections[call_id] = {
             "chat_session": chat_session,
             "deepgram_ws": None,
-            "cartesia_ws": None,
             "tasks": [],
             "user_speaking": False,
             "is_bot_speaking": False,
@@ -102,20 +106,19 @@ class ModularSalesBot:
             "tts_queue": asyncio.Queue()   # Queue to pass text chunks to TTS
         }
         
-        # 3. Connect to WebSockets concurrently
+        # 3. Connect to WebSockets
         try:
             await self._connect_websockets(call_id)
-            logger.info(f"✅ WebSockets connected for call: {call_id}")
+            logger.info(f"✅ Deepgram WebSocket connected for call: {call_id}")
             
             session_state = self.connections[call_id]
             
             # Start background async pipeline workers
             dg_task = asyncio.create_task(self._handle_deepgram_responses(call_id))
-            tts_send_task = asyncio.create_task(self._process_tts_queue(call_id))
-            tts_recv_task = asyncio.create_task(self._handle_cartesia_responses(call_id))
+            tts_process_task = asyncio.create_task(self._process_tts_queue(call_id))
             llm_process_task = asyncio.create_task(self._process_llm_queue(call_id))
             
-            session_state["tasks"].extend([dg_task, tts_send_task, tts_recv_task, llm_process_task])
+            session_state["tasks"].extend([dg_task, tts_process_task, llm_process_task])
             
             # Trigger initial greeting
             greeting_prompt = (
@@ -130,24 +133,15 @@ class ModularSalesBot:
             raise
 
     async def _connect_websockets(self, call_id: str):
-        """Concurrently connect to Deepgram and Cartesia WebSockets"""
+        """Connect to Deepgram WebSocket"""
         session_state = self.connections[call_id]
         
         # Deepgram Live WS config
         dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&encoding=linear16&sample_rate=16000&channels=1&endpointing=300&interim_results=false"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
-        # Cartesia WS config
-        cartesia_url = f"wss://api.cartesia.ai/tts/websocket?api_key={Config.CARTESIA_API_KEY}&client_version=2024-06-10"
-        
-        # Concurrently establish sockets
-        dg_ws, cartesia_ws = await asyncio.gather(
-            websockets.connect(dg_url, extra_headers=dg_headers),
-            websockets.connect(cartesia_url)
-        )
-        
+        dg_ws = await websockets.connect(dg_url, extra_headers=dg_headers)
         session_state["deepgram_ws"] = dg_ws
-        session_state["cartesia_ws"] = cartesia_ws
 
     async def send_audio_to_openai(self, call_id: str, audio_chunk: bytes, sample_rate: int = 16000):
         """
@@ -203,7 +197,7 @@ class ModularSalesBot:
             logger.error(f"❌ Error handling Deepgram messages for call {call_id}: {e}")
 
     async def _process_llm_queue(self, call_id: str):
-        """Listens for user transcripts, queries Gemini 1.5, and pushes streaming text to Cartesia TTS"""
+        """Listens for user transcripts, queries Gemini 1.5, and pushes sentence blocks to the TTS queue"""
         session_state = self.connections.get(call_id)
         if not session_state:
             return
@@ -218,13 +212,15 @@ class ModularSalesBot:
                 logger.info(f"🧠 Querying Gemini LLM with: '{prompt}'")
                 
                 session_state["is_bot_speaking"] = True
-                # Set a unique context ID for this speech turn in Cartesia
+                # Set a unique context ID for this speech turn
                 context_id = f"ctx_{int(time.time() * 1000)}"
                 session_state["current_context_id"] = context_id
                 
                 try:
                     # Async stream Gemini response
                     response = await chat_session.send_message_async(prompt, stream=True)
+                    current_sentence = ""
+                    
                     async for chunk in response:
                         # If user started speaking during generation, break immediately
                         if session_state["user_speaking"]:
@@ -233,15 +229,32 @@ class ModularSalesBot:
                         
                         text_delta = chunk.text
                         if text_delta:
-                            # Push text delta to TTS queue
-                            await tts_queue.put((context_id, text_delta))
+                            current_sentence += text_delta
                             
-                    # Signal completion of this turn
-                    await tts_queue.put((context_id, None))
+                            # Split by sentence boundaries (., ?, !, \n)
+                            while True:
+                                idx = -1
+                                for p in ['.', '?', '!', '\n']:
+                                    p_idx = current_sentence.find(p)
+                                    if p_idx != -1:
+                                        if idx == -1 or p_idx < idx:
+                                            idx = p_idx
+                                            
+                                if idx == -1:
+                                    break
+                                    
+                                sentence_to_send = current_sentence[:idx+1].strip()
+                                current_sentence = current_sentence[idx+1:]
+                                
+                                if sentence_to_send:
+                                    await tts_queue.put((context_id, sentence_to_send))
+                                    
+                    # Send any remaining text
+                    if current_sentence.strip() and not session_state["user_speaking"]:
+                        await tts_queue.put((context_id, current_sentence.strip()))
                     
                 except Exception as e:
                     logger.error(f"❌ Gemini generation error: {e}")
-                    await tts_queue.put((context_id, None))
                 finally:
                     llm_queue.task_done()
                     
@@ -249,90 +262,67 @@ class ModularSalesBot:
             pass
 
     async def _process_tts_queue(self, call_id: str):
-        """Listens for text tokens from Gemini and streams TTS generation requests to Cartesia"""
+        """Listens for sentences and invokes Sarvam AI TTS in a thread pool executor"""
         session_state = self.connections.get(call_id)
         if not session_state:
             return
             
-        cartesia_ws = session_state["cartesia_ws"]
         tts_queue = session_state["tts_queue"]
+        loop = asyncio.get_running_loop()
         
         try:
             while True:
-                context_id, text_chunk = await tts_queue.get()
+                context_id, sentence_text = await tts_queue.get()
                 
-                # Check if this context has been cancelled
+                # Check if this context has been cancelled/interrupted
                 if context_id != session_state["current_context_id"]:
                     tts_queue.task_done()
                     continue
-                    
-                if text_chunk is None:
-                    # End of speech turn
-                    logger.debug(f"🏁 Out of tokens for context {context_id}")
+                
+                if not sentence_text or not sentence_text.strip():
                     tts_queue.task_done()
                     continue
                 
-                # Send text token request to Cartesia
-                tts_request = {
-                    "model_id": Config.CARTESIA_MODEL,
-                    "voice": {
-                        "mode": "id",
-                        "id": Config.CARTESIA_VOICE_ID
-                    },
-                    "transcript": text_chunk,
-                    "output_format": {
-                        "container": "raw",
-                        "encoding": "pcm_s16le",
-                        "sample_rate": 16000
-                    },
-                    "context_id": context_id
-                }
+                logger.info(f"🔊 Requesting Sarvam TTS for sentence: '{sentence_text}'")
                 
                 try:
-                    await cartesia_ws.send(json.dumps(tts_request))
+                    # Run the synchronous client call in a thread executor
+                    response = await loop.run_in_executor(
+                        None,
+                        lambda: self.sarvam_client.text_to_speech.convert(
+                            text=sentence_text,
+                            target_language_code=Config.SARVAM_LANGUAGE_CODE,
+                            speaker=Config.SARVAM_SPEAKER,
+                            model=Config.SARVAM_MODEL,
+                            output_audio_codec="linear16",
+                            speech_sample_rate=16000
+                        )
+                    )
+                    
+                    # Verify again that context has not changed while API request was running
+                    if context_id != session_state["current_context_id"]:
+                        logger.info(f"🚫 Context changed during TTS gen. Discarding output for: '{sentence_text}'")
+                        tts_queue.task_done()
+                        continue
+                        
+                    if response and response.audios:
+                        base64_audio = response.audios[0]
+                        pcm_audio = base64.b64decode(base64_audio)
+                        
+                        logger.info(f"🗣️ SARAH SPEAKING: {sentence_text}")
+                        
+                        if self.sip_server:
+                            await self.sip_server.send_audio_to_rtp(call_id, pcm_audio)
+                    else:
+                        logger.error(f"❌ Empty or invalid response from Sarvam AI for: '{sentence_text}'")
+                        
                 except Exception as e:
-                    logger.error(f"❌ Error sending TTS request to Cartesia: {e}")
+                    logger.error(f"❌ Error generating TTS from Sarvam AI: {e}")
                     
                 tts_queue.task_done()
                 
         except asyncio.CancelledError:
             pass
-
-    async def _handle_cartesia_responses(self, call_id: str):
-        """Receives raw PCM16 audio blocks back from Cartesia and feeds them into the SIPServer"""
-        session_state = self.connections.get(call_id)
-        if not session_state:
-            return
-            
-        cartesia_ws = session_state["cartesia_ws"]
-        try:
-            async for message in cartesia_ws:
-                data = json.loads(message)
-                
-                context_id = data.get("context_id")
-                # Drop audio if it belongs to a cancelled turn
-                if context_id != session_state["current_context_id"]:
-                    continue
-                    
-                # Extract and decode binary audio delta
-                base64_audio = data.get("base64_audio", "")
-                if base64_audio:
-                    pcm_audio = base64.b64decode(base64_audio)
-                    
-                    # Log bot speaking transcript delta if present for reporting
-                    word = data.get("word")
-                    if word:
-                        # Print bot speech deltas to logs
-                        logger.info(f"🗣️ SARAH SPEAKING: {word}")
-                    
-                    # Push directly into the PJSIP audio playout buffer!
-                    if self.sip_server:
-                        await self.sip_server.send_audio_to_rtp(call_id, pcm_audio)
-                        
-        except websockets.exceptions.ConnectionClosed:
-            logger.info(f"🔌 Cartesia connection closed for call {call_id}")
-        except Exception as e:
-            logger.error(f"❌ Error handling Cartesia response: {e}")
 
     async def _handle_customer_interruption(self, call_id: str):
         """Immediately stops bot speaking and clears PJSIP queues on customer interruption"""
@@ -354,26 +344,16 @@ class ModularSalesBot:
                 call_state.is_playing = False
                 logger.info(f"🔇 SIP playout buffer cleared for call {call_id}")
                 
-        # 3. Clear pending TTS and LLM queues
+        # 3. Clear pending TTS queue
         while not session_state["tts_queue"].empty():
             try:
                 session_state["tts_queue"].get_nowait()
                 session_state["tts_queue"].task_done()
             except asyncio.QueueEmpty:
                 break
-                
-        # 4. Cartesia cancellation
-        cartesia_ws = session_state.get("cartesia_ws")
-        if cartesia_ws and not cartesia_ws.closed:
-            try:
-                # We can notify Cartesia of interruption by sending a cancellation text or message
-                # but invalidating current_context_id is already 100% effective in discarding playback.
-                pass
-            except Exception as e:
-                logger.warning(f"⚠️ Cartesia cancel warning: {e}")
 
     async def cleanup_connections(self, call_id: str):
-        """Closes all sockets and cancels tasks for a call session"""
+        """Closes deepgram socket and cancels tasks for a call session"""
         session_state = self.connections.get(call_id)
         if not session_state:
             return
@@ -385,14 +365,13 @@ class ModularSalesBot:
             if not task.done():
                 task.cancel()
                 
-        # Close WebSockets
-        for ws_key in ["deepgram_ws", "cartesia_ws"]:
-            ws = session_state.get(ws_key)
-            if ws and not ws.closed:
-                try:
-                    await ws.close()
-                except Exception as e:
-                    logger.debug(f"Error closing socket {ws_key}: {e}")
+        # Close Deepgram WebSocket
+        dg_ws = session_state.get("deepgram_ws")
+        if dg_ws and not dg_ws.closed:
+            try:
+                await dg_ws.close()
+            except Exception as e:
+                logger.debug(f"Error closing Deepgram WebSocket: {e}")
                     
         # Remove connection
         if call_id in self.connections:
