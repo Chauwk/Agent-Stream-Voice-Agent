@@ -46,6 +46,31 @@ class BotConfigUpdateRequest(BaseModel):
         example=0.7, 
         description="Creativity parameter for model responses (range 0.0 to 1.2)."
     )
+    voice_bot_mode: Optional[str] = Field(
+        None,
+        example="modular",
+        description="Active voice bot engine mode: 'modular' (Deepgram+Gemini+Cartesia) or 'realtime' (OpenAI Realtime API)."
+    )
+    deepgram_model: Optional[str] = Field(
+        None,
+        example="nova-2-phone",
+        description="Active STT model for Deepgram (e.g. nova-2-phone, nova-2-general)."
+    )
+    gemini_model: Optional[str] = Field(
+        None,
+        example="gemini-1.5-flash",
+        description="Active LLM model for Gemini (e.g. gemini-1.5-flash, gemini-1.5-pro)."
+    )
+    cartesia_model: Optional[str] = Field(
+        None,
+        example="sonic-english",
+        description="Active TTS model for Cartesia (e.g. sonic-english)."
+    )
+    cartesia_voice_id: Optional[str] = Field(
+        None,
+        example="a0e9987c-ab7c-4ad9-a689-9226f7435072",
+        description="Voice ID for Cartesia TTS synthesis."
+    )
 
 # === Pydantic Output Schemas for Swagger Documentation ===
 
@@ -53,6 +78,13 @@ class BotOpenAISettings(BaseModel):
     model: str = Field(..., example="gpt-4o-realtime-preview-2024-12-17")
     voice: str = Field(..., example="coral")
     temperature: float = Field(..., example=0.7)
+
+class BotModularSettings(BaseModel):
+    voice_bot_mode: str = Field(..., example="modular")
+    deepgram_model: str = Field(..., example="nova-2-phone")
+    gemini_model: str = Field(..., example="gemini-1.5-flash")
+    cartesia_model: str = Field(..., example="sonic-english")
+    cartesia_voice_id: str = Field(..., example="a0e9987c-ab7c-4ad9-a689-9226f7435072")
 
 class BotAudioSettings(BaseModel):
     sample_rate: int = Field(..., example=24000)
@@ -71,6 +103,7 @@ class BotStatusResponse(BaseModel):
     company_name: str = Field(..., example="TechSolutions Inc.")
     active_stream_calls: int = Field(..., example=0, description="Active concurrent streaming telephony calls.")
     openai_settings: BotOpenAISettings
+    modular_settings: BotModularSettings
     audio_settings: BotAudioSettings
     telephony_mode: BotTelephonyMode
 

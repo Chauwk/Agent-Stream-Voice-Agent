@@ -52,6 +52,13 @@ async def get_active_bot_telemetry() -> Dict[str, Any]:
             "voice": Config.OPENAI_VOICE,
             "temperature": Config.OPENAI_TEMPERATURE
         },
+        "modular_settings": {
+            "voice_bot_mode": Config.VOICE_BOT_MODE,
+            "deepgram_model": Config.DEEPGRAM_MODEL,
+            "gemini_model": Config.GEMINI_MODEL,
+            "cartesia_model": Config.CARTESIA_MODEL,
+            "cartesia_voice_id": Config.CARTESIA_VOICE_ID
+        },
         "audio_settings": {
             "sample_rate": Config.SAMPLE_RATE,
             "chunk_size_ms": Config.AUDIO_CHUNK_SIZE,
@@ -74,7 +81,7 @@ async def update_bot_runtime_config(payload: Dict[str, Any]) -> Dict[str, Any]:
     Functional logic to dynamically update bot configurations at runtime without restarting the server container.
     
     Args:
-        payload: Parameters to update (e.g. sales_bot_name, company_name, openai_voice, openai_temperature).
+        payload: Parameters to update (e.g. sales_bot_name, company_name, openai_voice, openai_temperature, gemini_model).
         
     Returns:
         Dict confirming successful updates and updated configuration state.
@@ -107,6 +114,26 @@ async def update_bot_runtime_config(payload: Dict[str, Any]) -> Dict[str, Any]:
             updated_fields.append("openai_temperature")
         except ValueError:
             logger.warning(f"⚠️ [BotController] Invalid temperature ignored: {payload['openai_temperature']}")
+
+    if "voice_bot_mode" in payload:
+        Config.VOICE_BOT_MODE = str(payload["voice_bot_mode"]).lower()
+        updated_fields.append("voice_bot_mode")
+
+    if "deepgram_model" in payload:
+        Config.DEEPGRAM_MODEL = str(payload["deepgram_model"])
+        updated_fields.append("deepgram_model")
+
+    if "gemini_model" in payload:
+        Config.GEMINI_MODEL = str(payload["gemini_model"])
+        updated_fields.append("gemini_model")
+
+    if "cartesia_model" in payload:
+        Config.CARTESIA_MODEL = str(payload["cartesia_model"])
+        updated_fields.append("cartesia_model")
+
+    if "cartesia_voice_id" in payload:
+        Config.CARTESIA_VOICE_ID = str(payload["cartesia_voice_id"])
+        updated_fields.append("cartesia_voice_id")
             
     logger.info(f"✅ [BotController] Dynamic reload complete. Fields modified: {updated_fields}")
     
@@ -118,6 +145,11 @@ async def update_bot_runtime_config(payload: Dict[str, Any]) -> Dict[str, Any]:
             "company_name": Config.COMPANY_NAME,
             "openai_model": Config.OPENAI_MODEL,
             "openai_voice": Config.OPENAI_VOICE,
-            "openai_temperature": Config.OPENAI_TEMPERATURE
+            "openai_temperature": Config.OPENAI_TEMPERATURE,
+            "voice_bot_mode": Config.VOICE_BOT_MODE,
+            "deepgram_model": Config.DEEPGRAM_MODEL,
+            "gemini_model": Config.GEMINI_MODEL,
+            "cartesia_model": Config.CARTESIA_MODEL,
+            "cartesia_voice_id": Config.CARTESIA_VOICE_ID
         }
     }
