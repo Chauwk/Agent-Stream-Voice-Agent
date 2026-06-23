@@ -140,7 +140,15 @@ class ModularSalesBot:
         dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&encoding=linear16&sample_rate=16000&channels=1&endpointing=300&interim_results=false"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
-        dg_ws = await websockets.connect(dg_url, extra_headers=dg_headers)
+        import inspect
+        connect_params = inspect.signature(websockets.connect).parameters
+        connect_kwargs = {}
+        if "additional_headers" in connect_params:
+            connect_kwargs["additional_headers"] = dg_headers
+        else:
+            connect_kwargs["extra_headers"] = dg_headers
+            
+        dg_ws = await websockets.connect(dg_url, **connect_kwargs)
         session_state["deepgram_ws"] = dg_ws
 
     async def send_audio_to_openai(self, call_id: str, audio_chunk: bytes, sample_rate: int = 16000):
