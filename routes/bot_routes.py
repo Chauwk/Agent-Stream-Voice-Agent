@@ -53,8 +53,8 @@ class BotConfigUpdateRequest(BaseModel):
     )
     deepgram_model: Optional[str] = Field(
         None,
-        example="nova-2-phone",
-        description="Active STT model for Deepgram (e.g. nova-2-phone, nova-2-general)."
+        example="nova-2-phonecall",
+        description="Active STT model for Deepgram (e.g. nova-2-phonecall, nova-2-general)."
     )
     gemini_model: Optional[str] = Field(
         None,
@@ -86,7 +86,7 @@ class BotOpenAISettings(BaseModel):
 
 class BotModularSettings(BaseModel):
     voice_bot_mode: str = Field(..., example="modular")
-    deepgram_model: str = Field(..., example="nova-2-phone")
+    deepgram_model: str = Field(..., example="nova-2-phonecall")
     gemini_model: str = Field(..., example="gemini-1.5-flash")
     sarvam_model: str = Field(..., example="bulbul:v3")
     sarvam_speaker: str = Field(..., example="shubh")
