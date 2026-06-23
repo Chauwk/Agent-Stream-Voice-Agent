@@ -79,7 +79,31 @@ class ModularSalesBot:
         
         # 1. Initialize Gemini chat model
         try:
-            genai.configure(api_key=Config.GEMINI_API_KEY)
+            import os
+            gcp_key = os.getenv('GCP_SERVICE_ACCOUNT_KEY') or os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+            
+            # Autodetect in root directory if not specified in env
+            if not gcp_key:
+                for f in os.listdir('.'):
+                    if f.endswith('.json') and f.startswith('project-'):
+                        gcp_key = f
+                        break
+                        
+            if gcp_key and os.path.exists(gcp_key):
+                logger.info(f"🔑 Configuring Gemini with GCP Service Account: {gcp_key}")
+                from google.oauth2 import service_account
+                creds = service_account.Credentials.from_service_account_file(
+                    gcp_key,
+                    scopes=['https://www.googleapis.com/auth/generative-language']
+                )
+                # Remove GEMINI_API_KEY from environment to avoid conflicts
+                os.environ.pop('GEMINI_API_KEY', None)
+                os.environ.pop('GOOGLE_API_KEY', None)
+                genai.configure(credentials=creds)
+            else:
+                logger.info("🔑 Configuring Gemini with API Key")
+                genai.configure(api_key=Config.GEMINI_API_KEY)
+                
             system_instruction = (
                 f"You are {Config.SALES_BOT_NAME}, a friendly and professional voice sales representative for {Config.COMPANY_NAME}. "
                 "Your goal is to assist the caller warmly and concisely. Speak naturally, keep answers brief "
