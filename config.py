@@ -27,7 +27,7 @@ class Config:
     VOICE_BOT_MODE = os.getenv('VOICE_BOT_MODE', 'realtime').lower()
     
     DEEPGRAM_MODEL = os.getenv('DEEPGRAM_MODEL', 'nova-2-phonecall')
-    GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')
+    GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
     SARVAM_MODEL = os.getenv('SARVAM_MODEL', 'bulbul:v3')
     SARVAM_SPEAKER = os.getenv('SARVAM_SPEAKER', 'shubh')
     SARVAM_LANGUAGE_CODE = os.getenv('SARVAM_LANGUAGE_CODE', 'hi-IN')

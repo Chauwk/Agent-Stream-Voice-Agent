@@ -58,8 +58,8 @@ class BotConfigUpdateRequest(BaseModel):
     )
     gemini_model: Optional[str] = Field(
         None,
-        example="gemini-1.5-flash",
-        description="Active LLM model for Gemini (e.g. gemini-1.5-flash, gemini-1.5-pro)."
+        example="gemini-2.0-flash",
+        description="Active LLM model for Gemini (e.g. gemini-2.0-flash, gemini-2.5-flash)."
     )
     sarvam_model: Optional[str] = Field(
         None,
@@ -87,7 +87,7 @@ class BotOpenAISettings(BaseModel):
 class BotModularSettings(BaseModel):
     voice_bot_mode: str = Field(..., example="modular")
     deepgram_model: str = Field(..., example="nova-2-phonecall")
-    gemini_model: str = Field(..., example="gemini-1.5-flash")
+    gemini_model: str = Field(..., example="gemini-2.0-flash")
     sarvam_model: str = Field(..., example="bulbul:v3")
     sarvam_speaker: str = Field(..., example="shubh")
     sarvam_language_code: str = Field(..., example="hi-IN")
