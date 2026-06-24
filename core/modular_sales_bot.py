@@ -112,15 +112,24 @@ class ModularSalesBot:
                 logger.info("🔑 Configuring Gemini with API Key (AI Studio)")
                 client = genai.Client(api_key=Config.GEMINI_API_KEY)
                 
+            # Define the end_call tool closure
+            def end_call() -> str:
+                """Hang up the call when the conversation is finished, the customer says goodbye, or they want to end the call."""
+                logger.info(f"📞 Tool end_call invoked for call: {call_id}")
+                asyncio.create_task(self.delayed_hangup(call_id))
+                return "Call hangup initiated"
+
             system_instruction = (
                 f"You are {Config.SALES_BOT_NAME}, a friendly and professional voice sales representative for {Config.COMPANY_NAME}. "
                 "Your goal is to assist the caller warmly and concisely. Speak naturally, keep answers brief "
-                "(1-2 sentences max) as this is a real-time phone call. Do not use markdown like bold or bullet points."
+                "(1-2 sentences max) as this is a real-time phone call. Do not use markdown like bold or bullet points. "
+                "When the conversation is finished or the user says goodbye, call the end_call tool to disconnect the call."
             )
             chat_session = client.aio.chats.create(
                 model=Config.GEMINI_MODEL,
                 config={
-                    "system_instruction": system_instruction
+                    "system_instruction": system_instruction,
+                    "tools": [end_call]
                 }
             )
         except Exception as e:
@@ -454,3 +463,10 @@ class ModularSalesBot:
             del self.connections[call_id]
             
         logger.info(f"🧹 Cleanup complete for call: {call_id}")
+
+    async def delayed_hangup(self, call_id: str, delay_seconds: float = 3.0):
+        """Clean up and disconnect the SIP call after a short delay to let final speech frames finish playing"""
+        logger.info(f"⏳ Delayed hangup initiated for call {call_id} (delay: {delay_seconds}s)")
+        await asyncio.sleep(delay_seconds)
+        if self.sip_server:
+            await self.sip_server.cleanup_call(call_id)
