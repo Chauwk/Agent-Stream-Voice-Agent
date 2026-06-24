@@ -13,6 +13,7 @@ import websockets
 from google import genai
 from sarvamai import SarvamAI
 from config import Config
+from websockets.connection import State
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +206,7 @@ class ModularSalesBot:
             logger.info(f"DEBUG: Sent {self._chunk_stats[call_id]} audio chunks to Deepgram for call {call_id}")
             
         dg_ws = session_state.get("deepgram_ws")
-        if dg_ws and not dg_ws.closed:
+        if dg_ws and dg_ws.state == State.OPEN:
             try:
                 # Direct binary send of PCM16 data to Deepgram
                 await dg_ws.send(audio_chunk)
@@ -261,7 +262,7 @@ class ModularSalesBot:
                 if not session_state:
                     break
                 dg_ws = session_state.get("deepgram_ws")
-                if dg_ws and not dg_ws.closed:
+                if dg_ws and dg_ws.state == State.OPEN:
                     logger.info(f"⏳ Sending KeepAlive to Deepgram for call {call_id}")
                     await dg_ws.send(json.dumps({"type": "KeepAlive"}))
                 else:
@@ -442,7 +443,7 @@ class ModularSalesBot:
                 
         # Close Deepgram WebSocket
         dg_ws = session_state.get("deepgram_ws")
-        if dg_ws and not dg_ws.closed:
+        if dg_ws and dg_ws.state == State.OPEN:
             try:
                 await dg_ws.close()
             except Exception as e:
