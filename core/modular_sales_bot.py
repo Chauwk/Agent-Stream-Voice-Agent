@@ -149,8 +149,9 @@ class ModularSalesBot:
             dg_task = asyncio.create_task(self._handle_deepgram_responses(call_id))
             tts_process_task = asyncio.create_task(self._process_tts_queue(call_id))
             llm_process_task = asyncio.create_task(self._process_llm_queue(call_id))
+            dg_keepalive_task = asyncio.create_task(self._send_deepgram_keepalives(call_id))
             
-            session_state["tasks"].extend([dg_task, tts_process_task, llm_process_task])
+            session_state["tasks"].extend([dg_task, tts_process_task, llm_process_task, dg_keepalive_task])
             
             # Trigger initial greeting
             greeting_prompt = (
@@ -192,6 +193,17 @@ class ModularSalesBot:
         if not session_state:
             return
             
+        # Track chunk sending activity to verify PJSIP/Exotel audio stream is active
+        if not hasattr(self, "_chunk_stats"):
+            self._chunk_stats = {}
+        if call_id not in self._chunk_stats:
+            self._chunk_stats[call_id] = 0
+            logger.info(f"DEBUG: Started receiving audio chunks from PJSIP for call {call_id}")
+            
+        self._chunk_stats[call_id] += 1
+        if self._chunk_stats[call_id] % 100 == 0:
+            logger.info(f"DEBUG: Sent {self._chunk_stats[call_id]} audio chunks to Deepgram for call {call_id}")
+            
         dg_ws = session_state.get("deepgram_ws")
         if dg_ws and not dg_ws.closed:
             try:
@@ -231,10 +243,33 @@ class ModularSalesBot:
                         # Forward transcription text to the LLM processor queue
                         await session_state["llm_queue"].put(transcript)
                         
-        except websockets.exceptions.ConnectionClosed:
-            logger.info(f"🔌 Deepgram connection closed for call {call_id}")
+        except websockets.exceptions.ConnectionClosed as e:
+            logger.info(f"🔌 Deepgram connection closed for call {call_id}: code={e.code}, reason='{e.reason}'")
         except Exception as e:
             logger.error(f"❌ Error handling Deepgram messages for call {call_id}: {e}")
+
+    async def _send_deepgram_keepalives(self, call_id: str):
+        """Sends periodic KeepAlive messages to Deepgram to prevent inactivity timeouts"""
+        session_state = self.connections.get(call_id)
+        if not session_state:
+            return
+            
+        try:
+            while True:
+                await asyncio.sleep(4)
+                session_state = self.connections.get(call_id)
+                if not session_state:
+                    break
+                dg_ws = session_state.get("deepgram_ws")
+                if dg_ws and not dg_ws.closed:
+                    logger.info(f"⏳ Sending KeepAlive to Deepgram for call {call_id}")
+                    await dg_ws.send(json.dumps({"type": "KeepAlive"}))
+                else:
+                    break
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"❌ Error sending Deepgram KeepAlive: {e}")
 
     async def _process_llm_queue(self, call_id: str):
         """Listens for user transcripts, queries Gemini 1.5, and pushes sentence blocks to the TTS queue"""
