@@ -10,7 +10,7 @@ import logging
 import time
 import base64
 import websockets
-import google.generativeai as genai
+from google import genai
 from sarvamai import SarvamAI
 from config import Config
 
@@ -80,6 +80,7 @@ class ModularSalesBot:
         # 1. Initialize Gemini chat model
         try:
             import os
+            import json
             gcp_key = os.getenv('GCP_SERVICE_ACCOUNT_KEY') or os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
             
             # Autodetect in root directory if not specified in env
@@ -90,30 +91,37 @@ class ModularSalesBot:
                         break
                         
             if gcp_key and os.path.exists(gcp_key):
-                logger.info(f"🔑 Configuring Gemini with GCP Service Account: {gcp_key}")
+                logger.info(f"🔑 Configuring Gemini with GCP Service Account (Vertex AI): {gcp_key}")
                 from google.oauth2 import service_account
                 creds = service_account.Credentials.from_service_account_file(
                     gcp_key,
-                    scopes=['https://www.googleapis.com/auth/generative-language']
+                    scopes=['https://www.googleapis.com/auth/cloud-platform']
                 )
-                # Remove GEMINI_API_KEY from environment to avoid conflicts
-                os.environ.pop('GEMINI_API_KEY', None)
-                os.environ.pop('GOOGLE_API_KEY', None)
-                genai.configure(credentials=creds)
+                with open(gcp_key, 'r') as f:
+                    key_data = json.load(f)
+                project_id = key_data.get('project_id')
+                
+                client = genai.Client(
+                    vertexai=True,
+                    project=project_id,
+                    location="us-central1",
+                    credentials=creds
+                )
             else:
-                logger.info("🔑 Configuring Gemini with API Key")
-                genai.configure(api_key=Config.GEMINI_API_KEY)
+                logger.info("🔑 Configuring Gemini with API Key (AI Studio)")
+                client = genai.Client(api_key=Config.GEMINI_API_KEY)
                 
             system_instruction = (
                 f"You are {Config.SALES_BOT_NAME}, a friendly and professional voice sales representative for {Config.COMPANY_NAME}. "
                 "Your goal is to assist the caller warmly and concisely. Speak naturally, keep answers brief "
                 "(1-2 sentences max) as this is a real-time phone call. Do not use markdown like bold or bullet points."
             )
-            llm_model = genai.GenerativeModel(
-                model_name=Config.GEMINI_MODEL,
-                system_instruction=system_instruction
+            chat_session = client.aio.chats.create(
+                model=Config.GEMINI_MODEL,
+                config={
+                    "system_instruction": system_instruction
+                }
             )
-            chat_session = llm_model.start_chat(history=[])
         except Exception as e:
             logger.error(f"❌ Failed to configure Gemini: {e}")
             raise
@@ -250,7 +258,7 @@ class ModularSalesBot:
                 
                 try:
                     # Async stream Gemini response
-                    response = await chat_session.send_message_async(prompt, stream=True)
+                    response = await chat_session.send_message_stream(prompt)
                     current_sentence = ""
                     
                     async for chunk in response:
