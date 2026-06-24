@@ -113,7 +113,7 @@ class ModularSalesBot:
                 client = genai.Client(api_key=Config.GEMINI_API_KEY)
                 
             # Define the end_call tool closure
-            def end_call() -> str:
+            async def end_call() -> str:
                 """Hang up the call when the conversation is finished, the customer says goodbye, or they want to end the call."""
                 logger.info(f"📞 Tool end_call invoked for call: {call_id}")
                 asyncio.create_task(self.delayed_hangup(call_id))
