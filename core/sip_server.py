@@ -59,6 +59,12 @@ class OpenAIAudioPort(AudioMediaPortBase):
     def onFrameReceived(self, frame):
         """Called by PJSUA2 when a recorded frame (RTP) is received from the caller"""
         try:
+            if not hasattr(self, "_rx_count"):
+                self._rx_count = 0
+            self._rx_count += 1
+            if self._rx_count % 100 == 0:
+                logger.info(f"DEBUG: onFrameReceived called {self._rx_count} times for call {self.call_id}")
+
             call_state = self.sip_server.sip_calls.get(self.call_id)
             if call_state and call_state.openai_connected:
                 # Get the raw PCM16 bytes from the SWIG ByteVector
