@@ -496,7 +496,6 @@ class ModularSalesBot:
                     # Verify again that context has not changed while API request was running
                     if context_id != session_state["current_context_id"]:
                         logger.info(f"🚫 Context changed during TTS gen. Discarding output for: '{sentence_text}'")
-                        tts_queue.task_done()
                         continue
                         
                     if response and response.audios:
