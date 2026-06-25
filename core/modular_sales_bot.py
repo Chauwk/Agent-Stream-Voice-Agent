@@ -11,7 +11,7 @@ import time
 import base64
 import websockets
 from google import genai
-from sarvamai import SarvamAI
+from sarvamai import SarvamAI, AsyncSarvamAI
 from config import Config
 from websockets.connection import State
 
@@ -27,9 +27,33 @@ class ModularSalesBot:
         # Connections state map: call_id -> session state
         self.connections = {}
         
-        # Initialize Sarvam Client
-        self.sarvam_client = SarvamAI(api_subscription_key=Config.SARVAM_API_KEY)
+        # Initialize Sarvam Clients
+        self.sync_sarvam_client = SarvamAI(api_subscription_key=Config.SARVAM_API_KEY)
+        self.sarvam_client = AsyncSarvamAI(api_subscription_key=Config.SARVAM_API_KEY)
         
+        # Pre-generate default greeting audio at startup
+        self.cached_greeting_text = f"Hello! Thank you for calling {Config.COMPANY_NAME}. How can I help you today?"
+        self.cached_greeting_audio = None
+        
+        try:
+            logger.info("⏳ Pre-generating and caching startup greeting audio...")
+            response = self.sync_sarvam_client.text_to_speech.convert(
+                text=self.cached_greeting_text,
+                target_language_code=Config.SARVAM_LANGUAGE_CODE,
+                speaker=Config.SARVAM_SPEAKER,
+                model=Config.SARVAM_MODEL,
+                output_audio_codec="linear16",
+                speech_sample_rate=16000
+            )
+            if response and response.audios:
+                base64_audio = response.audios[0]
+                self.cached_greeting_audio = base64.b64decode(base64_audio)
+                logger.info("✅ Startup greeting audio cached successfully!")
+            else:
+                logger.error("❌ Failed to cache greeting: Empty response from Sarvam")
+        except Exception as e:
+            logger.error(f"❌ Failed to pre-generate greeting: {e}")
+            
         logger.info("🤖 Modular Voice Bot Engine Initialized")
         logger.info(f"   🎙️ STT Model (Deepgram): {Config.DEEPGRAM_MODEL}")
         logger.info(f"   🧠 LLM Model (Gemini): {Config.GEMINI_MODEL}")
@@ -92,7 +116,7 @@ class ModularSalesBot:
                         break
                         
             if gcp_key and os.path.exists(gcp_key):
-                logger.info(f"🔑 Configuring Gemini with GCP Service Account (Vertex AI): {gcp_key}")
+                logger.info(f"🔑 Configuring Gemini with GCP Service Account (Vertex AI asia-south1): {gcp_key}")
                 from google.oauth2 import service_account
                 creds = service_account.Credentials.from_service_account_file(
                     gcp_key,
@@ -105,7 +129,7 @@ class ModularSalesBot:
                 client = genai.Client(
                     vertexai=True,
                     project=project_id,
-                    location="us-central1",
+                    location="asia-south1",
                     credentials=creds
                 )
             else:
@@ -125,8 +149,22 @@ class ModularSalesBot:
                 "(1-2 sentences max) as this is a real-time phone call. Do not use markdown like bold or bullet points. "
                 "When the conversation is finished or the user says goodbye, call the end_call tool to disconnect the call."
             )
+            
+            from google.genai import types
+            history = [
+                types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text="A customer just called our sales line. Please greet them warmly and ask how you can help them today.")]
+                ),
+                types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(text=self.cached_greeting_text)]
+                )
+            ]
+            
             chat_session = client.aio.chats.create(
                 model=Config.GEMINI_MODEL,
+                history=history,
                 config={
                     "system_instruction": system_instruction,
                     "tools": [end_call]
@@ -163,12 +201,11 @@ class ModularSalesBot:
             
             session_state["tasks"].extend([dg_task, tts_process_task, llm_process_task, dg_keepalive_task])
             
-            # Trigger initial greeting
-            greeting_prompt = (
-                "A customer just called our sales line. "
-                "Please greet them warmly and ask how you can help them today."
-            )
-            await session_state["llm_queue"].put(greeting_prompt)
+            # Trigger initial greeting instantly from cache
+            if self.cached_greeting_audio:
+                logger.info(f"🗣️ Playing cached greeting for call: {call_id}")
+                if self.sip_server:
+                    await self.sip_server.send_audio_to_rtp(call_id, self.cached_greeting_audio)
             
         except Exception as e:
             logger.error(f"❌ Failed to initialize modular pipeline sockets: {e}")
@@ -316,10 +353,11 @@ class ModularSalesBot:
                         if text_delta:
                             current_sentence += text_delta
                             
-                            # Split by sentence boundaries (., ?, !, \n)
+                            # Split by sentence boundaries (., ?, !, \n) or clause boundaries (,, ;)
                             while True:
                                 idx = -1
-                                for p in ['.', '?', '!', '\n']:
+                                punctuations = ['.', '?', '!', '\n', ',', ';']
+                                for p in punctuations:
                                     p_idx = current_sentence.find(p)
                                     if p_idx != -1:
                                         if idx == -1 or p_idx < idx:
@@ -328,6 +366,28 @@ class ModularSalesBot:
                                 if idx == -1:
                                     break
                                     
+                                split_char = current_sentence[idx]
+                                chunk_candidate = current_sentence[:idx+1].strip()
+                                
+                                # For commas or semicolons, enforce a minimum length threshold to avoid tiny fragments
+                                if split_char in [',', ';']:
+                                    words = chunk_candidate.split()
+                                    if len(words) < 3 or len(chunk_candidate) < 15:
+                                        # Skip this boundary and look for the next punctuation
+                                        next_idx = -1
+                                        for p in punctuations:
+                                            p_idx = current_sentence.find(p, idx + 1)
+                                            if p_idx != -1:
+                                                if next_idx == -1 or p_idx < next_idx:
+                                                    next_idx = p_idx
+                                        if next_idx != -1:
+                                            idx = next_idx
+                                            split_char = current_sentence[idx]
+                                            chunk_candidate = current_sentence[:idx+1].strip()
+                                        else:
+                                            # No further punctuation in current buffer, wait for more stream tokens
+                                            break
+                                            
                                 sentence_to_send = current_sentence[:idx+1].strip()
                                 current_sentence = current_sentence[idx+1:]
                                 
@@ -347,13 +407,12 @@ class ModularSalesBot:
             pass
 
     async def _process_tts_queue(self, call_id: str):
-        """Listens for sentences and invokes Sarvam AI TTS in a thread pool executor"""
+        """Listens for sentences and invokes Sarvam AI TTS asynchronously"""
         session_state = self.connections.get(call_id)
         if not session_state:
             return
             
         tts_queue = session_state["tts_queue"]
-        loop = asyncio.get_running_loop()
         
         try:
             while True:
@@ -371,17 +430,14 @@ class ModularSalesBot:
                 logger.info(f"🔊 Requesting Sarvam TTS for sentence: '{sentence_text}'")
                 
                 try:
-                    # Run the synchronous client call in a thread executor
-                    response = await loop.run_in_executor(
-                        None,
-                        lambda: self.sarvam_client.text_to_speech.convert(
-                            text=sentence_text,
-                            target_language_code=Config.SARVAM_LANGUAGE_CODE,
-                            speaker=Config.SARVAM_SPEAKER,
-                            model=Config.SARVAM_MODEL,
-                            output_audio_codec="linear16",
-                            speech_sample_rate=16000
-                        )
+                    # Run the native async client call directly
+                    response = await self.sarvam_client.text_to_speech.convert(
+                        text=sentence_text,
+                        target_language_code=Config.SARVAM_LANGUAGE_CODE,
+                        speaker=Config.SARVAM_SPEAKER,
+                        model=Config.SARVAM_MODEL,
+                        output_audio_codec="linear16",
+                        speech_sample_rate=16000
                     )
                     
                     # Verify again that context has not changed while API request was running
