@@ -267,7 +267,7 @@ class ModularSalesBot:
         session_state = self.connections[call_id]
         
         # Deepgram Live WS config - boost company and bot name keywords
-        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&encoding=linear16&sample_rate=16000&channels=1&endpointing=180&interim_results=false&keywords=Chauwk:4.0&keywords=Sarah:2.0"
+        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&encoding=linear16&sample_rate=16000&channels=1&endpointing=450&vad_events=true&interim_results=false&keywords=Chauwk:4.0&keywords=Sarah:2.0"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
         import inspect
@@ -322,7 +322,7 @@ class ModularSalesBot:
                 
                 # Check for speech detection to handle quick interruptions
                 is_final = data.get("is_final", False)
-                speech_started = data.get("speech_started", False)
+                speech_started = (data.get("type") == "SpeechStarted")
                 
                 if speech_started and not session_state["user_speaking"]:
                     session_state["user_speaking"] = True
