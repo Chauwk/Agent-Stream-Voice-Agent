@@ -34,6 +34,9 @@ class ModularSalesBot:
         # Pre-generate default greeting audio at startup
         self.cached_greeting_text = f"Hello! Thank you for calling {Config.COMPANY_NAME}. How can I help you today?"
         self.cached_greeting_audio = None
+        self.cached_speaker = Config.SARVAM_SPEAKER
+        self.cached_company = Config.COMPANY_NAME
+        self.cached_language = Config.SARVAM_LANGUAGE_CODE
         
         try:
             logger.info("⏳ Pre-generating and caching startup greeting audio...")
@@ -95,12 +98,47 @@ class ModularSalesBot:
             if self.sip_server:
                 await self.sip_server.stop()
 
+    async def _check_and_update_greeting(self):
+        """Regenerate greeting audio asynchronously if configuration has changed"""
+        current_text = f"Hello! Thank you for calling {Config.COMPANY_NAME}. How can I help you today?"
+        if (self.cached_greeting_audio is None or 
+            self.cached_speaker != Config.SARVAM_SPEAKER or
+            self.cached_company != Config.COMPANY_NAME or
+            self.cached_language != Config.SARVAM_LANGUAGE_CODE or
+            self.cached_greeting_text != current_text):
+            
+            logger.info(f"🔄 Dynamic Voice Config changed! Regenerating greeting audio for speaker '{Config.SARVAM_SPEAKER}'...")
+            try:
+                response = await self.sarvam_client.text_to_speech.convert(
+                    text=current_text,
+                    target_language_code=Config.SARVAM_LANGUAGE_CODE,
+                    speaker=Config.SARVAM_SPEAKER,
+                    model=Config.SARVAM_MODEL,
+                    output_audio_codec="linear16",
+                    speech_sample_rate=16000
+                )
+                if response and response.audios:
+                    base64_audio = response.audios[0]
+                    self.cached_greeting_audio = base64.b64decode(base64_audio)
+                    self.cached_greeting_text = current_text
+                    self.cached_speaker = Config.SARVAM_SPEAKER
+                    self.cached_company = Config.COMPANY_NAME
+                    self.cached_language = Config.SARVAM_LANGUAGE_CODE
+                    logger.info(f"✅ Dynamic greeting audio regenerated successfully for {Config.SARVAM_SPEAKER}!")
+                else:
+                    logger.error("❌ Failed to regenerate greeting: Empty response from Sarvam")
+            except Exception as e:
+                logger.error(f"❌ Failed to regenerate greeting audio: {e}")
+
     async def connect_to_openai_enhanced(self, call_id: str):
         """
         Setup modular connection endpoints (Deepgram, Gemini, Sarvam) for the call session.
         Method name matches the SIP server interface call for backward compatibility.
         """
         logger.info(f"🔗 INITIALIZING MODULAR PIPELINE for call: {call_id}")
+        
+        # 0. Regenerate greeting audio if config was dynamically updated
+        await self._check_and_update_greeting()
         
         # 1. Initialize Gemini chat model
         try:
