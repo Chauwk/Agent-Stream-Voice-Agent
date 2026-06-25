@@ -145,8 +145,9 @@ class ModularSalesBot:
 
             system_instruction = (
                 f"You are {Config.SALES_BOT_NAME}, a friendly and professional voice sales representative for {Config.COMPANY_NAME}. "
-                "Your goal is to assist the caller warmly and concisely. Speak naturally, keep answers brief "
-                "(1-2 sentences max) as this is a real-time phone call. Do not use markdown like bold or bullet points. "
+                "Your goal is to assist the caller warmly and concisely. Speak naturally as this is a real-time phone call. "
+                "CRITICAL: Keep your responses extremely short. Use a maximum of 10 words per sentence, and a maximum of 15 words total. "
+                "Never output long lists. Ask clarifying questions instead of giving long descriptions. Do not use markdown (bold, bullet points). "
                 "When the conversation is finished or the user says goodbye, call the end_call tool to disconnect the call."
             )
             
@@ -183,7 +184,9 @@ class ModularSalesBot:
             "is_bot_speaking": False,
             "current_context_id": None,
             "llm_queue": asyncio.Queue(),  # Queue to pass text prompts to LLM
-            "tts_queue": asyncio.Queue()   # Queue to pass text chunks to TTS
+            "tts_queue": asyncio.Queue(),  # Queue to pass text chunks to TTS
+            "current_llm_task": None,      # Active Gemini generation task
+            "current_tts_task": None       # Active TTS API task
         }
         
         # 3. Connect to WebSockets
@@ -217,7 +220,7 @@ class ModularSalesBot:
         session_state = self.connections[call_id]
         
         # Deepgram Live WS config
-        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&encoding=linear16&sample_rate=16000&channels=1&endpointing=300&interim_results=false"
+        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&encoding=linear16&sample_rate=16000&channels=1&endpointing=250&interim_results=false"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
         import inspect
@@ -319,7 +322,7 @@ class ModularSalesBot:
             logger.error(f"❌ Error sending Deepgram KeepAlive: {e}")
 
     async def _process_llm_queue(self, call_id: str):
-        """Listens for user transcripts, queries Gemini 1.5, and pushes sentence blocks to the TTS queue"""
+        """Listens for user transcripts, queries Gemini, and pushes sentence blocks to the TTS queue"""
         session_state = self.connections.get(call_id)
         if not session_state:
             return
@@ -338,69 +341,77 @@ class ModularSalesBot:
                 context_id = f"ctx_{int(time.time() * 1000)}"
                 session_state["current_context_id"] = context_id
                 
-                try:
-                    # Async stream Gemini response
-                    response = await chat_session.send_message_stream(prompt)
-                    current_sentence = ""
-                    
-                    async for chunk in response:
-                        # If user started speaking during generation, break immediately
-                        if session_state["user_speaking"]:
-                            logger.info("🧠 Gemini generation interrupted by customer.")
-                            break
+                # Inner function to stream Gemini response and parse sentences
+                async def run_gemini():
+                    try:
+                        response = await chat_session.send_message_stream(prompt)
+                        current_sentence = ""
                         
-                        text_delta = chunk.text
-                        if text_delta:
-                            current_sentence += text_delta
+                        async for chunk in response:
+                            if session_state["user_speaking"]:
+                                logger.info("🧠 Gemini generation interrupted by customer.")
+                                break
                             
-                            # Split by sentence boundaries (., ?, !, \n) or clause boundaries (,, ;)
-                            while True:
-                                idx = -1
-                                punctuations = ['.', '?', '!', '\n', ',', ';']
-                                for p in punctuations:
-                                    p_idx = current_sentence.find(p)
-                                    if p_idx != -1:
-                                        if idx == -1 or p_idx < idx:
-                                            idx = p_idx
-                                            
-                                if idx == -1:
-                                    break
-                                    
-                                split_char = current_sentence[idx]
-                                chunk_candidate = current_sentence[:idx+1].strip()
+                            text_delta = chunk.text
+                            if text_delta:
+                                current_sentence += text_delta
                                 
-                                # For commas or semicolons, enforce a minimum length threshold to avoid tiny fragments
-                                if split_char in [',', ';']:
-                                    words = chunk_candidate.split()
-                                    if len(words) < 3 or len(chunk_candidate) < 15:
-                                        # Skip this boundary and look for the next punctuation
-                                        next_idx = -1
-                                        for p in punctuations:
-                                            p_idx = current_sentence.find(p, idx + 1)
-                                            if p_idx != -1:
-                                                if next_idx == -1 or p_idx < next_idx:
-                                                    next_idx = p_idx
-                                        if next_idx != -1:
-                                            idx = next_idx
-                                            split_char = current_sentence[idx]
-                                            chunk_candidate = current_sentence[:idx+1].strip()
-                                        else:
-                                            # No further punctuation in current buffer, wait for more stream tokens
-                                            break
-                                            
-                                sentence_to_send = current_sentence[:idx+1].strip()
-                                current_sentence = current_sentence[idx+1:]
-                                
-                                if sentence_to_send:
-                                    await tts_queue.put((context_id, sentence_to_send))
+                                # Split by sentence boundaries (., ?, !, \n) or clause boundaries (,, ;)
+                                while True:
+                                    idx = -1
+                                    punctuations = ['.', '?', '!', '\n', ',', ';']
+                                    for p in punctuations:
+                                        p_idx = current_sentence.find(p)
+                                        if p_idx != -1:
+                                            if idx == -1 or p_idx < idx:
+                                                idx = p_idx
+                                                
+                                    if idx == -1:
+                                        break
+                                        
+                                    split_char = current_sentence[idx]
+                                    chunk_candidate = current_sentence[:idx+1].strip()
                                     
-                    # Send any remaining text
-                    if current_sentence.strip() and not session_state["user_speaking"]:
-                        await tts_queue.put((context_id, current_sentence.strip()))
-                    
+                                    # For commas or semicolons, enforce a minimum length threshold to avoid tiny fragments
+                                    if split_char in [',', ';']:
+                                        words = chunk_candidate.split()
+                                        if len(words) < 3 or len(chunk_candidate) < 15:
+                                            next_idx = -1
+                                            for p in punctuations:
+                                                p_idx = current_sentence.find(p, idx + 1)
+                                                if p_idx != -1:
+                                                    if next_idx == -1 or p_idx < next_idx:
+                                                        next_idx = p_idx
+                                            if next_idx != -1:
+                                                idx = next_idx
+                                                split_char = current_sentence[idx]
+                                                chunk_candidate = current_sentence[:idx+1].strip()
+                                            else:
+                                                break
+                                                
+                                    sentence_to_send = current_sentence[:idx+1].strip()
+                                    current_sentence = current_sentence[idx+1:]
+                                    
+                                    if sentence_to_send:
+                                        await tts_queue.put((context_id, sentence_to_send))
+                                        
+                        if current_sentence.strip() and not session_state["user_speaking"]:
+                            await tts_queue.put((context_id, current_sentence.strip()))
+                    except Exception as e:
+                        logger.error(f"❌ Gemini generation error inside task: {e}")
+                        raise
+
+                llm_task = asyncio.create_task(run_gemini())
+                session_state["current_llm_task"] = llm_task
+                
+                try:
+                    await llm_task
+                except asyncio.CancelledError:
+                    logger.info(f"🧠 Gemini generation task was cancelled for context: {context_id}")
                 except Exception as e:
-                    logger.error(f"❌ Gemini generation error: {e}")
+                    logger.error(f"❌ Gemini generation task failed: {e}")
                 finally:
+                    session_state["current_llm_task"] = None
                     llm_queue.task_done()
                     
         except asyncio.CancelledError:
@@ -430,8 +441,8 @@ class ModularSalesBot:
                 logger.info(f"🔊 Requesting Sarvam TTS for sentence: '{sentence_text}'")
                 
                 try:
-                    # Run the native async client call directly
-                    response = await self.sarvam_client.text_to_speech.convert(
+                    # Run the native async client call directly, wrapped in a task to make it cancellable
+                    tts_coro = self.sarvam_client.text_to_speech.convert(
                         text=sentence_text,
                         target_language_code=Config.SARVAM_LANGUAGE_CODE,
                         speaker=Config.SARVAM_SPEAKER,
@@ -439,6 +450,10 @@ class ModularSalesBot:
                         output_audio_codec="linear16",
                         speech_sample_rate=16000
                     )
+                    tts_task = asyncio.create_task(tts_coro)
+                    session_state["current_tts_task"] = tts_task
+                    
+                    response = await tts_task
                     
                     # Verify again that context has not changed while API request was running
                     if context_id != session_state["current_context_id"]:
@@ -457,16 +472,19 @@ class ModularSalesBot:
                     else:
                         logger.error(f"❌ Empty or invalid response from Sarvam AI for: '{sentence_text}'")
                         
+                except asyncio.CancelledError:
+                    logger.info(f"🚫 TTS conversion task was cancelled for context: {context_id}")
                 except Exception as e:
                     logger.error(f"❌ Error generating TTS from Sarvam AI: {e}")
-                    
-                tts_queue.task_done()
+                finally:
+                    session_state["current_tts_task"] = None
+                    tts_queue.task_done()
                 
         except asyncio.CancelledError:
             pass
 
     async def _handle_customer_interruption(self, call_id: str):
-        """Immediately stops bot speaking and clears PJSIP queues on customer interruption"""
+        """Immediately stops bot speaking and cancels active Gemini/TTS requests on customer interruption"""
         session_state = self.connections.get(call_id)
         if not session_state:
             return
@@ -477,7 +495,19 @@ class ModularSalesBot:
         session_state["current_context_id"] = None
         session_state["is_bot_speaking"] = False
         
-        # 2. Flush PJSIP playout buffer
+        # 2. Cancel active LLM task immediately
+        active_llm = session_state.get("current_llm_task")
+        if active_llm and not active_llm.done():
+            active_llm.cancel()
+            logger.info(f"🚫 Active LLM task cancelled for call {call_id}")
+            
+        # 3. Cancel active TTS task immediately
+        active_tts = session_state.get("current_tts_task")
+        if active_tts and not active_tts.done():
+            active_tts.cancel()
+            logger.info(f"🚫 Active TTS task cancelled for call {call_id}")
+        
+        # 4. Flush PJSIP playout buffer
         if self.sip_server:
             call_state = self.sip_server.sip_calls.get(call_id)
             if call_state:
@@ -485,7 +515,7 @@ class ModularSalesBot:
                 call_state.is_playing = False
                 logger.info(f"🔇 SIP playout buffer cleared for call {call_id}")
                 
-        # 3. Clear pending TTS queue
+        # 5. Clear pending TTS queue
         while not session_state["tts_queue"].empty():
             try:
                 session_state["tts_queue"].get_nowait()
