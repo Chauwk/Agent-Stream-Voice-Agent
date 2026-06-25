@@ -224,6 +224,7 @@ class ModularSalesBot:
         self.connections[call_id] = {
             "chat_session": chat_session,
             "deepgram_ws": None,
+            "sarvam_ws": None,
             "tasks": [],
             "user_speaking": False,
             "is_bot_speaking": False,
@@ -252,8 +253,9 @@ class ModularSalesBot:
             tts_process_task = asyncio.create_task(self._process_tts_queue(call_id))
             llm_process_task = asyncio.create_task(self._process_llm_queue(call_id))
             dg_keepalive_task = asyncio.create_task(self._send_deepgram_keepalives(call_id))
+            sarvam_ws_task = asyncio.create_task(self._run_sarvam_websocket_loop(call_id))
             
-            session_state["tasks"].extend([dg_task, tts_process_task, llm_process_task, dg_keepalive_task])
+            session_state["tasks"].extend([dg_task, tts_process_task, llm_process_task, dg_keepalive_task, sarvam_ws_task])
             
         except Exception as e:
             logger.error(f"❌ Failed to initialize modular pipeline sockets: {e}")
@@ -265,7 +267,7 @@ class ModularSalesBot:
         session_state = self.connections[call_id]
         
         # Deepgram Live WS config - boost company and bot name keywords
-        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&encoding=linear16&sample_rate=16000&channels=1&endpointing=250&interim_results=false&keywords=Chauwk:4.0&keywords=Sarah:2.0"
+        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&encoding=linear16&sample_rate=16000&channels=1&endpointing=180&interim_results=false&keywords=Chauwk:4.0&keywords=Sarah:2.0"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
         import inspect
@@ -462,8 +464,69 @@ class ModularSalesBot:
         except asyncio.CancelledError:
             pass
 
+    async def _run_sarvam_websocket_loop(self, call_id: str):
+        """Manages a persistent connection to the Sarvam AI TTS WebSocket"""
+        session_state = self.connections.get(call_id)
+        if not session_state:
+            return
+            
+        logger.info(f"🔊 Starting persistent Sarvam AI WebSocket connection manager for call {call_id}...")
+        
+        while True:
+            # Check if session is still active
+            session_state = self.connections.get(call_id)
+            if not session_state:
+                break
+                
+            try:
+                logger.info(f"🔊 Connecting to Sarvam AI TTS WebSocket (model bulbul:v3) for call {call_id}...")
+                async with self.sarvam_client.text_to_speech_streaming.connect(
+                    model=Config.SARVAM_MODEL,
+                    send_completion_event="true"
+                ) as socket_client:
+                    logger.info(f"🔊 Configuring Sarvam AI TTS WebSocket for call {call_id}...")
+                    await socket_client.configure(
+                        target_language_code=Config.SARVAM_LANGUAGE_CODE,
+                        speaker=Config.SARVAM_SPEAKER,
+                        speech_sample_rate=16000,
+                        output_audio_codec="linear16"
+                    )
+                    
+                    session_state["sarvam_ws"] = socket_client
+                    logger.info(f"🔊 Sarvam AI WebSocket is ready for call {call_id}.")
+                    
+                    # Connection keep-alive ping loop
+                    while True:
+                        await asyncio.sleep(20)
+                        session_state = self.connections.get(call_id)
+                        if not session_state or session_state.get("sarvam_ws") != socket_client:
+                            break
+                        if not socket_client._websocket.open:
+                            break
+                            
+                        # Send ping
+                        try:
+                            await socket_client.ping()
+                        except Exception as ping_err:
+                            logger.error(f"❌ Error pinging Sarvam WebSocket: {ping_err}")
+                            break
+                            
+            except asyncio.CancelledError:
+                logger.info(f"🔊 Sarvam AI WebSocket loop cancelled for call {call_id}")
+                break
+            except Exception as e:
+                logger.error(f"❌ Sarvam AI WebSocket connection error for call {call_id}: {e}")
+                
+            # Clear socket in session if connection failed/closed
+            session_state = self.connections.get(call_id)
+            if session_state and session_state.get("sarvam_ws") is not None:
+                session_state["sarvam_ws"] = None
+                
+            # Wait 1.5 seconds before retrying connection
+            await asyncio.sleep(1.5)
+
     async def _process_tts_queue(self, call_id: str):
-        """Listens for sentences and invokes Sarvam AI TTS asynchronously"""
+        """Listens for sentences and invokes Sarvam AI TTS asynchronously (supports WebSocket-streaming)"""
         session_state = self.connections.get(call_id)
         if not session_state:
             return
@@ -483,47 +546,106 @@ class ModularSalesBot:
                     tts_queue.task_done()
                     continue
                 
-                logger.info(f"🔊 Requesting Sarvam TTS for sentence: '{sentence_text}'")
+                logger.info(f"🔊 Processing TTS for sentence: '{sentence_text}'")
                 
-                try:
-                    # Run the native async client call directly, wrapped in a task to make it cancellable
-                    tts_coro = self.sarvam_client.text_to_speech.convert(
-                        text=sentence_text,
-                        target_language_code=Config.SARVAM_LANGUAGE_CODE,
-                        speaker=Config.SARVAM_SPEAKER,
-                        model=Config.SARVAM_MODEL,
-                        output_audio_codec="linear16",
-                        speech_sample_rate=16000
-                    )
-                    tts_task = asyncio.create_task(tts_coro)
-                    session_state["current_tts_task"] = tts_task
-                    
-                    response = await tts_task
-                    
-                    # Verify again that context has not changed while API request was running
+                # Attempt to get Sarvam WebSocket connection
+                sarvam_ws = session_state.get("sarvam_ws")
+                if not sarvam_ws or not sarvam_ws._websocket.open:
+                    logger.info("⏳ Sarvam WebSocket not ready. Waiting for connection...")
+                    for _ in range(30): # Wait up to 3.0 seconds
+                        await asyncio.sleep(0.1)
+                        # Check context invalidation during wait
+                        if context_id != session_state["current_context_id"]:
+                            break
+                        sarvam_ws = session_state.get("sarvam_ws")
+                        if sarvam_ws and sarvam_ws._websocket.open:
+                            break
+                
+                # Fallback to HTTP POST TTS if WebSocket is not ready
+                if not sarvam_ws or not sarvam_ws._websocket.open or context_id != session_state["current_context_id"]:
                     if context_id != session_state["current_context_id"]:
-                        logger.info(f"🚫 Context changed during TTS gen. Discarding output for: '{sentence_text}'")
+                        tts_queue.task_done()
                         continue
                         
-                    if response and response.audios:
-                        base64_audio = response.audios[0]
-                        pcm_audio = base64.b64decode(base64_audio)
+                    logger.warning("⚠️ Sarvam WebSocket not available. Falling back to HTTP TTS.")
+                    try:
+                        tts_coro = self.sarvam_client.text_to_speech.convert(
+                            text=sentence_text,
+                            target_language_code=Config.SARVAM_LANGUAGE_CODE,
+                            speaker=Config.SARVAM_SPEAKER,
+                            model=Config.SARVAM_MODEL,
+                            output_audio_codec="linear16",
+                            speech_sample_rate=16000
+                        )
+                        tts_task = asyncio.create_task(tts_coro)
+                        session_state["current_tts_task"] = tts_task
                         
-                        logger.info(f"🗣️ SARAH SPEAKING: {sentence_text}")
+                        response = await tts_task
                         
-                        if self.sip_server:
-                            await self.sip_server.send_audio_to_rtp(call_id, pcm_audio)
-                    else:
-                        logger.error(f"❌ Empty or invalid response from Sarvam AI for: '{sentence_text}'")
+                        if context_id != session_state["current_context_id"]:
+                            logger.info(f"🚫 Context changed during HTTP TTS. Discarding output.")
+                            continue
+                            
+                        if response and response.audios:
+                            base64_audio = response.audios[0]
+                            pcm_audio = base64.b64decode(base64_audio)
+                            logger.info(f"🗣️ SARAH SPEAKING (HTTP): {sentence_text}")
+                            if self.sip_server:
+                                await self.sip_server.send_audio_to_rtp(call_id, pcm_audio)
+                        else:
+                            logger.error(f"❌ Empty response from HTTP TTS for: '{sentence_text}'")
+                    except asyncio.CancelledError:
+                        logger.info(f"🚫 HTTP TTS task cancelled for context: {context_id}")
+                    except Exception as e:
+                        logger.error(f"❌ HTTP TTS failed: {e}")
+                    finally:
+                        session_state["current_tts_task"] = None
+                        tts_queue.task_done()
+                    continue
+                
+                # If we get here, WebSocket is available!
+                try:
+                    async def run_websocket_tts():
+                        # Send text chunks
+                        await sarvam_ws.convert(sentence_text)
+                        await sarvam_ws.flush()
                         
+                        # Receive and stream back audio chunks
+                        logger.info(f"🗣️ SARAH SPEAKING (WS Streaming): {sentence_text}")
+                        while True:
+                            response = await sarvam_ws.recv()
+                            
+                            # Verify context hasn't changed
+                            if context_id != session_state["current_context_id"]:
+                                break
+                                
+                            if response.type == 'audio':
+                                base64_audio = response.data.audio
+                                pcm_audio = base64.b64decode(base64_audio)
+                                if self.sip_server:
+                                    await self.sip_server.send_audio_to_rtp(call_id, pcm_audio)
+                            elif response.type == 'event':
+                                if getattr(response.data, 'event_type', None) == 'final':
+                                    break
+                            elif response.type == 'error':
+                                logger.error(f"❌ Error response from Sarvam WS: {response.data}")
+                                break
+                                
+                    tts_task = asyncio.create_task(run_websocket_tts())
+                    session_state["current_tts_task"] = tts_task
+                    
+                    await tts_task
+                    
                 except asyncio.CancelledError:
-                    logger.info(f"🚫 TTS conversion task was cancelled for context: {context_id}")
+                    logger.info(f"🚫 WS TTS task cancelled for context: {context_id}")
                 except Exception as e:
-                    logger.error(f"❌ Error generating TTS from Sarvam AI: {e}")
+                    logger.error(f"❌ WS TTS failed: {e}")
+                    # Invalidate WS so next turn reconnects
+                    session_state["sarvam_ws"] = None
                 finally:
                     session_state["current_tts_task"] = None
                     tts_queue.task_done()
-                
+                    
         except asyncio.CancelledError:
             pass
 
@@ -550,8 +672,18 @@ class ModularSalesBot:
         if active_tts and not active_tts.done():
             active_tts.cancel()
             logger.info(f"🚫 Active TTS task cancelled for call {call_id}")
+            
+        # 4. Close active Sarvam WebSocket to discard server-buffered audio
+        sarvam_ws = session_state.get("sarvam_ws")
+        if sarvam_ws and hasattr(sarvam_ws, "_websocket") and sarvam_ws._websocket.open:
+            try:
+                # Run the close asynchronously in a non-blocking way
+                asyncio.create_task(sarvam_ws._websocket.close())
+                logger.info(f"🔇 Active Sarvam WebSocket closed on interruption for call {call_id}")
+            except Exception as e:
+                logger.debug(f"Error closing Sarvam WS on interruption: {e}")
         
-        # 4. Flush PJSIP playout buffer
+        # 5. Flush PJSIP playout buffer
         if self.sip_server:
             call_state = self.sip_server.sip_calls.get(call_id)
             if call_state:
@@ -559,7 +691,7 @@ class ModularSalesBot:
                 call_state.is_playing = False
                 logger.info(f"🔇 SIP playout buffer cleared for call {call_id}")
                 
-        # 5. Clear pending TTS queue
+        # 6. Clear pending TTS queue
         while not session_state["tts_queue"].empty():
             try:
                 session_state["tts_queue"].get_nowait()
@@ -587,6 +719,14 @@ class ModularSalesBot:
                 await dg_ws.close()
             except Exception as e:
                 logger.debug(f"Error closing Deepgram WebSocket: {e}")
+                
+        # Close Sarvam WebSocket
+        sarvam_ws = session_state.get("sarvam_ws")
+        if sarvam_ws and hasattr(sarvam_ws, "_websocket") and sarvam_ws._websocket.open:
+            try:
+                await sarvam_ws._websocket.close()
+            except Exception as e:
+                logger.debug(f"Error closing Sarvam WebSocket: {e}")
                     
         # Remove connection
         if call_id in self.connections:
