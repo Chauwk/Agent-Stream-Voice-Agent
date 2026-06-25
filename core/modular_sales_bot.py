@@ -184,6 +184,7 @@ class ModularSalesBot:
             system_instruction = (
                 f"You are {Config.SALES_BOT_NAME}, a friendly and professional voice sales representative for {Config.COMPANY_NAME}. "
                 "Your goal is to assist the caller warmly and concisely. Speak naturally as this is a real-time phone call. "
+                "You must respond in the same language as the customer's query (e.g. English, Hindi, or Hinglish). "
                 "CRITICAL: Keep your responses extremely short. Use a maximum of 10 words per sentence, and a maximum of 15 words total. "
                 "Never output long lists. Ask clarifying questions instead of giving long descriptions. Do not use markdown (bold, bullet points). "
                 "When the conversation is finished or the user says goodbye, call the end_call tool to disconnect the call."
@@ -257,8 +258,9 @@ class ModularSalesBot:
         """Connect to Deepgram WebSocket"""
         session_state = self.connections[call_id]
         
-        # Deepgram Live WS config
-        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&encoding=linear16&sample_rate=16000&channels=1&endpointing=250&interim_results=false"
+        # Deepgram Live WS config - dynamically match the STT language to the TTS language code
+        lang_code = Config.SARVAM_LANGUAGE_CODE.split('-')[0] if Config.SARVAM_LANGUAGE_CODE else 'en'
+        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&encoding=linear16&sample_rate=16000&channels=1&endpointing=250&interim_results=false&language={lang_code}"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
         import inspect
