@@ -181,10 +181,16 @@ class ModularSalesBot:
                 asyncio.create_task(self.delayed_hangup(call_id))
                 return "Call hangup initiated"
 
+            # Format company products/services for prompt injection
+            products_list = "\n".join([f"- {p['name']}: {p['price']} - {p['description']}" for p in Config.PRODUCTS])
+
             system_instruction = (
-                f"You are {Config.SALES_BOT_NAME}, a friendly and professional voice sales representative for {Config.COMPANY_NAME}. "
-                "Your goal is to assist the caller warmly and concisely. Speak naturally as this is a real-time phone call. "
-                "You must respond in the same language as the customer's query (e.g. English, Hindi, or Hinglish). "
+                f"You are a professional sales representative named {Config.SALES_BOT_NAME} for {Config.COMPANY_NAME}. "
+                "You must speak and respond EXCLUSIVELY in English. "
+                "Even if the user speaks in another language, or if there is noise, keep your responses in English. "
+                f"Our products/services are:\n{products_list}\n"
+                f"NOTE: The user might refer to our company name '{Config.COMPANY_NAME}' which could be mis-transcribed as 'job', 'chalk', 'chock', or 'jock'. "
+                f"If they ask about 'services provided by job' or similar, they mean our services at {Config.COMPANY_NAME}.\n"
                 "CRITICAL: Keep your responses extremely short. Use a maximum of 10 words per sentence, and a maximum of 15 words total. "
                 "Never output long lists. Ask clarifying questions instead of giving long descriptions. Do not use markdown (bold, bullet points). "
                 "When the conversation is finished or the user says goodbye, call the end_call tool to disconnect the call."
@@ -228,7 +234,13 @@ class ModularSalesBot:
             "current_tts_task": None       # Active TTS API task
         }
         
-        # 3. Connect to WebSockets
+        # 3. Play greeting instantly from cache (non-blocking) to eliminate greeting delay for the caller
+        if self.cached_greeting_audio:
+            logger.info(f"🗣️ Playing cached greeting for call: {call_id}")
+            if self.sip_server:
+                asyncio.create_task(self.sip_server.send_audio_to_rtp(call_id, self.cached_greeting_audio))
+
+        # 4. Connect to WebSockets
         try:
             await self._connect_websockets(call_id)
             logger.info(f"✅ Deepgram WebSocket connected for call: {call_id}")
@@ -243,12 +255,6 @@ class ModularSalesBot:
             
             session_state["tasks"].extend([dg_task, tts_process_task, llm_process_task, dg_keepalive_task])
             
-            # Trigger initial greeting instantly from cache
-            if self.cached_greeting_audio:
-                logger.info(f"🗣️ Playing cached greeting for call: {call_id}")
-                if self.sip_server:
-                    await self.sip_server.send_audio_to_rtp(call_id, self.cached_greeting_audio)
-            
         except Exception as e:
             logger.error(f"❌ Failed to initialize modular pipeline sockets: {e}")
             await self.cleanup_connections(call_id)
@@ -258,9 +264,8 @@ class ModularSalesBot:
         """Connect to Deepgram WebSocket"""
         session_state = self.connections[call_id]
         
-        # Deepgram Live WS config - dynamically match the STT language to the TTS language code
-        lang_code = Config.SARVAM_LANGUAGE_CODE.split('-')[0] if Config.SARVAM_LANGUAGE_CODE else 'en'
-        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&encoding=linear16&sample_rate=16000&channels=1&endpointing=250&interim_results=false&language={lang_code}"
+        # Deepgram Live WS config - boost company and bot name keywords
+        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&encoding=linear16&sample_rate=16000&channels=1&endpointing=250&interim_results=false&keywords=Chauwk:4.0&keywords=Sarah:2.0"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
         import inspect
