@@ -595,8 +595,44 @@ class ModularSalesBot:
         logger.info(f"🧹 Cleanup complete for call: {call_id}")
 
     async def delayed_hangup(self, call_id: str, delay_seconds: float = 3.0):
-        """Clean up and disconnect the SIP call after a short delay to let final speech frames finish playing"""
-        logger.info(f"⏳ Delayed hangup initiated for call {call_id} (delay: {delay_seconds}s)")
-        await asyncio.sleep(delay_seconds)
+        """Clean up and disconnect the SIP call after final speech has finished playing"""
+        logger.info(f"⏳ Dynamic hangup requested for call {call_id}")
+        
+        try:
+            session_state = self.connections.get(call_id)
+            if session_state:
+                # 1. Wait for LLM queue to be empty and LLM task to finish
+                while True:
+                    llm_q_empty = session_state.get("llm_queue") is None or session_state["llm_queue"].empty()
+                    llm_task_done = session_state.get("current_llm_task") is None or session_state["current_llm_task"].done()
+                    if llm_q_empty and llm_task_done:
+                        break
+                    logger.info(f"⏳ Waiting for LLM processing to complete for call {call_id}...")
+                    await asyncio.sleep(0.3)
+                    
+                # 2. Wait for TTS queue to be empty and TTS task to finish
+                while True:
+                    tts_q_empty = session_state.get("tts_queue") is None or session_state["tts_queue"].empty()
+                    tts_task_done = session_state.get("current_tts_task") is None or session_state["current_tts_task"].done()
+                    if tts_q_empty and tts_task_done:
+                        break
+                    logger.info(f"⏳ Waiting for TTS synthesis to complete for call {call_id}...")
+                    await asyncio.sleep(0.3)
+                    
+            # 3. Wait for PJSIP playback buffer to be empty
+            if self.sip_server:
+                call_state = self.sip_server.sip_calls.get(call_id)
+                if call_state:
+                    while hasattr(call_state, "playback_buffer") and len(call_state.playback_buffer) > 0:
+                        logger.info(f"⏳ Waiting for PJSIP playback buffer ({len(call_state.playback_buffer)} bytes remaining) for call {call_id}...")
+                        await asyncio.sleep(0.3)
+                        
+        except Exception as e:
+            logger.error(f"❌ Error in dynamic hangup check: {e}")
+            
+        # 4. Add a short buffer (e.g. 1.5 seconds) to ensure the final speech packets are fully transmitted over RTP
+        await asyncio.sleep(1.5)
+        
+        logger.info(f"📞 Hanging up call {call_id} now that final speech playback is complete.")
         if self.sip_server:
             await self.sip_server.cleanup_call(call_id)
