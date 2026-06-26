@@ -213,7 +213,7 @@ class ModularSalesBot:
             system_instruction = (
                 f"You are {Config.SALES_BOT_NAME}, sales rep for {Config.COMPANY_NAME}. Speak EXCLUSIVELY in English.\n"
                 "Strict Rules:\n"
-                "- Max 10 words/sentence, max 15 words total. No lists/markdown.\n"
+                "- Keep responses concise. Under 15 words per sentence, and max 35 words total. No lists/markdown.\n"
                 f"- Only sell these standard services: {products_summary}. Reject custom deals/discounts.\n"
                 "- Decline off-topic queries (coding, math, politics) and steer back to Chauwk sales.\n"
                 "- Never praise or mention competitors. Call the end_call tool to hang up."
@@ -680,13 +680,22 @@ class ModularSalesBot:
             except Exception as e:
                 logger.error(f"❌ Sarvam AI WebSocket connection error for call {call_id}: {e}")
                 
-            # Clear socket in session if connection failed/closed
+             # Clear socket in session if connection failed/closed
             session_state = self.connections.get(call_id)
-            if session_state and session_state.get("sarvam_ws") is not None:
-                session_state["sarvam_ws"] = None
-                
-            # Wait 1.5 seconds before retrying connection
-            await asyncio.sleep(1.5)
+            is_interrupted = False
+            if session_state:
+                if session_state.get("sarvam_ws") is not None:
+                    session_state["sarvam_ws"] = None
+                reconnect_event = session_state.get("reconnect_event")
+                if reconnect_event and reconnect_event.is_set():
+                    is_interrupted = True
+                    reconnect_event.clear()
+                    
+            if not is_interrupted:
+                # Wait 1.5 seconds before retrying connection (backoff for failures only)
+                await asyncio.sleep(1.5)
+            else:
+                logger.info(f"🔊 Reconnecting to Sarvam TTS immediately (0ms delay) after interruption for call {call_id}.")
 
     async def _process_tts_queue(self, call_id: str):
         """Listens for sentences and invokes Sarvam AI TTS asynchronously (supports WebSocket-streaming)"""
