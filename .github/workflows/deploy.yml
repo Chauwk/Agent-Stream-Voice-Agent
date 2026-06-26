@@ -83,3 +83,6 @@ jobs:
         run: |
           sleep 5
           sudo docker ps --filter "name=voice-bot-container" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+      - name: Cleanup unused Docker images
+        run: sudo docker image prune -a -f

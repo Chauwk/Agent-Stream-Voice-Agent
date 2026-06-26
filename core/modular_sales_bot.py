@@ -251,7 +251,8 @@ class ModularSalesBot:
             "current_tts_task": None,      # Active TTS API task
             "consecutive_speech_frames": 0,
             "consecutive_silence_frames": 0,
-            "local_user_speaking": False
+            "local_user_speaking": False,
+            "start_time": time.time()      # Track startup time for startup guard
         }
         
         # 3. Play greeting instantly from cache (non-blocking) to eliminate greeting delay for the caller
@@ -326,9 +327,20 @@ class ModularSalesBot:
             session_state["consecutive_silence_frames"] = 0
             session_state["local_user_speaking"] = False
             
-        # Update VAD state based on RMS threshold (300.0)
-        # Threshold of 300.0 is ideal for telephony lines to gate hum/breaths
-        if rms >= 300.0:
+        # Check for startup guard: ignore VAD during the first 1.5 seconds of the call to prevent initial line clicks/noises from triggering interruptions or breaking initial states
+        call_age = time.time() - session_state.get("start_time", time.time())
+        is_startup_guard_active = call_age < 1.5
+
+        # Update VAD state based on RMS threshold
+        # Default threshold of 1500.0 is ideal for telephony lines to gate hum/breaths and prevent false interruptions
+        vad_threshold = getattr(Config, "VAD_RMS_THRESHOLD", 1500.0)
+
+        if is_startup_guard_active:
+            # Force VAD state to silent during startup guard to avoid early transients setting user_speaking=True or triggering interruptions
+            session_state["consecutive_speech_frames"] = 0
+            session_state["consecutive_silence_frames"] += 1
+            audio_chunk = b"\x00" * len(audio_chunk)
+        elif rms >= vad_threshold:
             session_state["consecutive_speech_frames"] += 1
             session_state["consecutive_silence_frames"] = 0
             

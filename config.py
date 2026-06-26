@@ -51,6 +51,7 @@ class Config:
     BUFFER_SIZE_MS = int(os.getenv('BUFFER_SIZE_MS', '160'))
     SILENCE_THRESHOLD = float(os.getenv('SILENCE_THRESHOLD', '0.01'))
     NOISE_THRESHOLD = float(os.getenv('NOISE_THRESHOLD', '0.01'))
+    VAD_RMS_THRESHOLD = float(os.getenv('VAD_RMS_THRESHOLD', '1500.0'))
     AUDIO_ENHANCEMENT_ENABLED = os.getenv('AUDIO_ENHANCEMENT_ENABLED', 'false').lower() == 'true'
     OPENAI_AUDIO_FORMAT = os.getenv('OPENAI_AUDIO_FORMAT', 'g711_ulaw')
     
