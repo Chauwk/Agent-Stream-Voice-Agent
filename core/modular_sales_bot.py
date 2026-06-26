@@ -350,8 +350,9 @@ class ModularSalesBot:
                 session_state["user_speaking"] = True
                 
                 if self.is_bot_actively_speaking(call_id):
-                    logger.info(f"🎤 LOCAL VAD: CUSTOMER STARTED SPEAKING (Interruption) for call {call_id} (RMS={rms:.1f})")
-                    await self._handle_customer_interruption(call_id)
+                    logger.info(f"🎤 LOCAL VAD: CUSTOMER STARTED SPEAKING (Interruption - IGNORED local VAD to prevent self-interruption/echo) for call {call_id} (RMS={rms:.1f})")
+                    # Do NOT call self._handle_customer_interruption(call_id) here.
+                    # Rely on Deepgram word transcription for precise barge-in.
                 else:
                     logger.info(f"🎤 LOCAL VAD: CUSTOMER STARTED SPEAKING (Bot is silent) for call {call_id} (RMS={rms:.1f})")
         else:
@@ -484,9 +485,6 @@ class ModularSalesBot:
                         current_sentence = ""
                         
                         async for chunk in response:
-                            if session_state["user_speaking"]:
-                                logger.info("🧠 Gemini generation interrupted by customer.")
-                                break
                             
                             text_delta = chunk.text
                             if text_delta:
@@ -531,7 +529,7 @@ class ModularSalesBot:
                                     if sentence_to_send:
                                         await tts_queue.put((context_id, sentence_to_send))
                                         
-                        if current_sentence.strip() and not session_state["user_speaking"]:
+                        if current_sentence.strip():
                             await tts_queue.put((context_id, current_sentence.strip()))
                     except Exception as e:
                         logger.error(f"❌ Gemini generation error inside task: {e}")
