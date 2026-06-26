@@ -443,6 +443,9 @@ class ModularSalesBot:
                 
                 if speech_started:
                     logger.info(f"🎤 DEEPGRAM VAD: SpeechStarted for call {call_id}")
+                    if self.is_bot_actively_speaking(call_id):
+                        logger.info(f"⚡ Interrupting bot on SpeechStarted event for call {call_id}")
+                        await self._handle_customer_interruption(call_id)
                     
                 if speech_ended:
                     logger.info(f"🎤 DEEPGRAM VAD: SpeechEnded for call {call_id}")
