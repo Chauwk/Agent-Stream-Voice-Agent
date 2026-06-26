@@ -40,14 +40,22 @@ class ModularSalesBot:
         
         try:
             logger.info("⏳ Pre-generating and caching startup greeting audio...")
-            response = self.sync_sarvam_client.text_to_speech.convert(
-                text=self.cached_greeting_text,
-                target_language_code=Config.SARVAM_LANGUAGE_CODE,
-                speaker=Config.SARVAM_SPEAKER,
-                model=Config.SARVAM_MODEL,
-                output_audio_codec="linear16",
-                speech_sample_rate=16000
-            )
+            kwargs = {
+                "text": self.cached_greeting_text,
+                "target_language_code": Config.SARVAM_LANGUAGE_CODE,
+                "speaker": Config.SARVAM_SPEAKER,
+                "model": Config.SARVAM_MODEL,
+                "output_audio_codec": "linear16",
+                "speech_sample_rate": 16000
+            }
+            pace = getattr(Config, "SARVAM_PACE", 1.15)
+            if pace is not None:
+                kwargs["pace"] = pace
+            pitch = getattr(Config, "SARVAM_PITCH", 0.0)
+            if pitch is not None and pitch != 0.0 and "bulbul:v3" not in Config.SARVAM_MODEL:
+                kwargs["pitch"] = pitch
+                
+            response = self.sync_sarvam_client.text_to_speech.convert(**kwargs)
             if response and response.audios:
                 base64_audio = response.audios[0]
                 self.cached_greeting_audio = base64.b64decode(base64_audio)
@@ -163,14 +171,22 @@ class ModularSalesBot:
             
             logger.info(f"🔄 Dynamic Voice Config changed! Regenerating greeting audio for speaker '{Config.SARVAM_SPEAKER}'...")
             try:
-                response = await self.sarvam_client.text_to_speech.convert(
-                    text=current_text,
-                    target_language_code=Config.SARVAM_LANGUAGE_CODE,
-                    speaker=Config.SARVAM_SPEAKER,
-                    model=Config.SARVAM_MODEL,
-                    output_audio_codec="linear16",
-                    speech_sample_rate=16000
-                )
+                kwargs = {
+                    "text": current_text,
+                    "target_language_code": Config.SARVAM_LANGUAGE_CODE,
+                    "speaker": Config.SARVAM_SPEAKER,
+                    "model": Config.SARVAM_MODEL,
+                    "output_audio_codec": "linear16",
+                    "speech_sample_rate": 16000
+                }
+                pace = getattr(Config, "SARVAM_PACE", 1.15)
+                if pace is not None:
+                    kwargs["pace"] = pace
+                pitch = getattr(Config, "SARVAM_PITCH", 0.0)
+                if pitch is not None and pitch != 0.0 and "bulbul:v3" not in Config.SARVAM_MODEL:
+                    kwargs["pitch"] = pitch
+                    
+                response = await self.sarvam_client.text_to_speech.convert(**kwargs)
                 if response and response.audios:
                     base64_audio = response.audios[0]
                     self.cached_greeting_audio = base64.b64decode(base64_audio)
@@ -308,7 +324,8 @@ class ModularSalesBot:
         session_state = self.connections[call_id]
         
         # Deepgram Live WS config - boost company and bot name keywords
-        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&encoding=linear16&sample_rate=16000&channels=1&endpointing=450&vad_events=true&interim_results=false&keywords=Chauwk:4.0&keywords=Sarah:2.0"
+        endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
+        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&keywords=Chauwk:4.0&keywords=Sarah:2.0"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
         import inspect
@@ -633,12 +650,20 @@ class ModularSalesBot:
                     send_completion_event="true"
                 ) as socket_client:
                     logger.info(f"🔊 Configuring Sarvam AI TTS WebSocket for call {call_id}...")
-                    await socket_client.configure(
-                        target_language_code=Config.SARVAM_LANGUAGE_CODE,
-                        speaker=Config.SARVAM_SPEAKER,
-                        speech_sample_rate=16000,
-                        output_audio_codec="linear16"
-                    )
+                    kwargs = {
+                        "target_language_code": Config.SARVAM_LANGUAGE_CODE,
+                        "speaker": Config.SARVAM_SPEAKER,
+                        "speech_sample_rate": 16000,
+                        "output_audio_codec": "linear16"
+                    }
+                    pace = getattr(Config, "SARVAM_PACE", 1.15)
+                    if pace is not None:
+                        kwargs["pace"] = pace
+                    pitch = getattr(Config, "SARVAM_PITCH", 0.0)
+                    if pitch is not None and pitch != 0.0 and "bulbul:v3" not in Config.SARVAM_MODEL:
+                        kwargs["pitch"] = pitch
+                        
+                    await socket_client.configure(**kwargs)
                     
                     session_state["sarvam_ws"] = socket_client
                     logger.info(f"🔊 Sarvam AI WebSocket is ready for call {call_id}.")
@@ -741,14 +766,22 @@ class ModularSalesBot:
                         
                     logger.warning("⚠️ Sarvam WebSocket not available. Falling back to HTTP TTS.")
                     try:
-                        tts_coro = self.sarvam_client.text_to_speech.convert(
-                            text=sentence_text,
-                            target_language_code=Config.SARVAM_LANGUAGE_CODE,
-                            speaker=Config.SARVAM_SPEAKER,
-                            model=Config.SARVAM_MODEL,
-                            output_audio_codec="linear16",
-                            speech_sample_rate=16000
-                        )
+                        kwargs = {
+                            "text": sentence_text,
+                            "target_language_code": Config.SARVAM_LANGUAGE_CODE,
+                            "speaker": Config.SARVAM_SPEAKER,
+                            "model": Config.SARVAM_MODEL,
+                            "output_audio_codec": "linear16",
+                            "speech_sample_rate": 16000
+                        }
+                        pace = getattr(Config, "SARVAM_PACE", 1.15)
+                        if pace is not None:
+                            kwargs["pace"] = pace
+                        pitch = getattr(Config, "SARVAM_PITCH", 0.0)
+                        if pitch is not None and pitch != 0.0 and "bulbul:v3" not in Config.SARVAM_MODEL:
+                            kwargs["pitch"] = pitch
+                            
+                        tts_coro = self.sarvam_client.text_to_speech.convert(**kwargs)
                         tts_task = asyncio.create_task(tts_coro)
                         session_state["current_tts_task"] = tts_task
                         
