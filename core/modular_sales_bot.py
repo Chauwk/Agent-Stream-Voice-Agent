@@ -91,8 +91,7 @@ class ModularSalesBot:
                 logger.info("🔑 Pre-configuring Gemini Client with API Key (AI Studio)")
                 self.gemini_client = genai.Client(api_key=Config.GEMINI_API_KEY)
                 
-            # Run background warmup task
-            asyncio.create_task(self._warmup_gemini())
+            self.gemini_warmed_up = False
         except Exception as e:
             logger.error(f"❌ Failed to pre-configure Gemini client: {e}")
             
@@ -117,6 +116,10 @@ class ModularSalesBot:
 
     async def start_server(self):
         """Start SIP server for direct Exotel SIP trunking"""
+        # Run Gemini warmup task now that the event loop is running
+        if not getattr(self, "gemini_warmed_up", False) and self.gemini_client:
+            asyncio.create_task(self._warmup_gemini())
+            
         try:
             logger.info(f'🚀 Starting SIP Server (Modular Mode) on {Config.SIP_SERVER_HOST}:{Config.SIP_SERVER_PORT}')
             logger.info('📞 Ready for direct Exotel SIP trunk connections!')
@@ -188,6 +191,10 @@ class ModularSalesBot:
         """
         logger.info(f"🔗 INITIALIZING MODULAR PIPELINE for call: {call_id}")
         
+        # Ensure Gemini warmup runs if it hasn't completed yet
+        if not getattr(self, "gemini_warmed_up", False) and self.gemini_client:
+            asyncio.create_task(self._warmup_gemini())
+            
         # 0. Regenerate greeting audio if config was dynamically updated
         await self._check_and_update_greeting()
         
