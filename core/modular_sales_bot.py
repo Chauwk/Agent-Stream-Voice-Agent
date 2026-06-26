@@ -291,6 +291,21 @@ class ModularSalesBot:
         if not session_state:
             return
             
+        # Apply local noise gate to prevent false VAD triggers from background hum / line static
+        count = len(audio_chunk) // 2
+        if count > 0:
+            import struct
+            import math
+            # Unpack 16-bit little-endian samples
+            samples = struct.unpack(f"<{count}h", audio_chunk)
+            sum_squares = sum(s * s for s in samples)
+            rms = math.sqrt(sum_squares / count)
+            
+            # If RMS is below threshold, replace chunk with comfort silence (zeros)
+            # Threshold of 300.0 is ideal for telephony lines to gate hum/breaths
+            if rms < 300.0:
+                audio_chunk = b"\x00" * len(audio_chunk)
+            
         # Track chunk sending activity to verify PJSIP/Exotel audio stream is active
         if not hasattr(self, "_chunk_stats"):
             self._chunk_stats = {}
@@ -327,8 +342,11 @@ class ModularSalesBot:
                 
                 if speech_started and not session_state["user_speaking"]:
                     session_state["user_speaking"] = True
-                    logger.info(f"🎤 CUSTOMER STARTED SPEAKING for call {call_id}")
-                    await self._handle_customer_interruption(call_id)
+                    if self.is_bot_actively_speaking(call_id):
+                        logger.info(f"🎤 CUSTOMER STARTED SPEAKING (Interruption) for call {call_id}")
+                        await self._handle_customer_interruption(call_id)
+                    else:
+                        logger.info(f"🎤 CUSTOMER STARTED SPEAKING (Bot is silent) for call {call_id}")
                 
                 channel = data.get("channel", {})
                 if isinstance(channel, dict):
@@ -665,6 +683,35 @@ class ModularSalesBot:
                     
         except asyncio.CancelledError:
             pass
+
+    def is_bot_actively_speaking(self, call_id: str) -> bool:
+        """Checks if the bot is currently speaking, generating LLM response, or has non-empty playback buffers"""
+        session_state = self.connections.get(call_id)
+        if not session_state:
+            return False
+            
+        # 1. Check if LLM generation task is active
+        active_llm = session_state.get("current_llm_task")
+        if active_llm and not active_llm.done():
+            return True
+            
+        # 2. Check if TTS synthesis task is active
+        active_tts = session_state.get("current_tts_task")
+        if active_tts and not active_tts.done():
+            return True
+            
+        # 3. Check if TTS queue has items pending
+        tts_q = session_state.get("tts_queue")
+        if tts_q and not tts_q.empty():
+            return True
+            
+        # 4. Check if SIP playout buffer has active audio playing
+        if self.sip_server:
+            call_state = self.sip_server.sip_calls.get(call_id)
+            if call_state and hasattr(call_state, "playback_buffer") and len(call_state.playback_buffer) > 0:
+                return True
+                
+        return False
 
     async def _handle_customer_interruption(self, call_id: str):
         """Immediately stops bot speaking and cancels active Gemini/TTS requests on customer interruption"""
