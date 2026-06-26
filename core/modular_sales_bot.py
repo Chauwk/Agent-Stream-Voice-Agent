@@ -57,12 +57,63 @@ class ModularSalesBot:
         except Exception as e:
             logger.error(f"❌ Failed to pre-generate greeting: {e}")
             
+        # Initialize Gemini Client once to avoid cold starts on first call
+        self.gemini_client = None
+        try:
+            import os
+            gcp_key = os.getenv('GCP_SERVICE_ACCOUNT_KEY') or os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+            
+            # Autodetect in root directory if not specified in env
+            if not gcp_key:
+                for f in os.listdir('.'):
+                    if f.endswith('.json') and f.startswith('project-'):
+                        gcp_key = f
+                        break
+                        
+            if gcp_key and os.path.exists(gcp_key):
+                logger.info(f"🔑 Pre-configuring Gemini Client with GCP Service Account (Vertex AI): {gcp_key}")
+                from google.oauth2 import service_account
+                creds = service_account.Credentials.from_service_account_file(
+                    gcp_key,
+                    scopes=['https://www.googleapis.com/auth/cloud-platform']
+                )
+                with open(gcp_key, 'r') as f:
+                    key_data = json.load(f)
+                project_id = key_data.get('project_id')
+                
+                self.gemini_client = genai.Client(
+                    vertexai=True,
+                    project=project_id,
+                    location="asia-south1",
+                    credentials=creds
+                )
+            else:
+                logger.info("🔑 Pre-configuring Gemini Client with API Key (AI Studio)")
+                self.gemini_client = genai.Client(api_key=Config.GEMINI_API_KEY)
+                
+            # Run background warmup task
+            asyncio.create_task(self._warmup_gemini())
+        except Exception as e:
+            logger.error(f"❌ Failed to pre-configure Gemini client: {e}")
+            
         logger.info("🤖 Modular Voice Bot Engine Initialized")
         logger.info(f"   🎙️ STT Model (Deepgram): {Config.DEEPGRAM_MODEL}")
         logger.info(f"   🧠 LLM Model (Gemini): {Config.GEMINI_MODEL}")
         logger.info(f"   🔊 TTS Model (Sarvam): {Config.SARVAM_MODEL}")
         logger.info(f"   🎭 Speaker (Sarvam): {Config.SARVAM_SPEAKER}")
         logger.info(f"   🌐 Language (Sarvam): {Config.SARVAM_LANGUAGE_CODE}")
+
+    async def _warmup_gemini(self):
+        """Warms up the Gemini client connection to eliminate first-call cold-start latency"""
+        try:
+            logger.info("🧠 Warming up Gemini Client connection...")
+            await self.gemini_client.aio.models.generate_content(
+                model=Config.GEMINI_MODEL,
+                contents="ping"
+            )
+            logger.info("🧠 Gemini Client warmed up successfully.")
+        except Exception as e:
+            logger.warning(f"⚠️ Gemini Client warmup failed (will retry on first call): {e}")
 
     async def start_server(self):
         """Start SIP server for direct Exotel SIP trunking"""
@@ -140,40 +191,8 @@ class ModularSalesBot:
         # 0. Regenerate greeting audio if config was dynamically updated
         await self._check_and_update_greeting()
         
-        # 1. Initialize Gemini chat model
+        # 1. Prepare system instruction, safety settings, and history
         try:
-            import os
-            import json
-            gcp_key = os.getenv('GCP_SERVICE_ACCOUNT_KEY') or os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-            
-            # Autodetect in root directory if not specified in env
-            if not gcp_key:
-                for f in os.listdir('.'):
-                    if f.endswith('.json') and f.startswith('project-'):
-                        gcp_key = f
-                        break
-                        
-            if gcp_key and os.path.exists(gcp_key):
-                logger.info(f"🔑 Configuring Gemini with GCP Service Account (Vertex AI asia-south1): {gcp_key}")
-                from google.oauth2 import service_account
-                creds = service_account.Credentials.from_service_account_file(
-                    gcp_key,
-                    scopes=['https://www.googleapis.com/auth/cloud-platform']
-                )
-                with open(gcp_key, 'r') as f:
-                    key_data = json.load(f)
-                project_id = key_data.get('project_id')
-                
-                client = genai.Client(
-                    vertexai=True,
-                    project=project_id,
-                    location="asia-south1",
-                    credentials=creds
-                )
-            else:
-                logger.info("🔑 Configuring Gemini with API Key (AI Studio)")
-                client = genai.Client(api_key=Config.GEMINI_API_KEY)
-                
             # Define the end_call tool closure
             async def end_call() -> str:
                 """Hang up the call when the conversation is finished, the customer says goodbye, or they want to end the call."""
@@ -205,39 +224,34 @@ class ModularSalesBot:
                 )
             ]
             
-            chat_session = client.aio.chats.create(
-                model=Config.GEMINI_MODEL,
-                history=history,
-                config={
-                    "system_instruction": system_instruction,
-                    "tools": [end_call],
-                    "safety_settings": [
-                        types.SafetySetting(
-                            category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                            threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-                        ),
-                        types.SafetySetting(
-                            category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                            threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-                        ),
-                        types.SafetySetting(
-                            category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                            threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-                        ),
-                        types.SafetySetting(
-                            category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                            threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-                        )
-                    ]
-                }
-            )
+            safety_settings = [
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                    threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                    threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                    threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                    threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                )
+            ]
         except Exception as e:
-            logger.error(f"❌ Failed to configure Gemini: {e}")
+            logger.error(f"❌ Failed to configure Gemini parameters: {e}")
             raise
             
         # 2. Establish session state structure
         self.connections[call_id] = {
-            "chat_session": chat_session,
+            "history": history,
+            "system_instruction": system_instruction,
+            "safety_settings": safety_settings,
+            "end_call_tool": end_call,
             "deepgram_ws": None,
             "sarvam_ws": None,
             "reconnect_event": asyncio.Event(),
@@ -365,8 +379,8 @@ class ModularSalesBot:
                 session_state["user_speaking"] = False
                 logger.info(f"🎤 LOCAL VAD: CUSTOMER STOPPED SPEAKING for call {call_id}")
                 
-            # Replace noisy background chunk with comfort silence
-            audio_chunk = b"\x00" * len(audio_chunk)
+            # Do NOT replace audio chunk with silence here anymore, send raw audio to Deepgram!
+            # audio_chunk = b"\x00" * len(audio_chunk)
             
         # Track chunk sending activity to verify PJSIP/Exotel audio stream is active
         if not hasattr(self, "_chunk_stats"):
@@ -464,7 +478,10 @@ class ModularSalesBot:
         if not session_state:
             return
             
-        chat_session = session_state["chat_session"]
+        history = session_state["history"]
+        system_instruction = session_state["system_instruction"]
+        safety_settings = session_state["safety_settings"]
+        end_call = session_state["end_call_tool"]
         llm_queue = session_state["llm_queue"]
         tts_queue = session_state["tts_queue"]
         
@@ -473,21 +490,42 @@ class ModularSalesBot:
                 prompt = await llm_queue.get()
                 logger.info(f"🧠 Querying Gemini LLM with: '{prompt}'")
                 
+                # Append user prompt to manual history list
+                from google.genai import types
+                history.append(
+                    types.Content(
+                        role="user",
+                        parts=[types.Part.from_text(text=prompt)]
+                    )
+                )
+                
                 session_state["is_bot_speaking"] = True
                 # Set a unique context ID for this speech turn
                 context_id = f"ctx_{int(time.time() * 1000)}"
                 session_state["current_context_id"] = context_id
                 
+                generated_text = ""
+                
                 # Inner function to stream Gemini response and parse sentences
                 async def run_gemini():
+                    nonlocal generated_text
                     try:
-                        response = await chat_session.send_message_stream(prompt)
+                        # Call generate_content_stream using the shared client
+                        response = await self.gemini_client.aio.models.generate_content_stream(
+                            model=Config.GEMINI_MODEL,
+                            contents=history,
+                            config=types.GenerateContentConfig(
+                                system_instruction=system_instruction,
+                                tools=[end_call],
+                                safety_settings=safety_settings
+                            )
+                        )
                         current_sentence = ""
                         
                         async for chunk in response:
-                            
                             text_delta = chunk.text
                             if text_delta:
+                                generated_text += text_delta
                                 current_sentence += text_delta
                                 
                                 # Split by sentence boundaries (., ?, !, \n) or clause boundaries (,, ;)
@@ -540,8 +578,24 @@ class ModularSalesBot:
                 
                 try:
                     await llm_task
+                    # Append completed response to history
+                    if generated_text.strip():
+                        history.append(
+                            types.Content(
+                                role="model",
+                                parts=[types.Part.from_text(text=generated_text.strip())]
+                            )
+                        )
                 except asyncio.CancelledError:
                     logger.info(f"🧠 Gemini generation task was cancelled for context: {context_id}")
+                    # If cancelled/interrupted, append the partial response so model knows what it said
+                    if generated_text.strip():
+                        history.append(
+                            types.Content(
+                                role="model",
+                                parts=[types.Part.from_text(text=generated_text.strip())]
+                            )
+                        )
                 except Exception as e:
                     logger.error(f"❌ Gemini generation task failed: {e}")
                 finally:
