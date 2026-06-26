@@ -225,6 +225,7 @@ class ModularSalesBot:
             "chat_session": chat_session,
             "deepgram_ws": None,
             "sarvam_ws": None,
+            "reconnect_event": asyncio.Event(),
             "tasks": [],
             "user_speaking": False,
             "is_bot_speaking": False,
@@ -498,7 +499,22 @@ class ModularSalesBot:
                     
                     # Connection keep-alive ping loop
                     while True:
-                        await asyncio.sleep(20)
+                        reconnect_event = session_state.get("reconnect_event")
+                        if reconnect_event:
+                            reconnect_event.clear()
+                            
+                        try:
+                            # Wait for reconnect event or timeout (20s keep-alive)
+                            if reconnect_event:
+                                await asyncio.wait_for(reconnect_event.wait(), timeout=20.0)
+                                logger.info(f"🔊 Reconnect event triggered for call {call_id}. Reconnecting immediately...")
+                                break
+                            else:
+                                await asyncio.sleep(20)
+                        except asyncio.TimeoutError:
+                            # Timeout passed, proceed to send keep-alive ping
+                            pass
+                            
                         session_state = self.connections.get(call_id)
                         if not session_state or session_state.get("sarvam_ws") != socket_client:
                             break
@@ -553,7 +569,7 @@ class ModularSalesBot:
                 sarvam_ws = session_state.get("sarvam_ws")
                 if not sarvam_ws or not sarvam_ws._websocket.open:
                     logger.info("⏳ Sarvam WebSocket not ready. Waiting for connection...")
-                    for _ in range(30): # Wait up to 3.0 seconds
+                    for _ in range(10): # Wait up to 1.0 second
                         await asyncio.sleep(0.1)
                         # Check context invalidation during wait
                         if context_id != session_state["current_context_id"]:
@@ -683,6 +699,11 @@ class ModularSalesBot:
                 logger.info(f"🔇 Active Sarvam WebSocket closed on interruption for call {call_id}")
             except Exception as e:
                 logger.debug(f"Error closing Sarvam WS on interruption: {e}")
+                
+        # Trigger instant reconnection of the manager loop
+        reconnect_event = session_state.get("reconnect_event")
+        if reconnect_event:
+            reconnect_event.set()
         
         # 5. Flush PJSIP playout buffer
         if self.sip_server:
