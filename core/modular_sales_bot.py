@@ -330,20 +330,21 @@ class ModularSalesBot:
                     await self._handle_customer_interruption(call_id)
                 
                 channel = data.get("channel", {})
-                alternatives = channel.get("alternatives", [])
-                if alternatives:
-                    transcript = alternatives[0].get("transcript", "")
-                    if transcript.strip() and is_final:
-                        logger.info(f"🎤 CUSTOMER SAID: {transcript}")
-                        session_state["user_speaking"] = False
-                        
-                        # Forward transcription text to the LLM processor queue
-                        await session_state["llm_queue"].put(transcript)
+                if isinstance(channel, dict):
+                    alternatives = channel.get("alternatives", [])
+                    if alternatives:
+                        transcript = alternatives[0].get("transcript", "")
+                        if transcript.strip() and is_final:
+                            logger.info(f"🎤 CUSTOMER SAID: {transcript}")
+                            session_state["user_speaking"] = False
+                            
+                            # Forward transcription text to the LLM processor queue
+                            await session_state["llm_queue"].put(transcript)
                         
         except websockets.exceptions.ConnectionClosed as e:
             logger.info(f"🔌 Deepgram connection closed for call {call_id}: code={e.code}, reason='{e.reason}'")
         except Exception as e:
-            logger.error(f"❌ Error handling Deepgram messages for call {call_id}: {e}")
+            logger.error(f"❌ Error handling Deepgram messages for call {call_id}: {e}", exc_info=True)
 
     async def _send_deepgram_keepalives(self, call_id: str):
         """Sends periodic KeepAlive messages to Deepgram to prevent inactivity timeouts"""
