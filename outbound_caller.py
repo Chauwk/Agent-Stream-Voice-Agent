@@ -32,7 +32,7 @@ async def make_callback_call(phone_number: str, customer_name: str = "Customer")
         # Make the outbound call
         call_sid = await api.make_outbound_call(
             phone_number=phone_number,
-            custom_data=f"customer_name={customer_name}"
+            context={"customer_name": customer_name}
         )
         
         if call_sid:

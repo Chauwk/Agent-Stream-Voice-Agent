@@ -181,19 +181,16 @@ class ModularSalesBot:
                 asyncio.create_task(self.delayed_hangup(call_id))
                 return "Call hangup initiated"
 
-            # Format company products/services for prompt injection
-            products_list = "\n".join([f"- {p['name']}: {p['price']} - {p['description']}" for p in Config.PRODUCTS])
+            # Format company products/services for prompt injection (minimum size)
+            products_summary = ", ".join([f"{p['name']} ({p['price']})" for p in Config.PRODUCTS])
 
             system_instruction = (
-                f"You are a professional sales representative named {Config.SALES_BOT_NAME} for {Config.COMPANY_NAME}. "
-                "You must speak and respond EXCLUSIVELY in English. "
-                "Even if the user speaks in another language, or if there is noise, keep your responses in English. "
-                f"Our products/services are:\n{products_list}\n"
-                f"NOTE: The user might refer to our company name '{Config.COMPANY_NAME}' which could be mis-transcribed as 'job', 'chalk', 'chock', or 'jock'. "
-                f"If they ask about 'services provided by job' or similar, they mean our services at {Config.COMPANY_NAME}.\n"
-                "CRITICAL: Keep your responses extremely short. Use a maximum of 10 words per sentence, and a maximum of 15 words total. "
-                "Never output long lists. Ask clarifying questions instead of giving long descriptions. Do not use markdown (bold, bullet points). "
-                "When the conversation is finished or the user says goodbye, call the end_call tool to disconnect the call."
+                f"You are {Config.SALES_BOT_NAME}, sales rep for {Config.COMPANY_NAME}. Speak EXCLUSIVELY in English.\n"
+                "Strict Rules:\n"
+                "- Max 10 words/sentence, max 15 words total. No lists/markdown.\n"
+                f"- Only sell these standard services: {products_summary}. Reject custom deals/discounts.\n"
+                "- Decline off-topic queries (coding, math, politics) and steer back to Chauwk sales.\n"
+                "- Never praise or mention competitors. Call the end_call tool to hang up."
             )
             
             from google.genai import types
@@ -213,7 +210,25 @@ class ModularSalesBot:
                 history=history,
                 config={
                     "system_instruction": system_instruction,
-                    "tools": [end_call]
+                    "tools": [end_call],
+                    "safety_settings": [
+                        types.SafetySetting(
+                            category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                            threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                        ),
+                        types.SafetySetting(
+                            category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                            threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                        ),
+                        types.SafetySetting(
+                            category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                            threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                        ),
+                        types.SafetySetting(
+                            category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                            threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                        )
+                    ]
                 }
             )
         except Exception as e:
@@ -233,7 +248,10 @@ class ModularSalesBot:
             "llm_queue": asyncio.Queue(),  # Queue to pass text prompts to LLM
             "tts_queue": asyncio.Queue(),  # Queue to pass text chunks to TTS
             "current_llm_task": None,      # Active Gemini generation task
-            "current_tts_task": None       # Active TTS API task
+            "current_tts_task": None,      # Active TTS API task
+            "consecutive_speech_frames": 0,
+            "consecutive_silence_frames": 0,
+            "local_user_speaking": False
         }
         
         # 3. Play greeting instantly from cache (non-blocking) to eliminate greeting delay for the caller
@@ -291,8 +309,9 @@ class ModularSalesBot:
         if not session_state:
             return
             
-        # Apply local noise gate to prevent false VAD triggers from background hum / line static
+        # Apply local noise gate and track sustained speech/silence to trigger precise local VAD
         count = len(audio_chunk) // 2
+        rms = 0.0
         if count > 0:
             import struct
             import math
@@ -301,10 +320,40 @@ class ModularSalesBot:
             sum_squares = sum(s * s for s in samples)
             rms = math.sqrt(sum_squares / count)
             
-            # If RMS is below threshold, replace chunk with comfort silence (zeros)
-            # Threshold of 300.0 is ideal for telephony lines to gate hum/breaths
-            if rms < 300.0:
-                audio_chunk = b"\x00" * len(audio_chunk)
+        # Initialize local VAD counters if not present
+        if "consecutive_speech_frames" not in session_state:
+            session_state["consecutive_speech_frames"] = 0
+            session_state["consecutive_silence_frames"] = 0
+            session_state["local_user_speaking"] = False
+            
+        # Update VAD state based on RMS threshold (300.0)
+        # Threshold of 300.0 is ideal for telephony lines to gate hum/breaths
+        if rms >= 300.0:
+            session_state["consecutive_speech_frames"] += 1
+            session_state["consecutive_silence_frames"] = 0
+            
+            # If we detect sustained speech (e.g., 8 consecutive frames = 160ms)
+            if session_state["consecutive_speech_frames"] >= 8 and not session_state["local_user_speaking"]:
+                session_state["local_user_speaking"] = True
+                session_state["user_speaking"] = True
+                
+                if self.is_bot_actively_speaking(call_id):
+                    logger.info(f"🎤 LOCAL VAD: CUSTOMER STARTED SPEAKING (Interruption) for call {call_id} (RMS={rms:.1f})")
+                    await self._handle_customer_interruption(call_id)
+                else:
+                    logger.info(f"🎤 LOCAL VAD: CUSTOMER STARTED SPEAKING (Bot is silent) for call {call_id} (RMS={rms:.1f})")
+        else:
+            session_state["consecutive_silence_frames"] += 1
+            session_state["consecutive_speech_frames"] = 0
+            
+            # If we detect sustained silence (e.g., 20 consecutive frames = 400ms)
+            if session_state["consecutive_silence_frames"] >= 20 and session_state["local_user_speaking"]:
+                session_state["local_user_speaking"] = False
+                session_state["user_speaking"] = False
+                logger.info(f"🎤 LOCAL VAD: CUSTOMER STOPPED SPEAKING for call {call_id}")
+                
+            # Replace noisy background chunk with comfort silence
+            audio_chunk = b"\x00" * len(audio_chunk)
             
         # Track chunk sending activity to verify PJSIP/Exotel audio stream is active
         if not hasattr(self, "_chunk_stats"):
@@ -336,17 +385,16 @@ class ModularSalesBot:
             async for message in dg_ws:
                 data = json.loads(message)
                 
-                # Check for speech detection to handle quick interruptions
+                # Check for speech detection events (log only, rely on local VAD for interruptions)
                 is_final = data.get("is_final", False)
                 speech_started = (data.get("type") == "SpeechStarted")
+                speech_ended = (data.get("type") == "SpeechEnded")
                 
-                if speech_started and not session_state["user_speaking"]:
-                    session_state["user_speaking"] = True
-                    if self.is_bot_actively_speaking(call_id):
-                        logger.info(f"🎤 CUSTOMER STARTED SPEAKING (Interruption) for call {call_id}")
-                        await self._handle_customer_interruption(call_id)
-                    else:
-                        logger.info(f"🎤 CUSTOMER STARTED SPEAKING (Bot is silent) for call {call_id}")
+                if speech_started:
+                    logger.info(f"🎤 DEEPGRAM VAD: SpeechStarted for call {call_id}")
+                    
+                if speech_ended:
+                    logger.info(f"🎤 DEEPGRAM VAD: SpeechEnded for call {call_id}")
                 
                 channel = data.get("channel", {})
                 if isinstance(channel, dict):
@@ -355,7 +403,16 @@ class ModularSalesBot:
                         transcript = alternatives[0].get("transcript", "")
                         if transcript.strip() and is_final:
                             logger.info(f"🎤 CUSTOMER SAID: {transcript}")
+                            
+                            # Invalidate and cancel previous speaking/thinking tasks
+                            await self._handle_customer_interruption(call_id)
+                            
                             session_state["user_speaking"] = False
+                            
+                            # Reset local VAD states upon successful transcription
+                            session_state["consecutive_speech_frames"] = 0
+                            session_state["consecutive_silence_frames"] = 20
+                            session_state["local_user_speaking"] = False
                             
                             # Forward transcription text to the LLM processor queue
                             await session_state["llm_queue"].put(transcript)
@@ -685,27 +742,22 @@ class ModularSalesBot:
             pass
 
     def is_bot_actively_speaking(self, call_id: str) -> bool:
-        """Checks if the bot is currently speaking, generating LLM response, or has non-empty playback buffers"""
+        """Checks if the bot is currently speaking (playing audio) or actively synthesizing speech"""
         session_state = self.connections.get(call_id)
         if not session_state:
             return False
             
-        # 1. Check if LLM generation task is active
-        active_llm = session_state.get("current_llm_task")
-        if active_llm and not active_llm.done():
-            return True
-            
-        # 2. Check if TTS synthesis task is active
+        # 1. Check if TTS synthesis task is active
         active_tts = session_state.get("current_tts_task")
         if active_tts and not active_tts.done():
             return True
             
-        # 3. Check if TTS queue has items pending
+        # 2. Check if TTS queue has items pending
         tts_q = session_state.get("tts_queue")
         if tts_q and not tts_q.empty():
             return True
             
-        # 4. Check if SIP playout buffer has active audio playing
+        # 3. Check if SIP playout buffer has active audio playing
         if self.sip_server:
             call_state = self.sip_server.sip_calls.get(call_id)
             if call_state and hasattr(call_state, "playback_buffer") and len(call_state.playback_buffer) > 0:
