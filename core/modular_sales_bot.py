@@ -218,10 +218,27 @@ class ModularSalesBot:
         try:
             # Define the end_call tool closure
             async def end_call() -> str:
-                """Hang up the call when the conversation is finished, the customer says goodbye, or they want to end the call."""
-                logger.info(f"📞 Tool end_call invoked for call: {call_id}")
-                asyncio.create_task(self.delayed_hangup(call_id))
-                return "Call hangup initiated"
+                """Request or confirm hang‑up.
+                If a confirmation is already pending, proceed to hang up.
+                Otherwise, ask the user to confirm before disconnecting.
+                """
+                session_state = self.connections[call_id]
+                if session_state.get("awaiting_hangup_confirmation"):
+                    # User confirmed, perform hang‑up
+                    logger.info(f"✅ End‑call confirmed by user for call {call_id}")
+                    session_state["awaiting_hangup_confirmation"] = False
+                    asyncio.create_task(self.delayed_hangup(call_id))
+                    return "Call hangup initiated"
+                else:
+                    # First request – ask for confirmation
+                    logger.info(f"⚠️ End‑call requested, asking for confirmation for call {call_id}")
+                    session_state["awaiting_hangup_confirmation"] = True
+                    # Send a confirmation prompt to the user via TTS
+                    # Use the current context ID if available, otherwise generate one
+                    ctx_id = session_state.get("current_context_id") or f"ctx_{int(time.time()*1000)}"
+                    await session_state["tts_queue"].put((ctx_id, "I am about to disconnect the call. Could you please confirm?"))
+                    return "Hangup confirmation requested"
+
 
             # Format company products/services for prompt injection
             products_summary = "; ".join([f"{p['name']} at {p['price']} ({p['description']})" for p in Config.PRODUCTS])
@@ -291,7 +308,8 @@ class ModularSalesBot:
             "consecutive_speech_frames": 0,
             "consecutive_silence_frames": 0,
             "local_user_speaking": False,
-            "start_time": time.time()      # Track startup time for startup guard
+            "start_time": time.time(),      # Track startup time for startup guard
+            "awaiting_hangup_confirmation": False
         }
         
         # 3. Play greeting instantly from cache (non-blocking) to eliminate greeting delay for the caller
@@ -531,6 +549,17 @@ class ModularSalesBot:
         try:
             while True:
                 prompt = await llm_queue.get()
+                session_state = self.connections[call_id]
+                # If we are awaiting hang‑up confirmation, treat affirmative replies as confirmation
+                if session_state.get("awaiting_hangup_confirmation"):
+                    confirm_keywords = ["yes", "yeah", "yep", "sure", "confirm", "ok", "okay", "affirmative"]
+                    if any(word in prompt.lower() for word in confirm_keywords):
+                        logger.info(f"✅ User confirmed hang‑up with phrase: '{prompt}'")
+                        # Directly invoke end_call to finalize hang‑up
+                        await session_state["end_call_tool"]()
+                        # Mark the prompt as handled and continue loop
+                        llm_queue.task_done()
+                        continue
                 logger.info(f"🧠 Querying Gemini LLM with: '{prompt}'")
                 
                 # Append user prompt to manual history list
