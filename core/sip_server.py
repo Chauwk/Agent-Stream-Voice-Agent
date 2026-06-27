@@ -333,14 +333,23 @@ class SIPServer:
                 self.transport_id = self.ep.transportCreate(pj.PJSIP_TRANSPORT_TLS, tp_cfg)
                 logger.info(f"✅ SIP Transport created: TLS/0.0.0.0:{self.sip_port}")
                 logger.info(f"🌐 Public endpoint: tls://{Config.SIP_PUBLIC_IP or self.sip_host}:{self.sip_port}")
-            elif transport_type == 'TCP':
-                self.transport_id = self.ep.transportCreate(pj.PJSIP_TRANSPORT_TCP, tp_cfg)
-                logger.info(f"✅ SIP Transport created: TCP/0.0.0.0:{self.sip_port}")
-                logger.info(f"🌐 Public endpoint: sip://{Config.SIP_PUBLIC_IP or self.sip_host}:{self.sip_port}")
             else:
-                self.transport_id = self.ep.transportCreate(pj.PJSIP_TRANSPORT_UDP, tp_cfg)
-                logger.info(f"✅ SIP Transport created: UDP/0.0.0.0:{self.sip_port}")
-                logger.info(f"🌐 Public endpoint: sip://{Config.SIP_PUBLIC_IP or self.sip_host}:{self.sip_port}")
+                # Create UDP Transport
+                try:
+                    self.udp_transport_id = self.ep.transportCreate(pj.PJSIP_TRANSPORT_UDP, tp_cfg)
+                    logger.info(f"✅ SIP Transport created: UDP/0.0.0.0:{self.sip_port}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to create UDP transport: {e}")
+                
+                # Create TCP Transport
+                try:
+                    self.tcp_transport_id = self.ep.transportCreate(pj.PJSIP_TRANSPORT_TCP, tp_cfg)
+                    logger.info(f"✅ SIP Transport created: TCP/0.0.0.0:{self.sip_port}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to create TCP transport: {e}")
+                
+                self.transport_id = getattr(self, "tcp_transport_id", getattr(self, "udp_transport_id", None))
+                logger.info(f"🌐 Public endpoints listening on: sip://{Config.SIP_PUBLIC_IP or self.sip_host}:{self.sip_port} (UDP & TCP)")
                 
             # Start Endpoint
             self.ep.libStart()
