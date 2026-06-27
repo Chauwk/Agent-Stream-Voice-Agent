@@ -223,8 +223,8 @@ class ModularSalesBot:
                 asyncio.create_task(self.delayed_hangup(call_id))
                 return "Call hangup initiated"
 
-            # Format company products/services for prompt injection (minimum size)
-            products_summary = ", ".join([f"{p['name']} ({p['price']})" for p in Config.PRODUCTS])
+            # Format company products/services for prompt injection
+            products_summary = "; ".join([f"{p['name']} at {p['price']} ({p['description']})" for p in Config.PRODUCTS])
 
             system_instruction = (
                 f"You are {Config.SALES_BOT_NAME}, sales rep for {Config.COMPANY_NAME}. Speak EXCLUSIVELY in English.\n"
@@ -447,17 +447,18 @@ class ModularSalesBot:
                 if speech_started:
                     logger.info(f"🎤 DEEPGRAM VAD: SpeechStarted for call {call_id}")
                     session_state["user_speaking"] = True
-                    if self.is_bot_actively_speaking(call_id):
-                        # Guard: Do not allow interruptions during the first 3.5 seconds of the call to protect the initial welcome greeting from transients
-                        call_age = time.time() - session_state.get("start_time", time.time())
-                        if call_age < 3.5:
-                            logger.info(f"🛡️ Guard: Ignoring SpeechStarted interruption during welcome greeting (call age: {call_age:.2f}s)")
-                        else:
-                            logger.info(f"⚡ Interrupting bot on SpeechStarted event for call {call_id}")
-                            await self._handle_customer_interruption(call_id)
+                    session_state["user_speaking_start_time"] = time.time()
+                    # We rely on final transcripts (real words spoken) for barge-in rather than raw VAD SpeechStarted
+                    # to completely protect the bot from being cut off by line clicks, breaths, background noise, or echo.
                     
                 if speech_ended:
                     logger.info(f"🎤 DEEPGRAM VAD: SpeechEnded for call {call_id}")
+                    session_state["user_speaking"] = False
+                    if "user_speaking_start_time" in session_state:
+                        try:
+                            del session_state["user_speaking_start_time"]
+                        except KeyError:
+                            pass
                     session_state["user_speaking"] = False
                 
                 channel = data.get("channel", {})
@@ -472,6 +473,11 @@ class ModularSalesBot:
                             await self._handle_customer_interruption(call_id)
                             
                             session_state["user_speaking"] = False
+                            if "user_speaking_start_time" in session_state:
+                                try:
+                                    del session_state["user_speaking_start_time"]
+                                except KeyError:
+                                    pass
                             
                             # Reset local VAD states upon successful transcription
                             session_state["consecutive_speech_frames"] = 0
@@ -542,6 +548,7 @@ class ModularSalesBot:
                 session_state["current_context_id"] = context_id
                 
                 generated_text = ""
+                start_query_time = time.time()
                 
                 # Inner function to stream Gemini response and parse sentences
                 async def run_gemini():
@@ -558,8 +565,12 @@ class ModularSalesBot:
                             )
                         )
                         current_sentence = ""
+                        first_chunk = True
                         
                         async for chunk in response:
+                            if first_chunk:
+                                logger.info(f"🧠 Gemini LLM first chunk received in {time.time() - start_query_time:.3f}s")
+                                first_chunk = False
                             text_delta = chunk.text
                             if text_delta:
                                 generated_text += text_delta
@@ -964,7 +975,30 @@ class ModularSalesBot:
                     break
                     
                 # Update last activity if user is speaking or bot is speaking/synthesizing
-                if session_state.get("user_speaking") or self.is_bot_actively_speaking(call_id):
+                user_is_speaking = session_state.get("user_speaking")
+                
+                # Safety timeout: if user_speaking has been True for more than 4.0 seconds without any words transcribed,
+                # force reset it to prevent silence monitor from getting stuck due to missed SpeechEnded events or line noise.
+                if user_is_speaking:
+                    if "user_speaking_start_time" not in session_state:
+                        session_state["user_speaking_start_time"] = time.time()
+                    elif time.time() - session_state["user_speaking_start_time"] > 4.0:
+                        logger.info(f"⏱️ Safety guard: Resetting stuck user_speaking state for call {call_id}")
+                        session_state["user_speaking"] = False
+                        user_is_speaking = False
+                        if "user_speaking_start_time" in session_state:
+                            try:
+                                del session_state["user_speaking_start_time"]
+                            except KeyError:
+                                pass
+                else:
+                    if "user_speaking_start_time" in session_state:
+                        try:
+                            del session_state["user_speaking_start_time"]
+                        except KeyError:
+                            pass
+                
+                if user_is_speaking or self.is_bot_actively_speaking(call_id):
                     session_state["last_activity_time"] = time.time()
                     continue
                     
