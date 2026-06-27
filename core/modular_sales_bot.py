@@ -448,8 +448,13 @@ class ModularSalesBot:
                     logger.info(f"🎤 DEEPGRAM VAD: SpeechStarted for call {call_id}")
                     session_state["user_speaking"] = True
                     if self.is_bot_actively_speaking(call_id):
-                        logger.info(f"⚡ Interrupting bot on SpeechStarted event for call {call_id}")
-                        await self._handle_customer_interruption(call_id)
+                        # Guard: Do not allow interruptions during the first 3.5 seconds of the call to protect the initial welcome greeting from transients
+                        call_age = time.time() - session_state.get("start_time", time.time())
+                        if call_age < 3.5:
+                            logger.info(f"🛡️ Guard: Ignoring SpeechStarted interruption during welcome greeting (call age: {call_age:.2f}s)")
+                        else:
+                            logger.info(f"⚡ Interrupting bot on SpeechStarted event for call {call_id}")
+                            await self._handle_customer_interruption(call_id)
                     
                 if speech_ended:
                     logger.info(f"🎤 DEEPGRAM VAD: SpeechEnded for call {call_id}")
