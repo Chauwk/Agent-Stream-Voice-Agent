@@ -12,6 +12,9 @@ Set OPENAI_API_KEY environment variable before running.
 import asyncio
 import websockets
 import json
+from core.rag_manager import RAGManager
+
+RAG_MANAGER = RAGManager()
 import logging
 import base64
 import time
@@ -37,6 +40,8 @@ class OpenAIRealtimeSalesBot:
     def __init__(self):
         # Validate configuration first
         Config.validate()
+        # Mapping of stream_id to company_id for RAG queries
+        self.connection_company_map = {}
         
         self.openai_connections: Dict[str, Any] = {}
         

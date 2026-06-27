@@ -5,7 +5,7 @@ Handles functional business logic for retrieving sales bot metrics, dynamic runt
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -15,6 +15,10 @@ active_bot_instance = None
 
 # Track active streaming connections globally (deprecated in SIP-only mode)
 _active_connections_counter = 0
+
+# Initialise a RAG manager for company lookups
+from core.rag_manager import RAGManager
+rag_manager = RAGManager()
 
 def increment_active_connections():
     """Increment global active stream counter"""
@@ -28,6 +32,21 @@ def decrement_active_connections():
     if _active_connections_counter > 0:
         _active_connections_counter -= 1
     logger.debug(f"📉 Active connection decremented: {_active_connections_counter}")
+
+async def get_company_id_by_phone(phone_number: str) -> str | None:
+    """Simple lookup in companies registry matching exact phone number."""
+    for cid, meta in rag_manager._companies_cache.items():
+        if meta.get("phone_number") == phone_number:
+            return cid
+    return None
+
+async def query_knowledge_base(phone_number: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    """Resolve company from phone and perform RAG search."""
+    company_id = await get_company_id_by_phone(phone_number)
+    if not company_id:
+        raise ValueError(f"Company not found for phone {phone_number}")
+    results = await rag_manager.search(company_id, query, top_k)
+    return [{"chunk": r["chunk_text"], "source": r["metadata"].get("source")} for r in results]
 
 async def get_active_bot_telemetry() -> Dict[str, Any]:
     """

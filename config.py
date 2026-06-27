@@ -32,7 +32,7 @@ class Config:
     SARVAM_MODEL = os.getenv('SARVAM_MODEL', 'bulbul:v3')
     SARVAM_SPEAKER = os.getenv('SARVAM_SPEAKER', 'shubh')
     SARVAM_LANGUAGE_CODE = os.getenv('SARVAM_LANGUAGE_CODE', 'hi-IN')
-    SARVAM_PACE = float(os.getenv('SARVAM_PACE', '1.15'))  # 1.15x speed for more energy
+    SARVAM_PACE = float(os.getenv('SARVAM_PACE', '1.05'))  # 1.05x speed for a natural and clear pace
     SARVAM_PITCH = float(os.getenv('SARVAM_PITCH', '0.0'))
     
     # ===== SERVER SETTINGS =====

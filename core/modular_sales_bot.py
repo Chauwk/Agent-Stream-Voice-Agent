@@ -229,10 +229,12 @@ class ModularSalesBot:
             system_instruction = (
                 f"You are {Config.SALES_BOT_NAME}, sales rep for {Config.COMPANY_NAME}. Speak EXCLUSIVELY in English.\n"
                 "Strict Rules:\n"
-                "- Keep responses concise. Under 15 words per sentence, and max 35 words total. No lists/markdown.\n"
+                "- Keep responses concise, under 25 words per sentence, and max 60 words total. No lists/markdown.\n"
                 f"- Only sell these standard services: {products_summary}. Reject custom deals/discounts.\n"
                 "- Decline off-topic queries (coding, math, politics) and steer back to Chauwk sales.\n"
-                "- Never praise or mention competitors. Call the end_call tool to hang up."
+                "- Never praise or mention competitors.\n"
+                "- Call the end_call tool to hang up only when the conversation is finished, the customer says goodbye, or they explicitly ask to end/hang up the call.\n"
+                "- When the call is ending, make sure to state a warm goodbye (e.g., 'Thank you for calling. Goodbye!') first, and then call the end_call tool to hang up."
             )
             
             from google.genai import types
@@ -311,8 +313,9 @@ class ModularSalesBot:
             llm_process_task = asyncio.create_task(self._process_llm_queue(call_id))
             dg_keepalive_task = asyncio.create_task(self._send_deepgram_keepalives(call_id))
             sarvam_ws_task = asyncio.create_task(self._run_sarvam_websocket_loop(call_id))
+            silence_task = asyncio.create_task(self._silence_monitor_loop(call_id))
             
-            session_state["tasks"].extend([dg_task, tts_process_task, llm_process_task, dg_keepalive_task, sarvam_ws_task])
+            session_state["tasks"].extend([dg_task, tts_process_task, llm_process_task, dg_keepalive_task, sarvam_ws_task, silence_task])
             
         except Exception as e:
             logger.error(f"❌ Failed to initialize modular pipeline sockets: {e}")
@@ -443,12 +446,14 @@ class ModularSalesBot:
                 
                 if speech_started:
                     logger.info(f"🎤 DEEPGRAM VAD: SpeechStarted for call {call_id}")
+                    session_state["user_speaking"] = True
                     if self.is_bot_actively_speaking(call_id):
                         logger.info(f"⚡ Interrupting bot on SpeechStarted event for call {call_id}")
                         await self._handle_customer_interruption(call_id)
                     
                 if speech_ended:
                     logger.info(f"🎤 DEEPGRAM VAD: SpeechEnded for call {call_id}")
+                    session_state["user_speaking"] = False
                 
                 channel = data.get("channel", {})
                 if isinstance(channel, dict):
@@ -935,6 +940,45 @@ class ModularSalesBot:
                 session_state["tts_queue"].task_done()
             except asyncio.QueueEmpty:
                 break
+
+    async def _silence_monitor_loop(self, call_id: str):
+        """Monitors caller silence and injects follow-up prompts if inactive for 10 seconds"""
+        session_state = self.connections.get(call_id)
+        if not session_state:
+            return
+            
+        logger.info(f"⏱️ Starting silence monitor loop for call {call_id}")
+        session_state["last_activity_time"] = time.time()
+        
+        try:
+            while True:
+                await asyncio.sleep(1.0)
+                
+                session_state = self.connections.get(call_id)
+                if not session_state:
+                    break
+                    
+                # Update last activity if user is speaking or bot is speaking/synthesizing
+                if session_state.get("user_speaking") or self.is_bot_actively_speaking(call_id):
+                    session_state["last_activity_time"] = time.time()
+                    continue
+                    
+                # Check idle duration
+                idle_time = time.time() - session_state.get("last_activity_time", time.time())
+                if idle_time >= 10.0:
+                    logger.info(f"⏱️ Silence detected for 10 seconds on call {call_id}. Injecting follow-up prompt.")
+                    # Reset timer to prevent rapid repeated follow-ups
+                    session_state["last_activity_time"] = time.time()
+                    
+                    llm_queue = session_state.get("llm_queue")
+                    if llm_queue:
+                        # Feed a system directive into the LLM processor queue
+                        await llm_queue.put("System: The customer has been silent for 10 seconds. Please prompt them to see if they are still there or need help.")
+                        
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Error in silence monitor loop: {e}")
 
     async def cleanup_connections(self, call_id: str):
         """Closes deepgram socket and cancels tasks for a call session"""
