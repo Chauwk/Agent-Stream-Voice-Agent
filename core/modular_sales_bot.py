@@ -233,7 +233,7 @@ class ModularSalesBot:
                 f"- Only sell these standard services: {products_summary}. Reject custom deals/discounts.\n"
                 "- Decline off-topic queries (coding, math, politics) and steer back to Chauwk sales.\n"
                 "- Never praise or mention competitors.\n"
-                "- Call the end_call tool to hang up only when the conversation is finished, the customer says goodbye, or they explicitly ask to end/hang up the call.\n"
+                "- Call the end_call tool to hang up ONLY when the customer explicitly says goodbye or requests to hang up/end the call (e.g. 'goodbye', 'bye', 'hang up', 'end the call'). Do NOT call the end_call tool for product selections, questions, or vague inputs.\n"
                 "- When the call is ending, make sure to state a warm goodbye (e.g., 'Thank you for calling. Goodbye!') first, and then call the end_call tool to hang up."
             )
             
