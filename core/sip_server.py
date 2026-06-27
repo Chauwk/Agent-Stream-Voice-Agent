@@ -153,6 +153,12 @@ class MyCall(CallBase):
             ci = self.getInfo()
             logger.info(f"🎵 Call media state changed for call {ci.callIdString}")
             
+            # Prevent mid-call media renegotiations from resetting the session and history
+            call_state = self.sip_server.sip_calls.get(self.sip_call_id)
+            if call_state and call_state.openai_connected:
+                logger.info(f"⏭️ Call {self.sip_call_id} is already bridged. Ignoring media state change to prevent reset.")
+                return
+            
             # Loop through call media streams to find active audio
             for i in range(len(ci.media)):
                 mi = ci.media[i]
