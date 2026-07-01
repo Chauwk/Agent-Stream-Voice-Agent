@@ -230,26 +230,43 @@ class MyAccount(AccountBase):
             # Create a MyCall object to handle incoming call
             call = MyCall(self, self.sip_server, prm.callId)
             
-            # Keep the call object alive in Python to prevent immediate garbage collection & call drop
+            # Retrieve call details
             try:
                 ci = call.getInfo()
+                remote_uri = ci.remoteUri
+                local_uri = ci.localUri
                 call_id_str = ci.callIdString
-                self.sip_server._call_objects[call_id_str] = call
-                logger.info(f"📌 Kept call reference alive for {call_id_str}")
             except Exception as e:
-                # Fallback key if getInfo is not ready
-                temp_key = f"temp_{prm.callId}"
-                self.sip_server._call_objects[temp_key] = call
-                logger.info(f"📌 Kept call reference alive with fallback key {temp_key}: {e}")
+                logger.error(f"❌ Error getting call info for callId={prm.callId}: {e}")
+                # Fallback to reject to be safe
+                call_prm = pj.CallOpParam()
+                call_prm.statusCode = 403
+                call.answer(call_prm)
+                return
+
+            # Security check: verify that the call is from Exotel carrier trunk
+            is_valid_exotel = ("exotel" in remote_uri.lower() or "exotel" in local_uri.lower())
+            
+            if not is_valid_exotel:
+                logger.warning(f"🛡️ REJECTED UNAUTHORIZED SIP CALL (Scanner Blocked): remote={remote_uri}, local={local_uri}")
+                call_prm = pj.CallOpParam()
+                call_prm.statusCode = 403  # Forbidden
+                call.answer(call_prm)
+                return
+
+            # Keep the call object alive in Python to prevent immediate garbage collection & call drop
+            self.sip_server._call_objects[call_id_str] = call
+            logger.info(f"📌 Kept call reference alive for authorized call {call_id_str}")
             
             # Answer with 200 OK status
             call_prm = pj.CallOpParam()
             call_prm.statusCode = 200
             call.answer(call_prm)
-            logger.info("✅ Answered incoming SIP call successfully!")
+            logger.info(f"✅ Answered incoming SIP call successfully: remote={remote_uri}")
             
         except Exception as e:
             logger.error(f"❌ Error answering call: {e}")
+
 
 class MyLogWriter(LogWriterBase):
     """Bridges PJSUA2 internal native logs into Python's logging module"""
