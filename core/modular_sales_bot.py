@@ -309,7 +309,8 @@ class ModularSalesBot:
             "consecutive_silence_frames": 0,
             "local_user_speaking": False,
             "start_time": time.time(),      # Track startup time for startup guard
-            "awaiting_hangup_confirmation": False
+            "awaiting_hangup_confirmation": False,
+            "silence_prompts_count": 0
         }
         
         # 3. Play greeting instantly from cache (non-blocking) to eliminate greeting delay for the caller
@@ -1034,9 +1035,19 @@ class ModularSalesBot:
                 # Check idle duration
                 idle_time = time.time() - session_state.get("last_activity_time", time.time())
                 if idle_time >= 10.0:
-                    logger.info(f"⏱️ Silence detected for 10 seconds on call {call_id}. Injecting follow-up prompt.")
                     # Reset timer to prevent rapid repeated follow-ups
                     session_state["last_activity_time"] = time.time()
+                    
+                    silence_count = session_state.get("silence_prompts_count", 0)
+                    if silence_count >= 2:
+                        logger.info(f"⏱️ Maximum silence limit (2) reached for call {call_id}. Hanging up.")
+                        ctx_id = session_state.get("current_context_id") or f"ctx_{int(time.time()*1000)}"
+                        await session_state["tts_queue"].put((ctx_id, "Since I haven't heard from you, I'll go ahead and disconnect. Goodbye!"))
+                        asyncio.create_task(self.delayed_hangup(call_id))
+                        break
+                        
+                    session_state["silence_prompts_count"] = silence_count + 1
+                    logger.info(f"⏱️ Silence detected for 10 seconds on call {call_id} (count: {silence_count + 1}/2). Injecting follow-up prompt.")
                     
                     llm_queue = session_state.get("llm_queue")
                     if llm_queue:
