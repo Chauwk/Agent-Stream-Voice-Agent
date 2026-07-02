@@ -1034,7 +1034,7 @@ class ModularSalesBot:
                     
                 # Check idle duration
                 idle_time = time.time() - session_state.get("last_activity_time", time.time())
-                if idle_time >= 10.0:
+                if idle_time >= 8.0:
                     # Reset timer to prevent rapid repeated follow-ups
                     session_state["last_activity_time"] = time.time()
                     
@@ -1047,12 +1047,12 @@ class ModularSalesBot:
                         break
                         
                     session_state["silence_prompts_count"] = silence_count + 1
-                    logger.info(f"⏱️ Silence detected for 10 seconds on call {call_id} (count: {silence_count + 1}/2). Injecting follow-up prompt.")
+                    logger.info(f"⏱️ Silence detected for 8 seconds on call {call_id} (count: {silence_count + 1}/2). Injecting follow-up prompt.")
                     
                     llm_queue = session_state.get("llm_queue")
                     if llm_queue:
                         # Feed a system directive into the LLM processor queue
-                        await llm_queue.put("System: The customer has been silent for 10 seconds. Please prompt them to see if they are still there or need help.")
+                        await llm_queue.put("System: The customer has been silent for 8 seconds. Please prompt them to see if they are still there or need help.")
                         
         except asyncio.CancelledError:
             pass
