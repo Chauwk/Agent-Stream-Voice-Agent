@@ -15,7 +15,18 @@ from sarvamai import SarvamAI, AsyncSarvamAI
 from config import Config
 from websockets.connection import State
 
+class TriggerToolRecallException(Exception):
+    """Exception raised to restart Gemini stream after executing a tool call"""
+    pass
+
 logger = logging.getLogger(__name__)
+
+def is_hindi(text: str) -> bool:
+    """Helper to detect if text contains Devanagari (Hindi) characters"""
+    for char in text:
+        if '\u0900' <= char <= '\u097f':
+            return True
+    return False
 
 class ModularSalesBot:
     """Modular Voice AI bot integrating Deepgram, Gemini, and Sarvam AI with PJSIP telephony"""
@@ -207,6 +218,14 @@ class ModularSalesBot:
         """
         logger.info(f"🔗 INITIALIZING MODULAR PIPELINE for call: {call_id}")
         
+        # Resolve called virtual DID number
+        session_to_phone = "default"
+        if self.sip_server and call_id in self.sip_server.sip_calls:
+            sip_call = self.sip_server.sip_calls[call_id]
+            from controllers.bot_controller import extract_phone_number_from_uri
+            session_to_phone = extract_phone_number_from_uri(sip_call.to_uri)
+            logger.info(f"Resolved called DID number: {session_to_phone}")
+            
         # Ensure Gemini warmup runs if it hasn't completed yet
         if not getattr(self, "gemini_warmed_up", False) and self.gemini_client:
             asyncio.create_task(self._warmup_gemini())
@@ -239,19 +258,46 @@ class ModularSalesBot:
                     await session_state["tts_queue"].put((ctx_id, "I am about to disconnect the call. Could you please confirm?"))
                     return "Hangup confirmation requested"
 
+            # Define query_knowledge_base tool
+            async def query_knowledge_base(query: str) -> str:
+                """Search the company knowledge base for answers about services, products, pricing, custom deals, and policies.
+                Use this tool when you need information to answer the customer's query.
+
+                Args:
+                    query: The query string to search for in the database.
+                """
+                phone = session_to_phone
+                logger.info(f"🔎 Modular Bot RAG search query: '{query}' for phone: {phone}")
+                
+                try:
+                    from controllers.bot_controller import query_knowledge_base as db_query
+                    results = await db_query(phone, query, top_k=3)
+                    if not results:
+                        return "No matches found in the knowledge base."
+                    
+                    response_text = "\n\n".join([
+                        f"Document: {r['source']}\nContent: {r['chunk']}"
+                        for r in results
+                    ])
+                    logger.info(f"✅ RAG results found: {len(results)} chunks")
+                    return response_text
+                except Exception as db_err:
+                    logger.error(f"❌ RAG search failed: {db_err}")
+                    return "Error: Unable to search the knowledge base at this time. Fallback to general knowledge."
 
             # Format company products/services for prompt injection
             products_summary = "; ".join([f"{p['name']} at {p['price']} ({p['description']})" for p in Config.PRODUCTS])
 
             system_instruction = (
-                f"You are {Config.SALES_BOT_NAME}, sales rep for {Config.COMPANY_NAME}. Speak EXCLUSIVELY in English.\n"
+                f"You are {Config.SALES_BOT_NAME}, sales rep for {Config.COMPANY_NAME}. Speak in the language the customer speaks (either English or Hindi). If they speak Hindi, respond in Hindi. If they speak English, respond in English.\n"
                 "Strict Rules:\n"
                 "- Keep responses concise, under 25 words per sentence, and max 60 words total. No lists/markdown.\n"
-                f"- Only sell these standard services: {products_summary}. Reject custom deals/discounts.\n"
-                "- Decline off-topic queries (coding, math, politics) and steer back to Chauwk sales.\n"
+                f"- Sell these standard services: {products_summary}.\n"
+                "- If the customer asks questions about custom services, business pricing, custom deals, company policies, or details not listed in standard products, call the query_knowledge_base tool to retrieve accurate information. Do not guess.\n"
+                "- Decline general off-topic queries (coding, math, politics) and steer back to company sales.\n"
                 "- Never praise or mention competitors.\n"
-                "- Call the end_call tool to hang up ONLY when the customer explicitly says goodbye or requests to hang up/end the call (e.g. 'goodbye', 'bye', 'hang up', 'end the call'). Do NOT call the end_call tool for product selections, questions, or vague inputs.\n"
-                "- When the call is ending, make sure to state a warm goodbye (e.g., 'Thank you for calling. Goodbye!') first, and then call the end_call tool to hang up."
+                "- Call the end_call tool to hang up ONLY when the customer explicitly says goodbye or requests to hang up/end the call (e.g. 'goodbye', 'bye', 'hang up', 'end the call', 'अलविदा', 'नमस्ते'). Do NOT call the end_call tool for product selections, questions, or vague inputs.\n"
+                "- When the call is ending, make sure to state a warm goodbye first (e.g. 'Thank you for calling. Goodbye!' in English, or 'कॉल करने के लिए धन्यवाद। अलविदा!' in Hindi), and then call the end_call tool to hang up."
             )
             
             from google.genai import types
@@ -294,6 +340,8 @@ class ModularSalesBot:
             "system_instruction": system_instruction,
             "safety_settings": safety_settings,
             "end_call_tool": end_call,
+            "query_knowledge_base_tool": query_knowledge_base,
+            "to_phone": session_to_phone,
             "deepgram_ws": None,
             "sarvam_ws": None,
             "reconnect_event": asyncio.Event(),
@@ -310,7 +358,8 @@ class ModularSalesBot:
             "local_user_speaking": False,
             "start_time": time.time(),      # Track startup time for startup guard
             "awaiting_hangup_confirmation": False,
-            "silence_prompts_count": 0
+            "silence_prompts_count": 0,
+            "sarvam_current_language_code": None
         }
         
         # 3. Play greeting instantly from cache (non-blocking) to eliminate greeting delay for the caller
@@ -345,9 +394,9 @@ class ModularSalesBot:
         """Connect to Deepgram WebSocket"""
         session_state = self.connections[call_id]
         
-        # Deepgram Live WS config - boost company and bot name keywords
+        # Deepgram Live WS config - boost company and bot name keywords with multilingual support
         endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
-        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&keywords=Chauwk:4.0&keywords=Sarah:2.0"
+        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&language=multi&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&keywords=Chauwk:4.0&keywords=Sarah:2.0"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
         import inspect
@@ -544,6 +593,7 @@ class ModularSalesBot:
         system_instruction = session_state["system_instruction"]
         safety_settings = session_state["safety_settings"]
         end_call = session_state["end_call_tool"]
+        query_knowledge_base = session_state["query_knowledge_base_tool"]
         llm_queue = session_state["llm_queue"]
         tts_queue = session_state["tts_queue"]
         
@@ -583,73 +633,128 @@ class ModularSalesBot:
                 # Inner function to stream Gemini response and parse sentences
                 async def run_gemini():
                     nonlocal generated_text
-                    try:
-                        # Call generate_content_stream using the shared client
-                        response = await self.gemini_client.aio.models.generate_content_stream(
-                            model=Config.GEMINI_MODEL,
-                            contents=history,
-                            config=types.GenerateContentConfig(
-                                system_instruction=system_instruction,
-                                tools=[end_call],
-                                safety_settings=safety_settings
+                    while True:
+                        try:
+                            # Call generate_content_stream using the shared client
+                            response = await self.gemini_client.aio.models.generate_content_stream(
+                                model=Config.GEMINI_MODEL,
+                                contents=history,
+                                config=types.GenerateContentConfig(
+                                    system_instruction=system_instruction,
+                                    tools=[end_call, query_knowledge_base],
+                                    safety_settings=safety_settings
+                                )
                             )
-                        )
-                        current_sentence = ""
-                        first_chunk = True
-                        
-                        async for chunk in response:
-                            if first_chunk:
-                                logger.info(f"🧠 Gemini LLM first chunk received in {time.time() - start_query_time:.3f}s")
-                                first_chunk = False
-                            text_delta = chunk.text
-                            if text_delta:
-                                generated_text += text_delta
-                                current_sentence += text_delta
+                            current_sentence = ""
+                            first_chunk = True
+                            
+                            async for chunk in response:
+                                if first_chunk:
+                                    logger.info(f"🧠 Gemini LLM first chunk received in {time.time() - start_query_time:.3f}s")
+                                    first_chunk = False
+                                    
+                                # Check for function calls
+                                if chunk.function_calls:
+                                    for fc in chunk.function_calls:
+                                        logger.info(f"🔧 Gemini requested function call: {fc.name} with args {fc.args}")
+                                        if fc.name == "end_call":
+                                            result = await end_call()
+                                            history.append(
+                                                types.Content(
+                                                    role="model",
+                                                    parts=[types.Part.from_function_call(
+                                                        name=fc.name,
+                                                        args=fc.args
+                                                    )]
+                                                )
+                                            )
+                                            history.append(
+                                                types.Content(
+                                                    role="user",
+                                                    parts=[types.Part.from_function_response(
+                                                        name=fc.name,
+                                                        response={"result": result}
+                                                    )]
+                                                )
+                                            )
+                                            return
+                                        elif fc.name == "query_knowledge_base":
+                                            q_val = fc.args.get("query", "")
+                                            ans = await query_knowledge_base(q_val)
+                                            history.append(
+                                                types.Content(
+                                                    role="model",
+                                                    parts=[types.Part.from_function_call(
+                                                        name=fc.name,
+                                                        args=fc.args
+                                                    )]
+                                                )
+                                            )
+                                            history.append(
+                                                types.Content(
+                                                    role="user",
+                                                    parts=[types.Part.from_function_response(
+                                                        name=fc.name,
+                                                        response={"result": ans}
+                                                    )]
+                                                )
+                                            )
+                                            raise TriggerToolRecallException()
+                                            
+                                text_delta = chunk.text
+                                if text_delta:
+                                    generated_text += text_delta
+                                    current_sentence += text_delta
+                                    
+                                    # Split by sentence boundaries (., ?, !, \n) or clause boundaries (,, ;)
+                                    while True:
+                                        idx = -1
+                                        punctuations = ['.', '?', '!', '\n', ',', ';']
+                                        for p in punctuations:
+                                            p_idx = current_sentence.find(p)
+                                            if p_idx != -1:
+                                                if idx == -1 or p_idx < idx:
+                                                    idx = p_idx
+                                                    
+                                        if idx == -1:
+                                            break
+                                            
+                                        split_char = current_sentence[idx]
+                                        chunk_candidate = current_sentence[:idx+1].strip()
+                                        
+                                        # For commas or semicolons, enforce a minimum length threshold to avoid tiny fragments
+                                        if split_char in [',', ';']:
+                                            words = chunk_candidate.split()
+                                            if len(words) < 3 or len(chunk_candidate) < 15:
+                                                next_idx = -1
+                                                for p in punctuations:
+                                                    p_idx = current_sentence.find(p, idx + 1)
+                                                    if p_idx != -1:
+                                                        if next_idx == -1 or p_idx < next_idx:
+                                                            next_idx = p_idx
+                                                if next_idx != -1:
+                                                    idx = next_idx
+                                                    split_char = current_sentence[idx]
+                                                    chunk_candidate = current_sentence[:idx+1].strip()
+                                                else:
+                                                    break
+                                                    
+                                        sentence_to_send = current_sentence[:idx+1].strip()
+                                        current_sentence = current_sentence[idx+1:]
+                                        
+                                        if sentence_to_send:
+                                            await tts_queue.put((context_id, sentence_to_send))
+                                            
+                            if current_sentence.strip():
+                                await tts_queue.put((context_id, current_sentence.strip()))
                                 
-                                # Split by sentence boundaries (., ?, !, \n) or clause boundaries (,, ;)
-                                while True:
-                                    idx = -1
-                                    punctuations = ['.', '?', '!', '\n', ',', ';']
-                                    for p in punctuations:
-                                        p_idx = current_sentence.find(p)
-                                        if p_idx != -1:
-                                            if idx == -1 or p_idx < idx:
-                                                idx = p_idx
-                                                
-                                    if idx == -1:
-                                        break
-                                        
-                                    split_char = current_sentence[idx]
-                                    chunk_candidate = current_sentence[:idx+1].strip()
-                                    
-                                    # For commas or semicolons, enforce a minimum length threshold to avoid tiny fragments
-                                    if split_char in [',', ';']:
-                                        words = chunk_candidate.split()
-                                        if len(words) < 3 or len(chunk_candidate) < 15:
-                                            next_idx = -1
-                                            for p in punctuations:
-                                                p_idx = current_sentence.find(p, idx + 1)
-                                                if p_idx != -1:
-                                                    if next_idx == -1 or p_idx < next_idx:
-                                                        next_idx = p_idx
-                                            if next_idx != -1:
-                                                idx = next_idx
-                                                split_char = current_sentence[idx]
-                                                chunk_candidate = current_sentence[:idx+1].strip()
-                                            else:
-                                                break
-                                                
-                                    sentence_to_send = current_sentence[:idx+1].strip()
-                                    current_sentence = current_sentence[idx+1:]
-                                    
-                                    if sentence_to_send:
-                                        await tts_queue.put((context_id, sentence_to_send))
-                                        
-                        if current_sentence.strip():
-                            await tts_queue.put((context_id, current_sentence.strip()))
-                    except Exception as e:
-                        logger.error(f"❌ Gemini generation error inside task: {e}")
-                        raise
+                            break
+                        except TriggerToolRecallException:
+                            logger.info("🔄 Tool called. Restarting Gemini generation stream...")
+                            continue
+                        except Exception as e:
+                            logger.error(f"❌ Gemini generation error inside task: {e}")
+                            raise
 
                 llm_task = asyncio.create_task(run_gemini())
                 session_state["current_llm_task"] = llm_task
@@ -720,6 +825,7 @@ class ModularSalesBot:
                     await socket_client.configure(**kwargs)
                     
                     session_state["sarvam_ws"] = socket_client
+                    session_state["sarvam_current_language_code"] = Config.SARVAM_LANGUAGE_CODE
                     logger.info(f"🔊 Sarvam AI WebSocket is ready for call {call_id}.")
                     
                     # Connection keep-alive ping loop
@@ -799,6 +905,9 @@ class ModularSalesBot:
                 
                 logger.info(f"🔊 Processing TTS for sentence: '{sentence_text}'")
                 
+                # Detect language of the text to pass correct code to Sarvam
+                detected_lang = "hi-IN" if is_hindi(sentence_text) else "en-IN"
+                
                 # Attempt to get Sarvam WebSocket connection
                 sarvam_ws = session_state.get("sarvam_ws")
                 if not sarvam_ws or not sarvam_ws._websocket.open:
@@ -812,6 +921,27 @@ class ModularSalesBot:
                         if sarvam_ws and sarvam_ws._websocket.open:
                             break
                 
+                # Reconfigure WebSocket dynamically if language changed
+                if sarvam_ws and sarvam_ws._websocket.open and context_id == session_state["current_context_id"]:
+                    last_lang = session_state.get("sarvam_current_language_code")
+                    if last_lang != detected_lang:
+                        logger.info(f"🔄 Reconfiguring Sarvam WebSocket language from '{last_lang}' to '{detected_lang}'")
+                        kwargs = {
+                            "target_language_code": detected_lang,
+                            "speaker": Config.SARVAM_SPEAKER,
+                            "speech_sample_rate": 16000,
+                            "output_audio_codec": "linear16"
+                        }
+                        pace = getattr(Config, "SARVAM_PACE", 1.15)
+                        if pace is not None:
+                            kwargs["pace"] = pace
+                        pitch = getattr(Config, "SARVAM_PITCH", 0.0)
+                        if pitch is not None and pitch != 0.0 and "bulbul:v3" not in Config.SARVAM_MODEL:
+                            kwargs["pitch"] = pitch
+                            
+                        await sarvam_ws.configure(**kwargs)
+                        session_state["sarvam_current_language_code"] = detected_lang
+                
                 # Fallback to HTTP POST TTS if WebSocket is not ready
                 if not sarvam_ws or not sarvam_ws._websocket.open or context_id != session_state["current_context_id"]:
                     if context_id != session_state["current_context_id"]:
@@ -822,7 +952,7 @@ class ModularSalesBot:
                     try:
                         kwargs = {
                             "text": sentence_text,
-                            "target_language_code": Config.SARVAM_LANGUAGE_CODE,
+                            "target_language_code": detected_lang,
                             "speaker": Config.SARVAM_SPEAKER,
                             "model": Config.SARVAM_MODEL,
                             "output_audio_codec": "linear16",
