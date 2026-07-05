@@ -320,6 +320,8 @@ class OpenAIRealtimeSalesBot:
                 result = await self.transfer_to_human_enhanced(stream_id, arguments)
             elif function_name == "end_call":
                 result = await self.end_call_enhanced(stream_id, arguments)
+            elif function_name == "query_knowledge_base":
+                result = await self.query_knowledge_base_enhanced(stream_id, arguments)
             else:
                 result = {"status": "unknown_function", "error": f"Function {function_name} not implemented"}
             
@@ -352,6 +354,34 @@ class OpenAIRealtimeSalesBot:
             
         except Exception as e:
             logger.error(f"❌ Error handling enhanced function call: {e}")
+
+    async def query_knowledge_base_enhanced(self, stream_id: str, args: dict) -> dict:
+        """Query RAG system using search parameters for caller's company context"""
+        query = args.get("query", "")
+        top_k = args.get("top_k", 3)
+        
+        # Get target phone number of call
+        to_phone = "default"
+        if self.sip_server and stream_id in self.sip_server.sip_calls:
+            sip_call = self.sip_server.sip_calls[stream_id]
+            from controllers.bot_controller import extract_phone_number_from_uri
+            to_phone = extract_phone_number_from_uri(sip_call.to_uri)
+            
+        logger.info(f"🔎 OpenAI Realtime Bot RAG search query: '{query}' for phone: {to_phone}")
+        
+        try:
+            from controllers.bot_controller import query_knowledge_base
+            results = await query_knowledge_base(to_phone, query, top_k)
+            return {
+                "status": "success",
+                "results": results
+            }
+        except Exception as e:
+            logger.error(f"❌ OpenAI Realtime Bot RAG query failed: {e}")
+            return {
+                "status": "error",
+                "error": str(e)
+            }
 
     async def schedule_demo_enhanced(self, args: dict) -> dict:
         """Enhanced demo scheduling with better data capture"""

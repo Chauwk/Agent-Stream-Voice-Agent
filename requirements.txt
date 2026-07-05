@@ -26,4 +26,13 @@ google-generativeai
 google-genai
 sarvamai
 
-
+# RAG & Database dependencies
+chromadb
+boto3
+sqlalchemy
+psycopg2-binary
+python-docx
+python-pptx
+beautifulsoup4
+PyPDF2
+python-multipart

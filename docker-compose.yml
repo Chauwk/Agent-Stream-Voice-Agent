@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+  # Container 1: The Voice Bot Application
   voice-bot:
     build:
       context: .
@@ -20,10 +21,20 @@ services:
       - SIP_REALM=exotel.com
       - EXOTEL_OUTBOUND_PROXY=proxy.exotel.in:5060
       
-      # OpenAI
+      # OpenAI Realtime Fallback
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=gpt-4o-realtime-preview-2024-12-17
       - OPENAI_VOICE=coral
+      
+      # Gemini Configuration
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=gemini-2.5-flash
+      
+      # RAG Config
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - AWS_S3_BUCKET_NAME=${AWS_S3_BUCKET_NAME}
+      - DATABASE_URL=${DATABASE_URL}
       
       # Bot Personality
       - COMPANY_NAME=${COMPANY_NAME:-Your Company}
@@ -48,8 +59,14 @@ services:
     ports:
       - "5060:5060/tcp"
       - "5060:5060/udp"
-      - "5000:5000/tcp"  # WebSocket fallback (optional)
+      - "5000:5000/tcp"
     
+    depends_on:
+      - chromadb
+    
+    networks:
+      - voice-bot-network
+      
     restart: always
     
     # Health check
@@ -60,7 +77,7 @@ services:
       retries: 3
       start_period: 40s
     
-    # Resource limits (optional)
+    # Resource limits
     deploy:
       resources:
         limits:
@@ -77,6 +94,28 @@ services:
         max-size: "10m"
         max-file: "3"
 
-volumes:
-  voice-bot-data:
-    driver: local
+  # Container 2: Chroma Vector Database Server
+  chromadb:
+    image: chromadb/chroma:0.5.3
+    container_name: chromadb
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+    ports:
+      - "8000:8000"
+    volumes:
+      # PERSISTENCE: Maps a local directory in the repo to Chroma container.
+      # Since the repo is on the EC2 instance volume, this writes to your EBS volume.
+      - ./chroma_data:/chroma/chroma
+    networks:
+      - voice-bot-network
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  voice-bot-network:
+    driver: bridge

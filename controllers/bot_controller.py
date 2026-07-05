@@ -18,6 +18,9 @@ _active_connections_counter = 0
 
 # Initialise a RAG manager for company lookups
 from core.rag_manager import RAGManager
+from models.database import SessionLocal
+from models.metadata import Company
+
 rag_manager = RAGManager()
 
 def increment_active_connections():
@@ -33,20 +36,43 @@ def decrement_active_connections():
         _active_connections_counter -= 1
     logger.debug(f"📉 Active connection decremented: {_active_connections_counter}")
 
-async def get_company_id_by_phone(phone_number: str) -> str | None:
-    """Simple lookup in companies registry matching exact phone number."""
-    for cid, meta in rag_manager._companies_cache.items():
-        if meta.get("phone_number") == phone_number:
-            return cid
-    return None
+def extract_phone_number_from_uri(sip_uri: str) -> str:
+    """Extract phone number user part from SIP URI (e.g. sip:+12345@ip -> 12345)"""
+    raw = sip_uri.lower()
+    if raw.startswith("sips:"):
+        raw = raw[5:]
+    elif raw.startswith("sip:"):
+        raw = raw[4:]
+    user_part = raw.split('@')[0]
+    # Remove leading + or whitespace
+    user_part = user_part.replace("+", "").strip()
+    return user_part
 
-async def query_knowledge_base(phone_number: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+async def get_company_id_by_phone(phone_number: str) -> str | None:
+    """Lookup company in DB matching phone number."""
+    cleaned_phone = phone_number.replace("+", "").strip()
+    db = SessionLocal()
+    try:
+        company = db.query(Company).filter(Company.phone_number == cleaned_phone).first()
+        return company.company_id if company else None
+    except Exception as e:
+        logger.error(f"Failed to lookup company by phone: {e}")
+        return None
+    finally:
+        db.close()
+
+async def query_knowledge_base(phone_number: str, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
     """Resolve company from phone and perform RAG search."""
     company_id = await get_company_id_by_phone(phone_number)
     if not company_id:
-        raise ValueError(f"Company not found for phone {phone_number}")
-    results = await rag_manager.search(company_id, query, top_k)
-    return [{"chunk": r["chunk_text"], "source": r["metadata"].get("source")} for r in results]
+        logger.warning(f"Company not found for phone: {phone_number}")
+        return []
+    try:
+        results = await rag_manager.search(company_id, query, top_k)
+        return [{"chunk": r["chunk_text"], "source": r["metadata"].get("source")} for r in results]
+    except Exception as e:
+        logger.error(f"Error querying knowledge base for company {company_id}: {e}")
+        return []
 
 async def get_active_bot_telemetry() -> Dict[str, Any]:
     """

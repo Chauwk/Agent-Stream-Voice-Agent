@@ -26,6 +26,13 @@ class Config:
     SARVAM_API_KEY = os.getenv('SARVAM_API_KEY', '')
     VOICE_BOT_MODE = os.getenv('VOICE_BOT_MODE', 'realtime').lower()
     
+    # ===== RAG & DATABASE SETTINGS =====
+    CHROMA_HOST = os.getenv('CHROMA_HOST', 'localhost')
+    CHROMA_PORT = int(os.getenv('CHROMA_PORT', '8000'))
+    AWS_S3_BUCKET_NAME = os.getenv('AWS_S3_BUCKET_NAME', '')
+    DATABASE_URL = os.getenv('DATABASE_URL', '')
+
+    
     DEEPGRAM_MODEL = os.getenv('DEEPGRAM_MODEL', 'nova-2-phonecall')
     DEEPGRAM_ENDPOINTING = int(os.getenv('DEEPGRAM_ENDPOINTING', '300'))
     GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
@@ -291,6 +298,19 @@ class Config:
                             'urgency': {'type': 'string', 'description': 'Urgency level (low, medium, high).'}
                         },
                         'required': ['reason']
+                    }
+                },
+                {
+                    'type': 'function',
+                    'name': 'query_knowledge_base',
+                    'description': 'Search the company knowledge base for answers about services, products, pricing, custom offers, and company policies.',
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'query': {'type': 'string', 'description': 'The query to search in the knowledge base.'},
+                            'top_k': {'type': 'integer', 'description': 'Number of results to retrieve.', 'default': 3}
+                        },
+                        'required': ['query']
                     }
                 }
             ],

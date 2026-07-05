@@ -1,10 +1,16 @@
 import os
-import json
+import asyncio
 import hashlib
+import logging
 from typing import List, Dict, Any
 from pathlib import Path
 
-from fastapi import UploadFile
+import boto3
+import chromadb
+from google import genai
+from config import Config
+
+logger = logging.getLogger(__name__)
 
 # Optional: use langchain's text splitter if available
 try:
@@ -12,171 +18,209 @@ try:
 except ImportError:
     RecursiveCharacterTextSplitter = None
 
-# OpenAI for embeddings
-try:
-    import openai
-except ImportError:
-    openai = None
-
-# Helper functions
-def _ensure_dir(path: Path):
-    path.mkdir(parents=True, exist_ok=True)
-
-def _load_json(file_path: Path) -> Any:
-    if not file_path.is_file():
-        return None
-    with file_path.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-def _save_json(file_path: Path, data: Any):
-    _ensure_dir(file_path.parent)
-    with file_path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-def _cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
-    import math
-    dot = sum(a * b for a, b in zip(vec1, vec2))
-    norm1 = math.sqrt(sum(a * a for a in vec1))
-    norm2 = math.sqrt(sum(b * b for b in vec2))
-    if norm1 == 0 or norm2 == 0:
-        return 0.0
-    return dot / (norm1 * norm2)
-
 class RAGManager:
-    """Lightweight per‑company RAG manager using JSON files.
+    """Enterprise per‑company RAG manager using Chroma DB and AWS S3."""
 
-    Data layout:
-        data/companies.json          – registry of companies
-        data/rag/{company_id}.json   – list of {"chunk_text": str, "embedding": [float], "metadata": dict}
-    """
-
-    def __init__(self, base_path: str = "data"):
-        self.base_path = Path(base_path)
-        self.companies_path = self.base_path / "companies.json"
-        self.rag_dir = self.base_path / "rag"
-        _ensure_dir(self.base_path)
-        _ensure_dir(self.rag_dir)
-        # Load registry lazily
-        self._companies_cache: Dict[str, Dict[str, Any]] = {}
-        self._load_companies()
-        # Simple in‑memory cache for embeddings per company
-        self._rag_cache: Dict[str, List[Dict[str, Any]]] = {}
-
-    # ---------------------------------------------------------------------
-    # Company registry helpers
-    # ---------------------------------------------------------------------
-    def _load_companies(self):
-        data = _load_json(self.companies_path)
-        if isinstance(data, dict):
-            self._companies_cache = data
-        else:
-            self._companies_cache = {}
-
-    def _save_companies(self):
-        _save_json(self.companies_path, self._companies_cache)
-
-    def add_company(self, company_id: str, metadata: Dict[str, Any]):
-        if company_id in self._companies_cache:
-            raise ValueError(f"Company {company_id} already exists")
-        self._companies_cache[company_id] = metadata
-        self._save_companies()
-        # Create empty rag file
-        rag_path = self.rag_dir / f"{company_id}.json"
-        _save_json(rag_path, [])
-
-    def remove_company(self, company_id: str):
-        self._companies_cache.pop(company_id, None)
-        self._save_companies()
-        rag_path = self.rag_dir / f"{company_id}.json"
-        if rag_path.is_file():
-            rag_path.unlink()
-        self._rag_cache.pop(company_id, None)
-
-    def get_company(self, company_id: str) -> Dict[str, Any] | None:
-        return self._companies_cache.get(company_id)
-
-    def list_companies(self) -> List[Dict[str, Any]]:
-        return [{"company_id": cid, **meta} for cid, meta in self._companies_cache.items()]
+    def __init__(self):
+        self.chroma_client = None
+        # 1. Connect to Centralized Chroma DB Server (with error safety)
+        try:
+            logger.info(f"Connecting to Chroma DB at {Config.CHROMA_HOST}:{Config.CHROMA_PORT}...")
+            self.chroma_client = chromadb.HttpClient(
+                host=Config.CHROMA_HOST,
+                port=Config.CHROMA_PORT
+            )
+            logger.info("✅ Connected to Chroma DB successfully.")
+        except Exception as e:
+            logger.error(f"❌ Failed to connect to Chroma DB: {e}. RAG functions will be offline.")
+        
+        # 2. Initialize Gemini Client for embeddings (text-embedding-004)
+        api_key = Config.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            logger.warning("⚠️ GEMINI_API_KEY not set in configurations. Embedding calls will fail.")
+        self.gemini_client = genai.Client(api_key=api_key)
+        
+        # 3. Connect to S3 for raw document storage
+        self.bucket_name = Config.AWS_S3_BUCKET_NAME
+        if not self.bucket_name:
+            logger.warning("⚠️ AWS_S3_BUCKET_NAME not set. Document uploads will skip S3 persistent raw file backing.")
+        self.s3_client = boto3.client('s3')
 
     # ---------------------------------------------------------------------
-    # Document handling
+    # Tenant Index helpers
     # ---------------------------------------------------------------------
-    def _read_rag_file(self, company_id: str) -> List[Dict[str, Any]]:
-        if company_id in self._rag_cache:
-            return self._rag_cache[company_id]
-        rag_path = self.rag_dir / f"{company_id}.json"
-        data = _load_json(rag_path)
-        if not isinstance(data, list):
-            data = []
-        self._rag_cache[company_id] = data
-        return data
+    def _collection_name(self, company_id: str) -> str:
+        clean_cid = company_id.replace("_", "-").lower()
+        clean_cid = "".join(c for c in clean_cid if c.isalnum() or c in ['-', '_'])
+        name = f"tenant-{clean_cid}"
+        if len(name) > 63:
+            name = name[:63]
+        return name
 
-    def _write_rag_file(self, company_id: str, data: List[Dict[str, Any]]):
-        rag_path = self.rag_dir / f"{company_id}.json"
-        _save_json(rag_path, data)
-        self._rag_cache[company_id] = data
+    def init_index(self, company_id: str):
+        """Pre-initialize tenant collection in Chroma"""
+        if not self.chroma_client:
+            logger.error("Chroma DB client is offline. Skipping collection initialization.")
+            return
+        name = self._collection_name(company_id)
+        logger.info(f"Initializing collection: {name} in Chroma DB")
+        self.chroma_client.get_or_create_collection(name=name)
+
+    def delete_index(self, company_id: str):
+        """Delete tenant collection from Chroma"""
+        if not self.chroma_client:
+            logger.error("Chroma DB client is offline. Skipping collection deletion.")
+            return
+        name = self._collection_name(company_id)
+        logger.info(f"Deleting collection: {name} from Chroma DB")
+        try:
+            self.chroma_client.delete_collection(name=name)
+        except Exception as e:
+            logger.warning(f"Failed to delete collection {name} (may not exist): {e}")
+
+    def delete_document(self, company_id: str, filename: str):
+        """Delete specific document vectors from Chroma and its raw file from S3"""
+        if not self.chroma_client:
+            logger.error("Chroma DB client is offline. Skipping document deletion.")
+            return
+            
+        col_name = self._collection_name(company_id)
+        logger.info(f"Deleting document '{filename}' from collection '{col_name}'...")
+        
+        try:
+            collection = self.chroma_client.get_collection(name=col_name)
+            # Delete chunks matching filename metadata filter
+            collection.delete(where={"source": filename})
+            logger.info(f"✅ Deleted vectors for '{filename}' from Chroma.")
+        except Exception as e:
+            logger.error(f"❌ Failed to delete document vectors from Chroma: {e}")
+            
+        # Delete raw file from S3
+        if self.bucket_name:
+            s3_key = f"documents/{company_id}/{filename}"
+            logger.info(f"Deleting s3://{self.bucket_name}/{s3_key}...")
+            try:
+                self.s3_client.delete_object(Bucket=self.bucket_name, Key=s3_key)
+                logger.info(f"✅ Deleted '{filename}' from S3.")
+            except Exception as e:
+                logger.error(f"❌ Failed to delete '{filename}' from S3: {e}")
+
+    # ---------------------------------------------------------------------
+    # Embeddings & Document processing
+    # ---------------------------------------------------------------------
+    async def _embed_text(self, text: str) -> List[float]:
+        """Generate a 768-dimension embedding via Gemini API"""
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.gemini_client.models.embed_content(
+                model="text-embedding-004",
+                contents=text,
+            )
+        )
+        return response.embeddings[0].values
 
     def _split_text(self, text: str) -> List[str]:
+        """Split text into manageable chunks for vector search"""
         if RecursiveCharacterTextSplitter:
             splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
             return splitter.split_text(text)
         # Fallback simple split
         return [text[i : i + 500] for i in range(0, len(text), 500)]
 
-    async def _embed_text(self, text: str) -> List[float]:
-        if not openai:
-            raise RuntimeError("openai package not installed")
-        response = await openai.Embedding.acreate(
-            model="text-embedding-ada-002",
-            input=text,
-        )
-        return response["data"][0]["embedding"]
+    async def upload_documents(self, company_id: str, filename: str, file_body: bytes, text_content: str):
+        """Upload raw file to S3, chunk and generate embeddings using Gemini, and index in Chroma DB"""
+        if not self.chroma_client:
+            raise RuntimeError("Chroma DB is offline. Cannot upload documents.")
+            
+        # A. Save raw file to S3
+        if self.bucket_name:
+            s3_key = f"documents/{company_id}/{filename}"
+            logger.info(f"Uploading document to S3: s3://{self.bucket_name}/{s3_key}")
+            try:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None,
+                    lambda: self.s3_client.put_object(
+                        Bucket=self.bucket_name,
+                        Key=s3_key,
+                        Body=file_body
+                    )
+                )
+            except Exception as e:
+                logger.error(f"❌ Failed to upload document to S3: {e}")
+                raise
 
-    async def upload_documents(self, company_id: str, files: List[UploadFile]):
-        """Chunk uploaded files, generate embeddings, and store them.
-        Supported file types: plain text (.txt) and PDFs (.pdf). PDF handling falls back to raw bytes -> text conversion via PyPDF2 if available.
-        """
-        existing = self._read_rag_file(company_id)
-        for upload in files:
-            content = await upload.read()
-            # Determine simple text extraction based on filename extension
-            filename = upload.filename.lower()
-            if filename.endswith('.txt'):
-                text = content.decode('utf-8', errors='ignore')
-            else:
-                # Try PDF extraction
-                try:
-                    import PyPDF2
-                    pdf_reader = PyPDF2.PdfReader(upload.file)
-                    text = "\n".join(page.extract_text() or "" for page in pdf_reader.pages)
-                except Exception:
-                    # Fallback to raw bytes as string
-                    text = content.decode('utf-8', errors='ignore')
-            chunks = self._split_text(text)
-            for chunk in chunks:
-                embedding = await self._embed_text(chunk)
-                existing.append({
-                    "chunk_text": chunk,
-                    "embedding": embedding,
-                    "metadata": {"source": upload.filename},
-                })
-        self._write_rag_file(company_id, existing)
+        # B. Load Chroma Collection
+        col_name = self._collection_name(company_id)
+        collection = self.chroma_client.get_or_create_collection(name=col_name)
+
+        # C. Chunk text
+        chunks = self._split_text(text_content)
+        logger.info(f"Chunked document into {len(chunks)} fragments for tenant {company_id}")
+
+        # D. Batch embed and insert into Chroma
+        for idx, chunk in enumerate(chunks):
+            embedding = await self._embed_text(chunk)
+            chunk_id = f"{col_name}_doc_{hashlib.sha256(chunk.encode('utf-8')).hexdigest()[:16]}"
+            
+            # Run sync chroma call in executor to prevent event loop blocking
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: collection.add(
+                    embeddings=[embedding],
+                    documents=[chunk],
+                    ids=[chunk_id],
+                    metadatas=[{"source": filename, "company_id": company_id}]
+                )
+            )
+        logger.info(f"Successfully indexed document chunks in Chroma DB collection: {col_name}")
 
     # ---------------------------------------------------------------------
-    # Search
+    # Vector Search
     # ---------------------------------------------------------------------
-    async def search(self, company_id: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        if not openai:
-            raise RuntimeError("openai package not installed")
-        rag_data = self._read_rag_file(company_id)
-        if not rag_data:
+    async def search(self, company_id: str, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+        """Perform similarity search against the tenant's collection using Gemini embedded query"""
+        if not self.chroma_client:
+            logger.error("Chroma DB is offline. Cannot perform search.")
             return []
+            
+        col_name = self._collection_name(company_id)
+        
+        try:
+            # Query chroma in executor
+            loop = asyncio.get_event_loop()
+            collection = await loop.run_in_executor(
+                None,
+                lambda: self.chroma_client.get_collection(name=col_name)
+            )
+        except Exception:
+            logger.warning(f"Chroma collection not found: {col_name}. Returning empty search results.")
+            return []
+
+        # Generate query embedding
         query_emb = await self._embed_text(query)
-        # Compute similarity scores
-        scored = []
-        for entry in rag_data:
-            sim = _cosine_similarity(query_emb, entry["embedding"])
-            scored.append((sim, entry))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        top = [e for _, e in scored[:top_k]]
-        return top
+
+        # Perform ANN search
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(
+            None,
+            lambda: collection.query(
+                query_embeddings=[query_emb],
+                n_results=top_k
+            )
+        )
+
+        # Convert results to standard dictionary format
+        outputs = []
+        if results and 'documents' in results and results['documents']:
+            docs = results['documents'][0]
+            metadatas = results['metadatas'][0] if 'metadatas' in results and results['metadatas'] else [{}] * len(docs)
+            for doc, meta in zip(docs, metadatas):
+                outputs.append({
+                    "chunk_text": doc,
+                    "metadata": meta
+                })
+                
+        return outputs
