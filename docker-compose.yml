@@ -108,9 +108,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # PERSISTENCE: Maps a local directory in the repo to Chroma container.
-      # Since the repo is on the EC2 instance volume, this writes to your EBS volume.
-      - ./chroma_data:/chroma/chroma
+      - chroma-data:/chroma/chroma
     networks:
       - voice-bot-network
     restart: always
@@ -123,3 +121,6 @@ services:
 networks:
   voice-bot-network:
     driver: bridge
+
+volumes:
+  chroma-data:
