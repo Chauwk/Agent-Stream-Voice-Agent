@@ -12,6 +12,7 @@ import base64
 import time
 import threading
 import os
+import re
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 
@@ -216,6 +217,44 @@ class MyCall(CallBase):
     def onDtmfDigit(self, prm):
         logger.info(f"🔢 DTMF Digit received: {prm.digit}")
 
+def is_valid_exotel_ip_or_domain(uri: str) -> bool:
+    """Validate that the call is originating from an authentic Exotel domain or IP range."""
+    # Match any IP address or domain inside <sip:...@...>
+    match = re.search(r'@([a-zA-Z0-9\.\-\:]+)', uri)
+    if not match:
+        return False
+    domain = match.group(1).lower().split(':')[0]  # remove optional port
+    
+    # Check if domain ends with exotel.in or exotel.com
+    if domain.endswith('.exotel.in') or domain.endswith('.exotel.com') or domain == 'exotel.in' or domain == 'exotel.com':
+        return True
+        
+    # Check if it's a private network IP range (for local developer testing)
+    if domain == '127.0.0.1' or domain == 'localhost' or domain.startswith('192.168.') or domain.startswith('10.'):
+        return True
+    if domain.startswith('172.'):
+        # check if it is in private RFC 1918 range (172.16.x.x to 172.31.x.x)
+        try:
+            second_octet = int(domain.split('.')[1])
+            if 16 <= second_octet <= 31:
+                return True
+        except (IndexError, ValueError):
+            pass
+            
+    # Check if domain starts with any known Exotel IP prefix
+    exotel_prefixes = (
+        "103.111.29.",
+        "103.111.31.",
+        "202.162.247.",
+        "202.162.242.",
+        "103.54.96.",
+        "103.54.97."
+    )
+    if any(domain.startswith(prefix) for prefix in exotel_prefixes):
+        return True
+        
+    return False
+
 class MyAccount(AccountBase):
     """Subclass of pj.Account to handle inbound SIP calls"""
     
@@ -245,7 +284,7 @@ class MyAccount(AccountBase):
                 return
 
             # Security check: verify that the call is from Exotel carrier trunk
-            is_valid_exotel = ("exotel" in remote_uri.lower() or "exotel" in local_uri.lower())
+            is_valid_exotel = is_valid_exotel_ip_or_domain(remote_uri) or is_valid_exotel_ip_or_domain(local_uri)
             
             if not is_valid_exotel:
                 logger.warning(f"🛡️ REJECTED UNAUTHORIZED SIP CALL (Scanner Blocked): remote={remote_uri}, local={local_uri}")
