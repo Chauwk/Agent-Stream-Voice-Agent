@@ -64,6 +64,9 @@ services:
     
     depends_on:
       - chromadb
+      
+    volumes:
+      - /home/ubuntu/project-gcp-key.json:/app/project-gcp-key.json
     
     networks:
       - voice-bot-network
