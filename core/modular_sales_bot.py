@@ -285,19 +285,55 @@ class ModularSalesBot:
                     logger.error(f"❌ RAG search failed: {db_err}")
                     return "Error: Unable to search the knowledge base at this time. Fallback to general knowledge."
 
+            # Define send_email tool
+            async def send_email(recipient_email: str, subject: str, body: str, cc_recipient: str = None) -> str:
+                """Send an email to a customer or internally to Chauwk teams.
+
+                Args:
+                    recipient_email: The target email address to send the email to.
+                    subject: The subject line of the email.
+                    body: The body content of the email.
+                    cc_recipient: Optional CC email address (e.g. for partnerships/proposals).
+                """
+                cc_info = f" (CC: {cc_recipient})" if cc_recipient else ""
+                logger.info(f"📧 [Email Tool] Sending email to {recipient_email}{cc_info}. Subject: '{subject}'. Body: '{body}'")
+                return f"Email successfully sent to {recipient_email}"
+
             # Format company products/services for prompt injection
             products_summary = "; ".join([f"{p['name']} at {p['price']} ({p['description']})" for p in Config.PRODUCTS])
 
             system_instruction = (
-                f"You are {Config.SALES_BOT_NAME}, sales rep for {Config.COMPANY_NAME}. Speak in the language the customer speaks (either English or Hindi). If they speak Hindi, respond in Hindi. If they speak English, respond in English.\n"
-                "Strict Rules:\n"
-                "- Keep responses concise, under 25 words per sentence, and max 60 words total. No lists/markdown.\n"
-                f"- Sell these standard services: {products_summary}.\n"
-                "- If the customer asks questions about custom services, business pricing, custom deals, company policies, or details not listed in standard products, call the query_knowledge_base tool to retrieve accurate information. Do not guess.\n"
-                "- Decline general off-topic queries (coding, math, politics) and steer back to company sales.\n"
-                "- Never praise or mention competitors.\n"
-                "- Call the end_call tool to hang up ONLY when the customer explicitly says goodbye or requests to hang up/end the call (e.g. 'goodbye', 'bye', 'hang up', 'end the call', 'अलविदा', 'नमस्ते'). Do NOT call the end_call tool for product selections, questions, or vague inputs.\n"
-                "- When the call is ending, make sure to state a warm goodbye first (e.g. 'Thank you for calling. Goodbye!' in English, or 'कॉल करने के लिए धन्यवाद। अलविदा!' in Hindi), and then call the end_call tool to hang up."
+                f"You are Zara, a customer support agent specializing in enterprise solutions for Chauwk.\n"
+                "Speak in the language the customer speaks (either English or Hindi). If they speak Hindi, respond in Hindi. If they speak English, respond in English.\n"
+                "Tone: Clear, concise, professional, friendly, patient, helpful, and empathetic. Avoid technical jargon.\n"
+                "\n"
+                "### Customer Detail Collection Strategy (Mandatory Rule)\n"
+                "You must collect and confirm three details from every customer during the conversation:\n"
+                "1. Full Name (Ask early in the conversation: 'May I know your name so I can assist you better?')\n"
+                "2. Email Address (Ask when offering to send details, pricing, case studies, or documents: 'I can share this with you via email. Could you please provide your email address?')\n"
+                "3. Contact Number (Ask when scheduling a demo, callback, or support: 'In case our team needs to connect with you quickly, could you share your contact number?')\n"
+                "Follow a progressive flow (Name -> Email -> Phone) naturally. Do not ask for all details at once unless they show strong intent.\n"
+                "Position this as standard process: 'We usually capture a few details to ensure smooth follow-up and support.'\n"
+                "Reassure if they hesitate: 'This will only be used to assist you with your request.'\n"
+                "If they refuse, do not pressure them. Try to collect at least their email and continue assisting professionally.\n"
+                "Confirm details immediately after collection: 'Thank you, [Name]. I’ve noted your details.'\n"
+                "Before ending any conversation, ensure all three details are collected. If anything is missing, politely request it.\n"
+                "\n"
+                "### Email and Contact Request Handling\n"
+                "- For Partnerships / Proposals: Collect Name, Email, and Contact Number first. Then call the send_email tool TWICE:\n"
+                "  1. Send a follow-up email to the customer.\n"
+                "  2. Send an internal email to abhishek.gupta@gmail.com with customer details. You MUST pass partnerships.3@chauwk.com as the cc_recipient.\n"
+                "- For Documents / Pricing / Case Studies / Details: Ask for their email address, call the send_email tool to send details to the customer. Then say: 'Thank you. I’ve sent the requested information to your email.'\n"
+                "- When the customer wants to Contact Chauwk (speak with the team, get contacted, request support, schedule a call, connect with sales):\n"
+                "  Ask for their email and ensure Name + Phone are collected. Call the send_email tool to send an internal email to abhishek.gupta@gmail.com with the request details. Then say: 'Thank you. I’ve raised the request and sent you a follow-up email. Our team will reach out shortly.'\n"
+                "\n"
+                "### Guardrails & Strict Rules\n"
+                "- Keep responses concise: under 25 words per sentence, and max 60 words total. No markdown/lists.\n"
+                f"- Remain within the scope of Chauwk's enterprise offerings: {products_summary}.\n"
+                "- Never make promises or guarantees that cannot be fulfilled. Do not provide financial or legal advice.\n"
+                "- If the customer asks questions about custom services, company policies, or details not listed above, call the query_knowledge_base tool to search. Do not guess.\n"
+                "- Decline general off-topic queries (coding, math, politics) and steer back to Chauwk.\n"
+                "- Call the end_call tool to hang up ONLY when the conversation is finished, all details are collected, and they explicitly say goodbye."
             )
             
             from google.genai import types
@@ -341,6 +377,7 @@ class ModularSalesBot:
             "safety_settings": safety_settings,
             "end_call_tool": end_call,
             "query_knowledge_base_tool": query_knowledge_base,
+            "send_email_tool": send_email,
             "to_phone": session_to_phone,
             "deepgram_ws": None,
             "sarvam_ws": None,
@@ -396,7 +433,7 @@ class ModularSalesBot:
         
         # Deepgram Live WS config - boost company and bot name keywords with multilingual support
         endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
-        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&language=multi&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&keywords=Chauwk:4.0&keywords=Sarah:2.0"
+        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&language=multi&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&keywords=Chauwk:4.0&keywords=Zara:2.0"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
         import inspect
@@ -594,6 +631,7 @@ class ModularSalesBot:
         safety_settings = session_state["safety_settings"]
         end_call = session_state["end_call_tool"]
         query_knowledge_base = session_state["query_knowledge_base_tool"]
+        send_email = session_state.get("send_email_tool")
         llm_queue = session_state["llm_queue"]
         tts_queue = session_state["tts_queue"]
         
@@ -641,7 +679,7 @@ class ModularSalesBot:
                                 contents=history,
                                 config=types.GenerateContentConfig(
                                     system_instruction=system_instruction,
-                                    tools=[end_call, query_knowledge_base],
+                                    tools=[end_call, query_knowledge_base, send_email],
                                     safety_settings=safety_settings
                                 )
                             )
@@ -678,6 +716,31 @@ class ModularSalesBot:
                                                 )
                                             )
                                             return
+                                        elif fc.name == "send_email":
+                                            recipient_email = fc.args.get("recipient_email", "")
+                                            subject = fc.args.get("subject", "")
+                                            body = fc.args.get("body", "")
+                                            cc_recipient = fc.args.get("cc_recipient")
+                                            ans = await send_email(recipient_email=recipient_email, subject=subject, body=body, cc_recipient=cc_recipient)
+                                            history.append(
+                                                types.Content(
+                                                    role="model",
+                                                    parts=[types.Part.from_function_call(
+                                                        name=fc.name,
+                                                        args=fc.args
+                                                    )]
+                                                )
+                                            )
+                                            history.append(
+                                                types.Content(
+                                                    role="user",
+                                                    parts=[types.Part.from_function_response(
+                                                        name=fc.name,
+                                                        response={"result": ans}
+                                                    )]
+                                                )
+                                            )
+                                            raise TriggerToolRecallException()
                                         elif fc.name == "query_knowledge_base":
                                             q_val = fc.args.get("query", "")
                                             ans = await query_knowledge_base(q_val)
@@ -978,7 +1041,7 @@ class ModularSalesBot:
                         if response and response.audios:
                             base64_audio = response.audios[0]
                             pcm_audio = base64.b64decode(base64_audio)
-                            logger.info(f"🗣️ SARAH SPEAKING (HTTP): {sentence_text}")
+                            logger.info(f"🗣️ ZARA SPEAKING (HTTP): {sentence_text}")
                             if self.sip_server:
                                 await self.sip_server.send_audio_to_rtp(call_id, pcm_audio)
                         else:
@@ -1000,7 +1063,7 @@ class ModularSalesBot:
                         await sarvam_ws.flush()
                         
                         # Receive and stream back audio chunks
-                        logger.info(f"🗣️ SARAH SPEAKING (WS Streaming): {sentence_text}")
+                        logger.info(f"🗣️ ZARA SPEAKING (WS Streaming): {sentence_text}")
                         while True:
                             response = await sarvam_ws.recv()
                             

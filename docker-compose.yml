@@ -38,8 +38,8 @@ services:
       
       # Bot Personality
       - COMPANY_NAME=${COMPANY_NAME:-Your Company}
-      - SALES_BOT_NAME=${SALES_BOT_NAME:-Sarah}
-      - SALES_REP_NAME=${SALES_BOT_NAME:-Sarah}
+      - SALES_BOT_NAME=${SALES_BOT_NAME:-Zara}
+      - SALES_REP_NAME=${SALES_BOT_NAME:-Zara}
       
       # Audio
       - SAMPLE_RATE=24000

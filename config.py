@@ -85,8 +85,8 @@ class Config:
     USE_SIP_TRUNK = os.getenv('USE_SIP_TRUNK', 'true').lower() == 'true'
     
     # ===== BOT PERSONALITY =====
-    SALES_BOT_NAME = os.getenv('SALES_BOT_NAME', 'Sarah')
-    SALES_REP_NAME = os.getenv('SALES_REP_NAME', 'Sarah')  # Alias for compatibility
+    SALES_BOT_NAME = os.getenv('SALES_BOT_NAME', 'Zara')
+    SALES_REP_NAME = os.getenv('SALES_REP_NAME', 'Zara')  # Alias for compatibility
     COMPANY_NAME = os.getenv('COMPANY_NAME', 'TechSolutions Inc.')
     TEMPERATURE = float(os.getenv('TEMPERATURE', '0.7'))
     
