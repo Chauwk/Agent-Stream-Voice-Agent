@@ -55,34 +55,28 @@ jobs:
     needs: build
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Authenticate DockerHub
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: echo $DOCKER_PASSWORD | sudo docker login -u $DOCKER_USERNAME --password-stdin
 
-      - name: Pull Docker image
-        run: sudo docker pull ${{ secrets.DOCKER_USERNAME }}/agent-stream-voice-agent:latest
-
-      - name: Stop and remove old container
+      - name: Stop and remove legacy container if running
         run: sudo docker rm -f voice-bot-container || true
 
-      - name: Run Docker container on port 5002
+      - name: Deploy with Docker Compose
         run: |
-          sudo docker run -d \
-            --name voice-bot-container \
-            --restart always \
-            -p 5002:5002 \
-            -p 5060:5060 \
-            -p 5060:5060/udp \
-            -v /home/ubuntu/project-gcp-key.json:/app/project-gcp-key.json \
-            --env-file /home/ubuntu/voice-bot.env \
-            ${{ secrets.DOCKER_USERNAME }}/agent-stream-voice-agent:latest
+          cp /home/ubuntu/voice-bot.env .env
+          sudo docker compose pull
+          sudo docker compose up -d --force-recreate
 
-      - name: Verify container is running
+      - name: Verify containers are running
         run: |
           sleep 5
-          sudo docker ps --filter "name=voice-bot-container" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+          sudo docker compose ps
 
       - name: Cleanup unused Docker images
         run: sudo docker image prune -a -f
