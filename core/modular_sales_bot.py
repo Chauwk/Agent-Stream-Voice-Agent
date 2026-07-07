@@ -303,7 +303,7 @@ class ModularSalesBot:
             products_summary = "; ".join([f"{p['name']} at {p['price']} ({p['description']})" for p in Config.PRODUCTS])
 
             system_instruction = (
-                f"You are Zara, a customer support agent specializing in enterprise solutions for Chauwk.\n"
+                f"You are {Config.SALES_BOT_NAME}, a customer support agent specializing in enterprise solutions for Chauwk.\n"
                 "Speak in the language the customer speaks (either English or Hindi). If they speak Hindi, respond in Hindi. If they speak English, respond in English.\n"
                 "Tone: Clear, concise, professional, friendly, patient, helpful, and empathetic. Avoid technical jargon.\n"
                 "\n"
@@ -435,7 +435,7 @@ class ModularSalesBot:
         
         # Deepgram Live WS config - boost company and bot name keywords with multilingual support
         endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
-        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&language=multi&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&keywords=Chauwk:4.0&keywords=Zara:2.0"
+        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&language=hi&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&keywords=Chauwk:4.0&keywords={Config.SALES_BOT_NAME}:2.0"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
         import inspect

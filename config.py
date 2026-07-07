@@ -37,7 +37,7 @@ class Config:
     DEEPGRAM_ENDPOINTING = int(os.getenv('DEEPGRAM_ENDPOINTING', '300'))
     GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
     SARVAM_MODEL = os.getenv('SARVAM_MODEL', 'bulbul:v3')
-    SARVAM_SPEAKER = os.getenv('SARVAM_SPEAKER', 'shubh')
+    SARVAM_SPEAKER = 'neha'
     SARVAM_LANGUAGE_CODE = os.getenv('SARVAM_LANGUAGE_CODE', 'hi-IN')
     SARVAM_PACE = float(os.getenv('SARVAM_PACE', '1.05'))  # 1.05x speed for a natural and clear pace
     SARVAM_PITCH = float(os.getenv('SARVAM_PITCH', '0.0'))
@@ -85,8 +85,8 @@ class Config:
     USE_SIP_TRUNK = os.getenv('USE_SIP_TRUNK', 'true').lower() == 'true'
     
     # ===== BOT PERSONALITY =====
-    SALES_BOT_NAME = os.getenv('SALES_BOT_NAME', 'Zara')
-    SALES_REP_NAME = os.getenv('SALES_REP_NAME', 'Zara')  # Alias for compatibility
+    SALES_BOT_NAME = 'Shaakti'
+    SALES_REP_NAME = 'Shaakti'  # Alias for compatibility
     COMPANY_NAME = os.getenv('COMPANY_NAME', 'TechSolutions Inc.')
     TEMPERATURE = float(os.getenv('TEMPERATURE', '0.7'))
     
