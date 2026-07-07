@@ -100,7 +100,7 @@ services:
 
   # Container 2: Chroma Vector Database Server
   chromadb:
-    image: chromadb/chroma:0.5.3
+    image: chromadb/chroma:1.5.9
     container_name: chromadb
     environment:
       - IS_PERSISTENT=TRUE

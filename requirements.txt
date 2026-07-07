@@ -36,3 +36,4 @@ python-pptx
 beautifulsoup4
 PyPDF2
 python-multipart
+playwright

@@ -1074,28 +1074,55 @@ async def admin_portal():
                 const companyId = document.getElementById('upload-company-select').value;
                 const fileInput = document.getElementById('upload-files');
                 const submitBtn = document.getElementById('upload-submit-btn');
-                
+                let progressBar = document.getElementById('upload-progress-container');
+
                 if (!companyId) return alert("Please select a company first.");
                 if (fileInput.files.length === 0) return alert("Select at least one document.");
-                
+
                 const formData = new FormData();
                 for (let i = 0; i < fileInput.files.length; i++) {{
                     formData.append("files", fileInput.files[i]);
                 }}
-                
+
                 submitBtn.disabled = true;
-                submitBtn.innerText = "Indexing vectors... Please wait...";
-                
+                submitBtn.innerText = "⏫ Uploading...";
+
+                // Show progress container
+                if (!progressBar) {{
+                    progressBar = document.createElement('div');
+                    progressBar.id = 'upload-progress-container';
+                    progressBar.style.cssText = 'margin-top:12px;padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;border:1px solid rgba(255,255,255,0.1);';
+                    progressBar.innerHTML =
+                        '<div id="upload-progress-label" style="font-size:13px;color:#a0aec0;margin-bottom:6px;">Starting upload...</div>' +
+                        '<div style="background:rgba(255,255,255,0.1);border-radius:99px;height:8px;overflow:hidden;">' +
+                            '<div id="upload-progress-fill" style="height:100%;width:0%;background:linear-gradient(90deg,#667eea,#764ba2);border-radius:99px;transition:width 0.4s ease;"></div>' +
+                        '</div>' +
+                        '<div id="upload-progress-pct" style="font-size:12px;color:#667eea;margin-top:4px;text-align:right;">0%</div>';
+                    submitBtn.parentNode.insertBefore(progressBar, submitBtn.nextSibling);
+                }}
+                progressBar.style.display = 'block';
+                document.getElementById('upload-progress-label').innerText = 'Uploading file...';
+                document.getElementById('upload-progress-fill').style.width = '0%';
+                document.getElementById('upload-progress-pct').innerText = '0%';
+
                 try {{
+                    // Step 1: Submit — returns immediately with job_id(s)
                     const response = await fetch(`/companies/${{companyId}}/documents`, {{
                         method: 'POST',
                         body: formData
                     }});
                     const result = await response.json();
-                    if (!response.ok) {{
-                        throw new Error(result.detail || 'Indexing failed');
+                    if (!response.ok) throw new Error(result.detail || 'Upload failed');
+
+                    // Step 2: Poll each job for progress
+                    const jobs = result.jobs || [];
+                    for (const job of jobs) {{
+                        submitBtn.innerText = '⚙️ Indexing ' + job.filename + '...';
+                        document.getElementById('upload-progress-label').innerText = 'Indexing: ' + job.filename;
+                        await pollJobProgress(job.job_id);
                     }}
-                    showAlert('docs-alert', `Documents successfully uploaded and indexed.`);
+
+                    showAlert('docs-alert', `✅ Document(s) uploaded and indexed successfully!`);
                     fileInput.value = '';
                     fetchCompanyDocs(companyId);
                 }} catch (err) {{
@@ -1103,7 +1130,36 @@ async def admin_portal():
                 }} finally {{
                     submitBtn.disabled = false;
                     submitBtn.innerText = "🚀 Upload & Index Document";
+                    setTimeout(() => {{ if(progressBar) progressBar.style.display = 'none'; }}, 3000);
                 }}
+            }}
+
+            // Poll a job until done, updating the progress bar
+            async function pollJobProgress(jobId) {{
+                return new Promise((resolve, reject) => {{
+                    const interval = setInterval(async () => {{
+                        try {{
+                            const res = await fetch(`/companies/jobs/${{jobId}}`);
+                            if (!res.ok) {{ clearInterval(interval); return reject(new Error('Job not found')); }}
+                            const job = await res.json();
+
+                            const pct = job.total > 0 ? Math.round((job.progress / job.total) * 100) : 5;
+                            document.getElementById('upload-progress-fill').style.width = pct + '%';
+                            document.getElementById('upload-progress-pct').innerText = pct + '%';
+                            document.getElementById('upload-progress-label').innerText = job.message || 'Processing...';
+
+                            if (job.status === 'done') {{
+                                document.getElementById('upload-progress-fill').style.width = '100%';
+                                document.getElementById('upload-progress-pct').innerText = '100%';
+                                clearInterval(interval);
+                                resolve();
+                            }} else if (job.status === 'error') {{
+                                clearInterval(interval);
+                                reject(new Error(job.message || 'Indexing failed'));
+                            }}
+                        }} catch(e) {{ clearInterval(interval); reject(e); }}
+                    }}, 1000);
+                }});
             }}
 
             // Crawl & Index Webpage URL

@@ -35,10 +35,20 @@ class RAGManager:
             logger.error(f"❌ Failed to connect to Chroma DB: {e}. RAG functions will be offline.")
         
         # 2. Initialize Gemini Client for embeddings (text-embedding-004)
-        api_key = Config.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            logger.warning("⚠️ GEMINI_API_KEY not set in configurations. Embedding calls will fail.")
-        self.gemini_client = genai.Client(api_key=api_key)
+        gcp_key_path = "/app/project-gcp-key.json"
+        if os.path.exists(gcp_key_path):
+            logger.info("🔑 project-gcp-key.json found. Initializing Gemini Client in Vertex AI mode...")
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_key_path
+            # Pop GEMINI_API_KEY to prevent SDK credential conflicts (API key vs Service Account)
+            os.environ.pop("GEMINI_API_KEY", None)
+            self.gemini_client = genai.Client(vertexai=True)
+            logger.info("✅ Gemini Client initialized via Vertex AI successfully.")
+        else:
+            logger.info("ℹ️ project-gcp-key.json not found. Initializing Gemini Client in Developer API key mode...")
+            api_key = Config.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY")
+            if not api_key:
+                logger.warning("⚠️ GEMINI_API_KEY not set in configurations. Embedding calls will fail.")
+            self.gemini_client = genai.Client(api_key=api_key)
         
         # 3. Connect to S3 for raw document storage
         self.bucket_name = Config.AWS_S3_BUCKET_NAME
@@ -78,32 +88,32 @@ class RAGManager:
         except Exception as e:
             logger.warning(f"Failed to delete collection {name} (may not exist): {e}")
 
-    def delete_document(self, company_id: str, filename: str):
-        """Delete specific document vectors from Chroma and its raw file from S3"""
+    def delete_document(self, company_id: str, doc_id: int, filename: str):
+        """Delete specific document vectors from Chroma and its raw file from S3 using doc_id"""
         if not self.chroma_client:
             logger.error("Chroma DB client is offline. Skipping document deletion.")
             return
             
         col_name = self._collection_name(company_id)
-        logger.info(f"Deleting document '{filename}' from collection '{col_name}'...")
+        logger.info(f"Deleting document ID {doc_id} ('{filename}') from collection '{col_name}'...")
         
         try:
             collection = self.chroma_client.get_collection(name=col_name)
-            # Delete chunks matching filename metadata filter
-            collection.delete(where={"source": filename})
-            logger.info(f"✅ Deleted vectors for '{filename}' from Chroma.")
+            # Delete chunks matching unique document_id metadata filter
+            collection.delete(where={"document_id": doc_id})
+            logger.info(f"✅ Deleted vectors for document ID {doc_id} from Chroma.")
         except Exception as e:
             logger.error(f"❌ Failed to delete document vectors from Chroma: {e}")
             
         # Delete raw file from S3
         if self.bucket_name:
-            s3_key = f"documents/{company_id}/{filename}"
+            s3_key = f"documents/{company_id}/{doc_id}_{filename}"
             logger.info(f"Deleting s3://{self.bucket_name}/{s3_key}...")
             try:
                 self.s3_client.delete_object(Bucket=self.bucket_name, Key=s3_key)
-                logger.info(f"✅ Deleted '{filename}' from S3.")
+                logger.info(f"✅ Deleted S3 file for document ID {doc_id}.")
             except Exception as e:
-                logger.error(f"❌ Failed to delete '{filename}' from S3: {e}")
+                logger.error(f"❌ Failed to delete S3 file for document ID {doc_id}: {e}")
 
     # ---------------------------------------------------------------------
     # Embeddings & Document processing
@@ -128,14 +138,14 @@ class RAGManager:
         # Fallback simple split
         return [text[i : i + 500] for i in range(0, len(text), 500)]
 
-    async def upload_documents(self, company_id: str, filename: str, file_body: bytes, text_content: str):
+    async def upload_documents(self, company_id: str, filename: str, file_body: bytes, text_content: str, doc_id: int, on_progress=None):
         """Upload raw file to S3, chunk and generate embeddings using Gemini, and index in Chroma DB"""
         if not self.chroma_client:
             raise RuntimeError("Chroma DB is offline. Cannot upload documents.")
             
         # A. Save raw file to S3
         if self.bucket_name:
-            s3_key = f"documents/{company_id}/{filename}"
+            s3_key = f"documents/{company_id}/{doc_id}_{filename}"
             logger.info(f"Uploading document to S3: s3://{self.bucket_name}/{s3_key}")
             try:
                 loop = asyncio.get_event_loop()
@@ -157,12 +167,13 @@ class RAGManager:
 
         # C. Chunk text
         chunks = self._split_text(text_content)
-        logger.info(f"Chunked document into {len(chunks)} fragments for tenant {company_id}")
+        total = len(chunks)
+        logger.info(f"Chunked document into {total} fragments for tenant {company_id}")
 
         # D. Batch embed and insert into Chroma
         for idx, chunk in enumerate(chunks):
             embedding = await self._embed_text(chunk)
-            chunk_id = f"{col_name}_doc_{hashlib.sha256(chunk.encode('utf-8')).hexdigest()[:16]}"
+            chunk_id = f"{col_name}_doc_{doc_id}_{hashlib.sha256(chunk.encode('utf-8')).hexdigest()[:16]}"
             
             # Run sync chroma call in executor to prevent event loop blocking
             loop = asyncio.get_event_loop()
@@ -172,9 +183,13 @@ class RAGManager:
                     embeddings=[embedding],
                     documents=[chunk],
                     ids=[chunk_id],
-                    metadatas=[{"source": filename, "company_id": company_id}]
+                    metadatas=[{"source": filename, "company_id": company_id, "document_id": doc_id}]
                 )
             )
+            # Fire progress callback after each chunk
+            if on_progress:
+                on_progress(idx + 1, total)
+
         logger.info(f"Successfully indexed document chunks in Chroma DB collection: {col_name}")
 
     # ---------------------------------------------------------------------
