@@ -33,7 +33,7 @@ class Config:
     DATABASE_URL = os.getenv('DATABASE_URL', '')
 
     
-    DEEPGRAM_MODEL = os.getenv('DEEPGRAM_MODEL', 'nova-2-phonecall')
+    DEEPGRAM_MODEL = 'nova-2'
     DEEPGRAM_ENDPOINTING = int(os.getenv('DEEPGRAM_ENDPOINTING', '300'))
     GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
     SARVAM_MODEL = os.getenv('SARVAM_MODEL', 'bulbul:v3')
