@@ -37,8 +37,21 @@ def decrement_active_connections():
     logger.debug(f"📉 Active connection decremented: {_active_connections_counter}")
 
 def extract_phone_number_from_uri(sip_uri: str) -> str:
-    """Extract phone number user part from SIP URI (e.g. sip:+12345@ip -> 12345)"""
-    raw = sip_uri.lower()
+    """Extract phone number user part from SIP URI.
+    
+    Handles formats like:
+      sip:+12345@ip   -> 12345
+      <sip:914040377112  -> 914040377112
+      sip:914040377112@tsep.exotel.com -> 914040377112
+    """
+    raw = sip_uri.strip()
+    # Strip leading angle bracket if present (e.g. '<sip:...')
+    if raw.startswith("<"):
+        raw = raw[1:]
+    # Strip trailing angle bracket if present
+    if raw.endswith(">"):
+        raw = raw[:-1]
+    raw = raw.lower()
     if raw.startswith("sips:"):
         raw = raw[5:]
     elif raw.startswith("sip:"):
@@ -49,12 +62,35 @@ def extract_phone_number_from_uri(sip_uri: str) -> str:
     return user_part
 
 async def get_company_id_by_phone(phone_number: str) -> str | None:
-    """Lookup company in DB matching phone number."""
+    """Lookup company in DB matching phone number.
+    
+    Tries multiple phone number variants to handle country code differences:
+    - As-is (e.g. 914040377112)
+    - Without leading 91 India country code (e.g. 04040377112)
+    - Without leading 0 after stripping country code (e.g. 4040377112)
+    """
     cleaned_phone = phone_number.replace("+", "").strip()
     db = SessionLocal()
     try:
-        company = db.query(Company).filter(Company.phone_number == cleaned_phone).first()
-        return company.company_id if company else None
+        # Build list of variants to try
+        variants = [cleaned_phone]
+        # If starts with 91 (India country code), try local formats
+        if cleaned_phone.startswith("91") and len(cleaned_phone) > 10:
+            local = cleaned_phone[2:]  # strip 91 -> e.g. 4040377112
+            variants.append(local)
+            variants.append("0" + local)  # add leading 0 -> e.g. 04040377112
+        # Also try with leading 91 added if it's a local number
+        elif len(cleaned_phone) <= 11 and not cleaned_phone.startswith("91"):
+            variants.append("91" + cleaned_phone)
+
+        for variant in variants:
+            company = db.query(Company).filter(Company.phone_number == variant).first()
+            if company:
+                logger.info(f"✅ Company matched: {company.name} ({company.company_id}) via phone variant '{variant}'")
+                return company.company_id
+        
+        logger.warning(f"Company not found for phone: {phone_number} (tried variants: {variants})")
+        return None
     except Exception as e:
         logger.error(f"Failed to lookup company by phone: {e}")
         return None
