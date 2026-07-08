@@ -34,6 +34,7 @@ class Config:
 
     
     DEEPGRAM_MODEL = 'nova-2'
+    DEEPGRAM_LANGUAGE = os.getenv('DEEPGRAM_LANGUAGE', 'multi')
     DEEPGRAM_ENDPOINTING = int(os.getenv('DEEPGRAM_ENDPOINTING', '300'))
     GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
     SARVAM_MODEL = os.getenv('SARVAM_MODEL', 'bulbul:v3')

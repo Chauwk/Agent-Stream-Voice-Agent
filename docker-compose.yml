@@ -67,6 +67,7 @@ services:
       
     volumes:
       - /home/ubuntu/project-gcp-key.json:/app/project-gcp-key.json
+      - sqlite-data:/app/db
     
     networks:
       - voice-bot-network
@@ -124,3 +125,4 @@ networks:
 
 volumes:
   chroma-data:
+  sqlite-data:

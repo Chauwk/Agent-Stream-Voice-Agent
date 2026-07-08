@@ -435,7 +435,8 @@ class ModularSalesBot:
         
         # Deepgram Live WS config - boost company and bot name keywords with multilingual support
         endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
-        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&language=hi&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&keywords=Chauwk:4.0&keywords={Config.SALES_BOT_NAME}:2.0"
+        dg_lang = getattr(Config, "DEEPGRAM_LANGUAGE", "multi")
+        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&keywords=Chauwk:4.0&keywords={Config.SALES_BOT_NAME}:2.0"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
         import inspect

@@ -8,7 +8,9 @@ DATABASE_URL = Config.DATABASE_URL
 
 # Fallback to local SQLite if DATABASE_URL is not set
 if not DATABASE_URL:
-    DATABASE_URL = "sqlite:///./metadata.db"
+    import os
+    os.makedirs("./db", exist_ok=True)
+    DATABASE_URL = "sqlite:///./db/metadata.db"
     connect_args = {"check_same_thread": False}
 else:
     connect_args = {}
