@@ -28,6 +28,22 @@ def is_hindi(text: str) -> bool:
             return True
     return False
 
+def apply_audio_gain(pcm_data: bytes, gain: float) -> bytes:
+    """Apply digital volume gain to raw linear16 PCM audio bytes"""
+    if not pcm_data or gain == 1.0:
+        return pcm_data
+    try:
+        import numpy as np
+        samples = np.frombuffer(pcm_data, dtype=np.int16).astype(np.float32)
+        samples = samples * gain
+        # Clip to prevent int16 overflow distortion
+        samples = np.clip(samples, -32768, 32767).astype(np.int16)
+        return samples.tobytes()
+    except Exception as e:
+        logger.error(f"Failed to apply audio gain: {e}")
+        return pcm_data
+
+
 class ModularSalesBot:
     """Modular Voice AI bot integrating Deepgram, Gemini, and Sarvam AI with PJSIP telephony"""
     
@@ -69,8 +85,9 @@ class ModularSalesBot:
             response = self.sync_sarvam_client.text_to_speech.convert(**kwargs)
             if response and response.audios:
                 base64_audio = response.audios[0]
-                self.cached_greeting_audio = base64.b64decode(base64_audio)
-                logger.info("✅ Startup greeting audio cached successfully!")
+                raw_audio = base64.b64decode(base64_audio)
+                self.cached_greeting_audio = apply_audio_gain(raw_audio, getattr(Config, "AUDIO_GAIN", 1.0))
+                logger.info("✅ Startup greeting audio cached successfully (gain applied)!")
             else:
                 logger.error("❌ Failed to cache greeting: Empty response from Sarvam")
         except Exception as e:
@@ -200,7 +217,8 @@ class ModularSalesBot:
                 response = await self.sarvam_client.text_to_speech.convert(**kwargs)
                 if response and response.audios:
                     base64_audio = response.audios[0]
-                    self.cached_greeting_audio = base64.b64decode(base64_audio)
+                    raw_audio = base64.b64decode(base64_audio)
+                    self.cached_greeting_audio = apply_audio_gain(raw_audio, getattr(Config, "AUDIO_GAIN", 1.0))
                     self.cached_greeting_text = current_text
                     self.cached_speaker = Config.SARVAM_SPEAKER
                     self.cached_company = Config.COMPANY_NAME
@@ -1043,7 +1061,8 @@ class ModularSalesBot:
                             
                         if response and response.audios:
                             base64_audio = response.audios[0]
-                            pcm_audio = base64.b64decode(base64_audio)
+                            raw_audio = base64.b64decode(base64_audio)
+                            pcm_audio = apply_audio_gain(raw_audio, getattr(Config, "AUDIO_GAIN", 1.0))
                             logger.info(f"🗣️ ZARA SPEAKING (HTTP): {sentence_text}")
                             if self.sip_server:
                                 await self.sip_server.send_audio_to_rtp(call_id, pcm_audio)
@@ -1076,7 +1095,8 @@ class ModularSalesBot:
                                 
                             if response.type == 'audio':
                                 base64_audio = response.data.audio
-                                pcm_audio = base64.b64decode(base64_audio)
+                                raw_audio = base64.b64decode(base64_audio)
+                                pcm_audio = apply_audio_gain(raw_audio, getattr(Config, "AUDIO_GAIN", 1.0))
                                 if self.sip_server:
                                     await self.sip_server.send_audio_to_rtp(call_id, pcm_audio)
                             elif response.type == 'event':

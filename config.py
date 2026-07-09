@@ -40,8 +40,10 @@ class Config:
     SARVAM_MODEL = os.getenv('SARVAM_MODEL', 'bulbul:v3')
     SARVAM_SPEAKER = 'neha'
     SARVAM_LANGUAGE_CODE = os.getenv('SARVAM_LANGUAGE_CODE', 'hi-IN')
-    SARVAM_PACE = float(os.getenv('SARVAM_PACE', '1.05'))  # 1.05x speed for a natural and clear pace
+    SARVAM_PACE = float(os.getenv('SARVAM_PACE', '1.15'))  # 1.15x speed for dynamic conversational pace
     SARVAM_PITCH = float(os.getenv('SARVAM_PITCH', '0.0'))
+    AUDIO_GAIN = float(os.getenv('AUDIO_GAIN', '1.5'))  # 1.5x digital gain to boost quiet voice bot playback
+    
     
     # ===== SERVER SETTINGS =====
     SERVER_HOST = os.getenv('SERVER_HOST', '0.0.0.0')
