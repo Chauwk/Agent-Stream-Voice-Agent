@@ -52,9 +52,21 @@ class RAGManager:
         
         # 3. Connect to S3 for raw document storage
         self.bucket_name = Config.AWS_S3_BUCKET_NAME
+        self.s3_client = None
         if not self.bucket_name:
             logger.warning("⚠️ AWS_S3_BUCKET_NAME not set. Document uploads will skip S3 persistent raw file backing.")
-        self.s3_client = boto3.client('s3')
+        else:
+            try:
+                # Clean up empty strings passed from environment variables to prevent botocore endpoint construction crashes
+                for key in ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"]:
+                    if os.getenv(key) == "":
+                        os.environ.pop(key, None)
+                
+                self.s3_client = boto3.client('s3')
+                logger.info("✅ S3 Client initialized successfully.")
+            except Exception as s3_err:
+                logger.error(f"❌ Failed to initialize S3 client: {s3_err}. Document uploads will skip S3 backing.")
+                self.bucket_name = None
 
     # ---------------------------------------------------------------------
     # Tenant Index helpers
