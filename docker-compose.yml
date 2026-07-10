@@ -105,11 +105,11 @@ services:
     container_name: chromadb
     environment:
       - IS_PERSISTENT=TRUE
-      - PERSIST_DIRECTORY=/chroma/chroma
+      - PERSIST_DIRECTORY=/data
     ports:
       - "8000:8000"
     volumes:
-      - chroma-data:/chroma/chroma
+      - chroma-data:/data
     networks:
       - voice-bot-network
     restart: always
