@@ -31,6 +31,7 @@ class Config:
     CHROMA_PORT = int(os.getenv('CHROMA_PORT', '8000'))
     AWS_S3_BUCKET_NAME = os.getenv('AWS_S3_BUCKET_NAME', '')
     DATABASE_URL = os.getenv('DATABASE_URL', '')
+    DB_URL = os.getenv('DB_URL', '')
 
     
     DEEPGRAM_MODEL = 'nova-2'

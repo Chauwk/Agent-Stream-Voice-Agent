@@ -60,6 +60,9 @@ services:
     # Use .env file for secrets
     env_file: .env
     
+    volumes:
+      - ./metadata.db:/app/metadata.db
+      
     ports:
       - "5060:5060/tcp"
       - "5060:5060/udp"

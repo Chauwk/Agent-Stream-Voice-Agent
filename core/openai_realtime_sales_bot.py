@@ -13,6 +13,7 @@ import asyncio
 import websockets
 import json
 from core.rag_manager import RAGManager
+from core.mongo_manager import mongo_db
 
 RAG_MANAGER = RAGManager()
 import logging
@@ -126,7 +127,8 @@ class OpenAIRealtimeSalesBot:
                 "input_format": input_format,
                 "output_format": output_format,
                 "session_config": session_config,
-                "user_speaking": False
+                "user_speaking": False,
+                "transcript": []
             }
             
             logger.info(f"✅ ENHANCED OPENAI CONNECTED for {stream_id} @ {sample_rate}Hz")
@@ -234,8 +236,27 @@ class OpenAIRealtimeSalesBot:
                         await self.handle_openai_function_call_enhanced(stream_id, data)
                     elif event_type == "response.output_audio_transcript.delta":
                         transcript_delta = data.get('delta', '')
-                        if transcript_delta.strip():
-                            logger.info(f"🗣️ SARAH SPEAKING: {transcript_delta}")
+                        if transcript_delta:
+                            logger.info(f"🗣️ SARAH SPEAKING: {transcript_delta.strip()}")
+                            openai_config = self.openai_connections.get(stream_id)
+                            if openai_config:
+                                if "current_bot_text" not in openai_config:
+                                    openai_config["current_bot_text"] = ""
+                                openai_config["current_bot_text"] += transcript_delta
+                    elif event_type == "response.output_audio_transcript.done":
+                        openai_config = self.openai_connections.get(stream_id)
+                        if openai_config and "current_bot_text" in openai_config:
+                            bot_text = openai_config["current_bot_text"].strip()
+                            if bot_text:
+                                openai_config["transcript"].append({"role": "bot", "msg": bot_text})
+                            openai_config["current_bot_text"] = ""
+                    elif event_type == "conversation.item.input_audio_transcription.completed":
+                        user_text = data.get("transcript", "")
+                        if user_text:
+                            logger.info(f"🎤 CUSTOMER SAID: {user_text}")
+                            openai_config = self.openai_connections.get(stream_id)
+                            if openai_config:
+                                openai_config["transcript"].append({"role": "user", "msg": user_text})
                     elif event_type == "input_audio_buffer.speech_started":
                         logger.info(f"🎤 CUSTOMER STARTED SPEAKING (enhanced) for {stream_id}")
                         openai_config = self.openai_connections.get(stream_id)
@@ -867,7 +888,24 @@ class OpenAIRealtimeSalesBot:
         try:
             # Close OpenAI connection
             if stream_id in self.openai_connections:
-                openai_ws = self.openai_connections[stream_id]["websocket"]
+                openai_config = self.openai_connections[stream_id]
+                
+                # --- MONGODB SAVE LOGIC ---
+                try:
+                    duration = time.time() - openai_config["start_time"]
+                    transcript = openai_config.get("transcript", [])
+                    if transcript:
+                        call_log = {
+                            "call_id": stream_id,
+                            "duration_seconds": round(duration, 2),
+                            "transcript": transcript,
+                            "timestamp": __import__("datetime").datetime.utcnow()
+                        }
+                        asyncio.create_task(mongo_db.save_call_log(call_log))
+                except Exception as db_err:
+                    logger.error(f"Failed to save call log: {db_err}")
+                
+                openai_ws = openai_config["websocket"]
                 try:
                     if hasattr(openai_ws, "closed"):
                         if not openai_ws.closed:
