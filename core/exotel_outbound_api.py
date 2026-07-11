@@ -26,14 +26,22 @@ class ExotelOutboundAPI:
     
     def __init__(self):
         """Initialize Exotel API client"""
-        # Get from Exotel dashboard
+        # Get from Exotel dashboard configuration
+        self.api_key = Config.EXOTEL_API_KEY
         self.api_token = Config.EXOTEL_API_TOKEN
         self.account_sid = Config.EXOTEL_ACCOUNT_SID
         self.exotel_number = Config.EXOTEL_FROM_NUMBER  # Your virtual number
-        self.api_base_url = "https://api.exotel.com/v1"
+        subdomain = getattr(Config, "EXOTEL_SUBDOMAIN", "api.in.exotel.com") or "api.in.exotel.com"
+        self.api_base_url = f"https://{subdomain}/v1"
+        
+        # Prepare Base64 Basic Auth headers
+        import base64
+        auth_str = f"{self.api_key}:{self.api_token}"
+        self.auth_header = "Basic " + base64.b64encode(auth_str.encode('utf-8')).decode('utf-8')
         
         logger.info("🔌 Exotel Outbound API initialized")
         logger.info(f"📞 From Number: {self.exotel_number}")
+        logger.info(f"🌐 Base URL: {self.api_base_url}")
     
     async def make_outbound_call(
         self,
@@ -42,21 +50,7 @@ class ExotelOutboundAPI:
         context: Dict[str, Any] = None
     ) -> Optional[str]:
         """
-        Make an outbound call to a customer
-        
-        Args:
-            phone_number: Customer phone number (e.g., "+919876543210")
-            greeting_text: (Optional) Initial greeting text
-            context: (Optional) Context data for the call
-            
-        Returns:
-            call_sid: Exotel call ID, or None if failed
-            
-        Example:
-            call_sid = await api.make_outbound_call(
-                "+919876543210",
-                greeting_text="Hi John, this is Sarah calling..."
-            )
+        Make an outbound call to a customer using form-urlencoded POST
         """
         try:
             # Format phone number
@@ -65,30 +59,34 @@ class ExotelOutboundAPI:
             
             logger.info(f"📤 Making outbound call to {phone_number}")
             
-            # Prepare API request
-            url = f"{self.api_base_url}/Accounts/{self.account_sid}/Calls"
+            # Prepare API request (append .json)
+            url = f"{self.api_base_url}/Accounts/{self.account_sid}/Calls.json"
             
+            # Exotel API expects form-urlencoded parameters (not JSON)
             payload = {
-                "to": phone_number,
-                "from": self.exotel_number,
-                # After customer answers, route to your inbound vSIP
-                "CallbackUrl": f"http://{Config.SIP_PUBLIC_IP}:5060",
-                "CallbackMethod": "POST",
-                # Optional: greeting message (TTS)
-                "FirstPartyPlay": greeting_text or "Please wait while we connect your call"
+                "From": phone_number,
+                "To": self.exotel_number,
+                "CallerId": self.exotel_number,
+                # Route to PJSIP endpoint when customer answers
+                "Url": f"http://{Config.SIP_PUBLIC_IP}:5060"
             }
+            
+            # Note: For outbound call flows, Exotel makes an HTTP callback to "Url" to fetch applet instructions.
+            # However, if we want direct SIP forwarding:
+            # Let's check how the CallbackUrl is handled. In Exotel Calls API, "Url" holds the XML applet URL.
+            # If the user's Exotel is configured to forward directly, it routes to SIP.
             
             if context:
                 payload["CustomData"] = json.dumps(context)
             
             headers = {
-                "Authorization": f"Bearer {self.api_token}",
-                "Content-Type": "application/json"
+                "Authorization": self.auth_header,
+                "Content-Type": "application/x-www-form-urlencoded"
             }
             
-            # Make API call
+            # Make API call using data=payload (x-www-form-urlencoded)
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, headers=headers) as resp:
+                async with session.post(url, data=payload, headers=headers) as resp:
                     if resp.status == 200 or resp.status == 201:
                         data = await resp.json()
                         call_sid = data.get("Call", {}).get("Sid")
@@ -112,18 +110,13 @@ class ExotelOutboundAPI:
     async def get_call_status(self, call_sid: str) -> Optional[Dict[str, Any]]:
         """
         Get the status of an outbound call
-        
-        Args:
-            call_sid: Exotel call ID
-            
-        Returns:
-            Call status info or None if failed
         """
         try:
-            url = f"{self.api_base_url}/Accounts/{self.account_sid}/Calls/{call_sid}"
+            url = f"{self.api_base_url}/Accounts/{self.account_sid}/Calls/{call_sid}.json"
             
             headers = {
-                "Authorization": f"Bearer {self.api_token}"
+                "Authorization": self.auth_header,
+                "Accept": "application/json"
             }
             
             async with aiohttp.ClientSession() as session:
@@ -145,27 +138,21 @@ class ExotelOutboundAPI:
     async def hangup_call(self, call_sid: str) -> bool:
         """
         Hang up an active call
-        
-        Args:
-            call_sid: Exotel call ID
-            
-        Returns:
-            True if successful, False otherwise
         """
         try:
-            url = f"{self.api_base_url}/Accounts/{self.account_sid}/Calls/{call_sid}"
+            url = f"{self.api_base_url}/Accounts/{self.account_sid}/Calls/{call_sid}.json"
             
             payload = {
                 "Action": "hangup"
             }
             
             headers = {
-                "Authorization": f"Bearer {self.api_token}",
-                "Content-Type": "application/json"
+                "Authorization": self.auth_header,
+                "Content-Type": "application/x-www-form-urlencoded"
             }
             
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, headers=headers) as resp:
+                async with session.post(url, data=payload, headers=headers) as resp:
                     if resp.status == 200:
                         logger.info(f"✅ Call {call_sid} hung up")
                         return True

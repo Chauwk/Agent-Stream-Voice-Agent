@@ -75,9 +75,12 @@ class Config:
     DYNAMIC_CHUNK_SIZING = os.getenv('DYNAMIC_CHUNK_SIZING', 'true').lower() == 'true'
     
     # ===== EXOTEL OUTBOUND API (for REST-based outbound calls only) =====
-    EXOTEL_API_TOKEN = os.getenv('EXOTEL_API_TOKEN', '')  # Get from Exotel dashboard
+    EXOTEL_API_KEY = os.getenv('EXOTEL_API_KEY', '')  # Your API Key (username)
+    EXOTEL_API_TOKEN = os.getenv('EXOTEL_API_TOKEN', '')  # Your API Token (password)
     EXOTEL_ACCOUNT_SID = os.getenv('EXOTEL_ACCOUNT_SID', '')  # Your Account SID
     EXOTEL_FROM_NUMBER = os.getenv('EXOTEL_FROM_NUMBER', '')  # Your virtual number
+    EXOTEL_SUBDOMAIN = os.getenv('EXOTEL_SUBDOMAIN', 'api.in.exotel.com')  # e.g., api.in.exotel.com for Mumbai
+    
     
     # ===== SIP SERVER CONFIGURATION =====
     SIP_SERVER_HOST = os.getenv('SIP_SERVER_HOST', '0.0.0.0')
