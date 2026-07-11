@@ -1444,18 +1444,18 @@ async def admin_portal():
                 
                 listEl.innerHTML = activeOutboundCalls.map(c => `
                     <tr>
-                        <td><code>\${c.call_sid}</code></td>
-                        <td><strong>\${c.customer_name}</strong></td>
-                        <td><code>\${c.phone_number}</code></td>
-                        <td><span class="status-badge status-\${c.status === 'completed' || c.status === 'in-progress' ? 'processed' : (c.status === 'failed' ? 'failed' : 'processing')}">\${c.status}</span></td>
+                        <td><code>\${{c.call_sid}}</code></td>
+                        <td><strong>\${{c.customer_name}}</strong></td>
+                        <td><code>\${{c.phone_number}}</code></td>
+                        <td><span class="status-badge status-\${{c.status === 'completed' || c.status === 'in-progress' ? 'processed' : (c.status === 'failed' ? 'failed' : 'processing')}}">\${{c.status}}</span></td>
                     </tr>
                 `).join('');
-            }
+            }}
 
             function pollOutboundCallStatus(callSid) {{
                 const interval = setInterval(async () => {{
                     try {{
-                        const response = await fetch(`/api/v1/calls/status/\${callSid}`);
+                        const response = await fetch(`/api/v1/calls/status/\${{callSid}}`);
                         if (!response.ok) return;
                         const data = await response.json();
                         
@@ -1470,7 +1470,7 @@ async def admin_portal():
                                 clearInterval(interval);
                             }}
                         }}
-                    } catch (err) {{
+                    }} catch (err) {{
                         console.error(err);
                     }}
                 }}, 3000);
