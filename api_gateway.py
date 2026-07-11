@@ -1390,7 +1390,7 @@ async def admin_portal():
             // Outbound Call Center logic
             let activeOutboundCalls = [];
             
-            async function handleTriggerOutboundCall(e) {
+            async function handleTriggerOutboundCall(e) {{
                 e.preventDefault();
                 const name = document.getElementById('outbound-name').value;
                 const phone = document.getElementById('outbound-phone').value;
@@ -1399,82 +1399,82 @@ async def admin_portal():
                 submitBtn.disabled = true;
                 submitBtn.innerText = "🔌 Initiating...";
                 
-                try {
-                    const response = await fetch('/api/v1/calls/outbound', {
+                try {{
+                    const response = await fetch('/api/v1/calls/outbound', {{
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ phone_number: phone, customer_name: name })
-                    });
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ phone_number: phone, customer_name: name }})
+                    }});
                     
                     const result = await response.json();
-                    if (!response.ok) {
+                    if (!response.ok) {{
                         throw new Error(result.detail || 'Call trigger failed');
-                    }
+                    }}
                     
                     showAlert('outbound-alert', `✅ Call initiated successfully. SID: ${result.call_sid}`);
                     document.getElementById('outbound-call-form').reset();
                     
                     // Add call to tracking list
-                    const newCall = {
+                    const newCall = {{
                         call_sid: result.call_sid,
                         customer_name: name,
                         phone_number: phone,
                         status: result.status || 'initiated'
-                    };
+                    }};
                     activeOutboundCalls.unshift(newCall);
                     renderOutboundCalls();
                     
                     // Start polling status for this call
                     pollOutboundCallStatus(result.call_sid);
                     
-                } catch (err) {
+                }} catch (err) {{
                     showAlert('outbound-alert', err.message, true);
-                } finally {
+                }} finally {{
                     submitBtn.disabled = false;
                     submitBtn.innerText = "📞 Start Call";
-                }
-            }
+                }}
+            }}
 
-            function renderOutboundCalls() {
+            function renderOutboundCalls() {{
                 const listEl = document.getElementById('outbound-calls-list');
-                if (activeOutboundCalls.length === 0) {
+                if (activeOutboundCalls.length === 0) {{
                     listEl.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">No outbound calls triggered yet. Start one above!</td></tr>`;
                     return;
-                }
+                }}
                 
                 listEl.innerHTML = activeOutboundCalls.map(c => `
                     <tr>
-                        <td><code>${c.call_sid}</code></td>
-                        <td><strong>${c.customer_name}</strong></td>
-                        <td><code>${c.phone_number}</code></td>
-                        <td><span class="status-badge status-${c.status === 'completed' || c.status === 'in-progress' ? 'processed' : (c.status === 'failed' ? 'failed' : 'processing')}">${c.status}</span></td>
+                        <td><code>\${c.call_sid}</code></td>
+                        <td><strong>\${c.customer_name}</strong></td>
+                        <td><code>\${c.phone_number}</code></td>
+                        <td><span class="status-badge status-\${c.status === 'completed' || c.status === 'in-progress' ? 'processed' : (c.status === 'failed' ? 'failed' : 'processing')}">\${c.status}</span></td>
                     </tr>
                 `).join('');
             }
 
-            function pollOutboundCallStatus(callSid) {
-                const interval = setInterval(async () => {
-                    try {
-                        const response = await fetch(`/api/v1/calls/status/${callSid}`);
+            function pollOutboundCallStatus(callSid) {{
+                const interval = setInterval(async () => {{
+                    try {{
+                        const response = await fetch(`/api/v1/calls/status/\${callSid}`);
                         if (!response.ok) return;
                         const data = await response.json();
                         
                         // Update status in list
                         const call = activeOutboundCalls.find(c => c.call_sid === callSid);
-                        if (call) {
+                        if (call) {{
                             call.status = data.status;
                             renderOutboundCalls();
                             
                             // Stop polling if call is finished
-                            if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(data.status)) {
+                            if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(data.status)) {{
                                 clearInterval(interval);
-                            }
-                        }
-                    } catch (err) {
+                            }}
+                        }}
+                    } catch (err) {{
                         console.error(err);
-                    }
-                }, 3000);
-            }
+                    }}
+                }}, 3000);
+            }}
 
             // Run loops
             loadTelemetry();
