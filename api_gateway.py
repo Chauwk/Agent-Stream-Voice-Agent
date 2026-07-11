@@ -1411,7 +1411,7 @@ async def admin_portal():
                         throw new Error(result.detail || 'Call trigger failed');
                     }}
                     
-                    showAlert('outbound-alert', `✅ Call initiated successfully. SID: ${result.call_sid}`);
+                    showAlert('outbound-alert', `✅ Call initiated successfully. SID: \${{result.call_sid}}`);
                     document.getElementById('outbound-call-form').reset();
                     
                     // Add call to tracking list
