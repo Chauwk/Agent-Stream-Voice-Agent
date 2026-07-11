@@ -53,31 +53,31 @@ class ExotelOutboundAPI:
         Make an outbound call to a customer using form-urlencoded POST
         """
         try:
-            # Format phone number
-            if not phone_number.startswith("+"):
-                phone_number = "+" + phone_number
+            # Format phone number for Exotel Connect API
+            # Standard formatting: prefix the 10 digits with a 0 as per documentation
+            clean_number = phone_number.strip().replace(" ", "").replace("-", "")
+            if clean_number.startswith("+91"):
+                clean_number = "0" + clean_number[3:]
+            elif clean_number.startswith("91") and len(clean_number) == 12:
+                clean_number = "0" + clean_number[2:]
+            elif len(clean_number) == 10 and clean_number.isdigit():
+                clean_number = "0" + clean_number
+                
+            logger.info(f"📤 Making outbound call from customer={clean_number} to agent={self.exotel_number}")
             
-            logger.info(f"📤 Making outbound call to {phone_number}")
+            # Connect Two Numbers endpoint
+            url = f"{self.api_base_url}/Accounts/{self.account_sid}/Calls/connect.json"
             
-            # Prepare API request (append .json)
-            url = f"{self.api_base_url}/Accounts/{self.account_sid}/Calls.json"
-            
-            # Exotel API expects form-urlencoded parameters (not JSON)
+            # Exotel API parameters for Connect leg
             payload = {
-                "From": phone_number,
+                "From": clean_number,
                 "To": self.exotel_number,
                 "CallerId": self.exotel_number,
-                # Route to PJSIP endpoint when customer answers
-                "Url": f"http://{Config.SIP_PUBLIC_IP}:5060"
+                "CallType": "trans"
             }
             
-            # Note: For outbound call flows, Exotel makes an HTTP callback to "Url" to fetch applet instructions.
-            # However, if we want direct SIP forwarding:
-            # Let's check how the CallbackUrl is handled. In Exotel Calls API, "Url" holds the XML applet URL.
-            # If the user's Exotel is configured to forward directly, it routes to SIP.
-            
             if context:
-                payload["CustomData"] = json.dumps(context)
+                payload["StatusCallback"] = f"http://{Config.SIP_PUBLIC_IP}:5000/api/v1/calls/webhook"
             
             headers = {
                 "Authorization": self.auth_header,
