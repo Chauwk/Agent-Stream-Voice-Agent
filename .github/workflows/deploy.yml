@@ -69,9 +69,10 @@ jobs:
 
       - name: Deploy with Docker Compose
         run: |
-          cp /home/ubuntu/voice-bot.env .env
+          cp /home/ubuntu/Agent-Stream-Voice-Agent/.env .env
           sudo docker compose pull
           sudo docker compose up -d --force-recreate
+
 
       - name: Verify containers are running
         run: |
