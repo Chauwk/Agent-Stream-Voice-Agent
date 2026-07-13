@@ -725,6 +725,9 @@ async def admin_portal():
                 <button class="tab-btn" onclick="switchTab('sandbox-panel', this)">
                     🔍 Vector Search Sandbox
                 </button>
+                <button class="tab-btn" onclick="switchTab('outbound-panel', this)">
+                    📞 Outbound Call Center
+                </button>
             </div>
 
             <!-- Content Panels -->
@@ -936,6 +939,46 @@ async def admin_portal():
                     </div>
 
                     <div class="search-results" id="search-sandbox-results"></div>
+                </div>
+
+                <!-- Tab 5: Outbound Call Center -->
+                <div id="outbound-panel" class="panel">
+                    <h2>Outbound Call Center</h2>
+                    <p class="panel-desc">Trigger outbound callback calls to customers. Personalize greetings and monitor call progress in real-time.</p>
+                    
+                    <div id="outbound-alert" class="alert"></div>
+
+                    <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--border); padding: 1.5rem; border-radius: 12px; margin-bottom: 2rem;">
+                        <h3>Trigger Outbound Call</h3>
+                        <form id="outbound-call-form" onsubmit="handleTriggerOutboundCall(event)" style="margin-top: 1rem; display: grid; grid-template-columns: 1fr 1fr auto; gap: 1rem; align-items: end;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="outbound-name">Customer Name</label>
+                                <input type="text" id="outbound-name" required placeholder="e.g. John Doe">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="outbound-phone">Customer Phone Number</label>
+                                <input type="text" id="outbound-phone" required placeholder="e.g. +91XXXXXXXXXX">
+                            </div>
+                            <button type="submit" id="outbound-submit-btn" class="btn btn-primary">📞 Start Call</button>
+                        </form>
+                    </div>
+
+                    <h3>Active & Recent Outbound Calls</h3>
+                    <table style="margin-top: 1rem;">
+                        <thead>
+                            <tr>
+                                <th>Call ID (SID)</th>
+                                <th>Customer Name</th>
+                                <th>Phone Number</th>
+                                <th>Call Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="outbound-calls-list">
+                            <tr>
+                                <td colspan="4" style="text-align: center; color: var(--text-muted);">No outbound calls triggered yet. Start one above!</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -1342,6 +1385,95 @@ async def admin_portal():
                 }} catch (err) {{
                     resultsEl.innerHTML = `<div style="color: var(--error); border: 1px solid rgba(239,68,68,0.2); padding: 1.5rem; border-radius: 12px; background: rgba(239,68,68,0.05);">Search failed: ${{err.message}}</div>`;
                 }}
+            }}
+
+            // Outbound Call Center logic
+            let activeOutboundCalls = [];
+            
+            async function handleTriggerOutboundCall(e) {{
+                e.preventDefault();
+                const name = document.getElementById('outbound-name').value;
+                const phone = document.getElementById('outbound-phone').value;
+                const submitBtn = document.getElementById('outbound-submit-btn');
+                
+                submitBtn.disabled = true;
+                submitBtn.innerText = "🔌 Initiating...";
+                
+                try {{
+                    const response = await fetch('/api/v1/calls/outbound', {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ phone_number: phone, customer_name: name }})
+                    }});
+                    
+                    const result = await response.json();
+                    if (!response.ok) {{
+                        throw new Error(result.detail || 'Call trigger failed');
+                    }}
+                    
+                    showAlert('outbound-alert', `✅ Call initiated successfully. SID: \${{result.call_sid}}`);
+                    document.getElementById('outbound-call-form').reset();
+                    
+                    // Add call to tracking list
+                    const newCall = {{
+                        call_sid: result.call_sid,
+                        customer_name: name,
+                        phone_number: phone,
+                        status: result.status || 'initiated'
+                    }};
+                    activeOutboundCalls.unshift(newCall);
+                    renderOutboundCalls();
+                    
+                    // Start polling status for this call
+                    pollOutboundCallStatus(result.call_sid);
+                    
+                }} catch (err) {{
+                    showAlert('outbound-alert', err.message, true);
+                }} finally {{
+                    submitBtn.disabled = false;
+                    submitBtn.innerText = "📞 Start Call";
+                }}
+            }}
+
+            function renderOutboundCalls() {{
+                const listEl = document.getElementById('outbound-calls-list');
+                if (activeOutboundCalls.length === 0) {{
+                    listEl.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">No outbound calls triggered yet. Start one above!</td></tr>`;
+                    return;
+                }}
+                
+                listEl.innerHTML = activeOutboundCalls.map(c => `
+                    <tr>
+                        <td><code>\${{c.call_sid}}</code></td>
+                        <td><strong>\${{c.customer_name}}</strong></td>
+                        <td><code>\${{c.phone_number}}</code></td>
+                        <td><span class="status-badge status-\${{c.status === 'completed' || c.status === 'in-progress' ? 'processed' : (c.status === 'failed' ? 'failed' : 'processing')}}">\${{c.status}}</span></td>
+                    </tr>
+                `).join('');
+            }}
+
+            function pollOutboundCallStatus(callSid) {{
+                const interval = setInterval(async () => {{
+                    try {{
+                        const response = await fetch(`/api/v1/calls/status/\${{callSid}}`);
+                        if (!response.ok) return;
+                        const data = await response.json();
+                        
+                        // Update status in list
+                        const call = activeOutboundCalls.find(c => c.call_sid === callSid);
+                        if (call) {{
+                            call.status = data.status;
+                            renderOutboundCalls();
+                            
+                            // Stop polling if call is finished
+                            if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(data.status)) {{
+                                clearInterval(interval);
+                            }}
+                        }}
+                    }} catch (err) {{
+                        console.error(err);
+                    }}
+                }}, 3000);
             }}
 
             // Run loops
