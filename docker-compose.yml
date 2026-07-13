@@ -48,8 +48,10 @@ services:
       - SALES_REP_NAME=${SALES_BOT_NAME:-Zara}
       
       # Audio
+      - DEEPGRAM_LANGUAGE=${DEEPGRAM_LANGUAGE}
       - SAMPLE_RATE=24000
       - AUDIO_CHUNK_SIZE=200
+
       
       # Server
       - SERVER_HOST=0.0.0.0
