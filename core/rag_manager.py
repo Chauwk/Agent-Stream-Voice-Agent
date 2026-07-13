@@ -57,13 +57,20 @@ class RAGManager:
             logger.warning("⚠️ AWS_S3_BUCKET_NAME not set. Document uploads will skip S3 persistent raw file backing.")
         else:
             try:
-                # Clean up empty strings passed from environment variables to prevent botocore endpoint construction crashes
-                for key in ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"]:
-                    if os.getenv(key) == "":
-                        os.environ.pop(key, None)
+                aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
+                aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+                region_name = os.getenv("AWS_DEFAULT_REGION", "ap-south-1")
                 
-                self.s3_client = boto3.client('s3')
-                logger.info("✅ S3 Client initialized successfully.")
+                if aws_access_key and aws_secret_key:
+                    self.s3_client = boto3.client(
+                        's3',
+                        aws_access_key_id=aws_access_key,
+                        aws_secret_access_key=aws_secret_key,
+                        region_name=region_name
+                    )
+                else:
+                    self.s3_client = boto3.client('s3', region_name=region_name)
+                logger.info("✅ S3 Client initialized successfully using explicit credentials/region.")
             except Exception as s3_err:
                 logger.error(f"❌ Failed to initialize S3 client: {s3_err}. Document uploads will skip S3 backing.")
                 self.bucket_name = None
