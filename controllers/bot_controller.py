@@ -139,7 +139,10 @@ async def get_active_bot_telemetry() -> Dict[str, Any]:
             "gemini_model": Config.GEMINI_MODEL,
             "sarvam_model": Config.SARVAM_MODEL,
             "sarvam_speaker": Config.SARVAM_SPEAKER,
-            "sarvam_language_code": Config.SARVAM_LANGUAGE_CODE
+            "sarvam_language_code": Config.SARVAM_LANGUAGE_CODE,
+            "sarvam_pace": Config.SARVAM_PACE,
+            "sarvam_pitch": Config.SARVAM_PITCH,
+            "audio_gain": Config.AUDIO_GAIN
         },
         "audio_settings": {
             "sample_rate": Config.SAMPLE_RATE,
@@ -220,6 +223,18 @@ async def update_bot_runtime_config(payload: Dict[str, Any]) -> Dict[str, Any]:
     if "sarvam_language_code" in payload:
         Config.SARVAM_LANGUAGE_CODE = str(payload["sarvam_language_code"])
         updated_fields.append("sarvam_language_code")
+
+    if "sarvam_pace" in payload:
+        Config.SARVAM_PACE = float(payload["sarvam_pace"])
+        updated_fields.append("sarvam_pace")
+
+    if "sarvam_pitch" in payload:
+        Config.SARVAM_PITCH = float(payload["sarvam_pitch"])
+        updated_fields.append("sarvam_pitch")
+
+    if "audio_gain" in payload:
+        Config.AUDIO_GAIN = float(payload["audio_gain"])
+        updated_fields.append("audio_gain")
             
     logger.info(f"✅ [BotController] Dynamic reload complete. Fields modified: {updated_fields}")
     
@@ -237,6 +252,9 @@ async def update_bot_runtime_config(payload: Dict[str, Any]) -> Dict[str, Any]:
             "gemini_model": Config.GEMINI_MODEL,
             "sarvam_model": Config.SARVAM_MODEL,
             "sarvam_speaker": Config.SARVAM_SPEAKER,
-            "sarvam_language_code": Config.SARVAM_LANGUAGE_CODE
+            "sarvam_language_code": Config.SARVAM_LANGUAGE_CODE,
+            "sarvam_pace": Config.SARVAM_PACE,
+            "sarvam_pitch": Config.SARVAM_PITCH,
+            "audio_gain": Config.AUDIO_GAIN
         }
     }

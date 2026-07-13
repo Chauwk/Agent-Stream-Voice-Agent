@@ -39,7 +39,7 @@ class Config:
     DEEPGRAM_ENDPOINTING = int(os.getenv('DEEPGRAM_ENDPOINTING', '300'))
     GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
     SARVAM_MODEL = os.getenv('SARVAM_MODEL', 'bulbul:v3')
-    SARVAM_SPEAKER = 'neha'
+    SARVAM_SPEAKER = os.getenv('SARVAM_SPEAKER', 'neha')
     SARVAM_LANGUAGE_CODE = os.getenv('SARVAM_LANGUAGE_CODE', 'hi-IN')
     SARVAM_PACE = float(os.getenv('SARVAM_PACE', '1.15'))  # 1.15x speed for dynamic conversational pace
     SARVAM_PITCH = float(os.getenv('SARVAM_PITCH', '0.0'))

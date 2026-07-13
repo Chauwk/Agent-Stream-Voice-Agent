@@ -779,6 +779,36 @@ async def admin_portal():
                             </tbody>
                         </table>
                     </div>
+
+                    <div style="margin-top: 2.5rem; background: rgba(255,255,255,0.01); border: 1px solid var(--border); padding: 1.75rem; border-radius: 16px;">
+                        <h3>Configure AI Voice Settings</h3>
+                        <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;">Adjust the agent's vocal tone, conversational pace, and playback volume instantly.</p>
+                        
+                        <div id="config-voice-alert" class="alert" style="margin-top: 1rem;"></div>
+                        
+                        <form id="voice-settings-form" onsubmit="handleUpdateVoiceConfig(event)" style="margin-top: 1.5rem; display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 1.25rem; align-items: end;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="cfg-speaker">Sarvam Voice (Speaker)</label>
+                                <select id="cfg-speaker" required>
+                                    <option value="neha">Neha (Female - Default)</option>
+                                    <option value="shubh">Shubh (Male - Friendly)</option>
+                                    <option value="ishita">Ishita (Female - Expressive)</option>
+                                    <option value="aditya">Aditya (Male)</option>
+                                    <option value="priya">Priya (Female)</option>
+                                    <option value="manan">Manan (Male - Conversational)</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="cfg-pace">Speaking Pace (Speed)</label>
+                                <input type="number" id="cfg-pace" step="0.05" min="0.8" max="1.5" required placeholder="e.g. 1.15">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="cfg-gain">Audio Gain (Volume Boost)</label>
+                                <input type="number" id="cfg-gain" step="0.1" min="1.0" max="3.0" required placeholder="e.g. 1.5">
+                            </div>
+                            <button type="submit" class="btn btn-primary">💾 Save Settings</button>
+                        </form>
+                    </div>
                 </div>
 
                 <!-- Tab 2: Companies -->
@@ -1065,6 +1095,24 @@ async def admin_portal():
                     document.getElementById('cfg-stt-model').innerText = data.modular_settings.deepgram_model;
                     document.getElementById('cfg-llm-model').innerText = data.modular_settings.gemini_model;
                     document.getElementById('cfg-tts-model').innerText = data.modular_settings.sarvam_model;
+
+                    // Populate voice config inputs once
+                    const speakerInput = document.getElementById('cfg-speaker');
+                    const paceInput = document.getElementById('cfg-pace');
+                    const gainInput = document.getElementById('cfg-gain');
+                    
+                    if (speakerInput && !speakerInput.dataset.initialized) {{
+                        speakerInput.value = data.modular_settings.sarvam_speaker;
+                        speakerInput.dataset.initialized = "true";
+                    }}
+                    if (paceInput && !paceInput.dataset.initialized) {{
+                        paceInput.value = data.modular_settings.sarvam_pace;
+                        paceInput.dataset.initialized = "true";
+                    }}
+                    if (gainInput && !gainInput.dataset.initialized) {{
+                        gainInput.value = data.modular_settings.audio_gain;
+                        gainInput.dataset.initialized = "true";
+                    }}
                 }} catch (err) {{
                     console.error(err);
                 }}
@@ -1474,6 +1522,34 @@ async def admin_portal():
                         console.error(err);
                     }}
                 }}, 3000);
+            }}
+
+            // Update dynamic AI voice config
+            async function handleUpdateVoiceConfig(e) {{
+                e.preventDefault();
+                const speaker = document.getElementById('cfg-speaker').value;
+                const pace = parseFloat(document.getElementById('cfg-pace').value);
+                const gain = parseFloat(document.getElementById('cfg-gain').value);
+                const alertEl = document.getElementById('config-voice-alert');
+                
+                try {{
+                    const response = await fetch('/api/v1/bot/config', {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{
+                            sarvam_speaker: speaker,
+                            sarvam_pace: pace,
+                            audio_gain: gain
+                        }})
+                    }});
+                    const result = await response.json();
+                    if (!response.ok) {{
+                        throw new Error(result.detail || 'Failed to update voice configuration');
+                    }}
+                    showAlert('config-voice-alert', '✅ Voice configurations saved and hot-reloaded successfully!');
+                }} catch (err) {{
+                    showAlert('config-voice-alert', err.message, true);
+                }}
             }}
 
             // Run loops

@@ -76,6 +76,21 @@ class BotConfigUpdateRequest(BaseModel):
         example="hi-IN",
         description="Language code for Sarvam AI TTS (e.g. hi-IN)."
     )
+    sarvam_pace: Optional[float] = Field(
+        None,
+        example=1.15,
+        description="Pace (speed) factor for Sarvam AI TTS (e.g. 1.15)."
+    )
+    sarvam_pitch: Optional[float] = Field(
+        None,
+        example=0.0,
+        description="Pitch offset for Sarvam AI TTS (e.g. 0.0)."
+    )
+    audio_gain: Optional[float] = Field(
+        None,
+        example=1.5,
+        description="Digital playback audio gain factor (e.g. 1.5)."
+    )
 
 # === Pydantic Output Schemas for Swagger Documentation ===
 
@@ -91,6 +106,9 @@ class BotModularSettings(BaseModel):
     sarvam_model: str = Field(..., example="bulbul:v3")
     sarvam_speaker: str = Field(..., example="shubh")
     sarvam_language_code: str = Field(..., example="hi-IN")
+    sarvam_pace: float = Field(..., example=1.15)
+    sarvam_pitch: float = Field(..., example=0.0)
+    audio_gain: float = Field(..., example=1.5)
 
 class BotAudioSettings(BaseModel):
     sample_rate: int = Field(..., example=24000)
