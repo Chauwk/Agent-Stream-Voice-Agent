@@ -23,7 +23,7 @@ class MongoManager:
             self.call_logs_collection = None
 
     async def save_call_log(self, call_data: dict):
-        if not self.call_logs_collection:
+        if self.call_logs_collection is None:
             logger.warning("⚠️ Cannot save call log. MongoDB is not connected.")
             return
             
