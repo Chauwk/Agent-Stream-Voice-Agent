@@ -1306,6 +1306,47 @@ class ModularSalesBot:
                     
         # Remove connection
         if call_id in self.connections:
+            # --- MONGODB SAVE LOGIC ---
+            try:
+                duration = time.time() - session_state["start_time"]
+                history = session_state.get("history", [])
+                
+                # Convert GenAI Content list to a clean, serializable transcript list
+                transcript = []
+                for content in history:
+                    role = "user" if content.role == "user" else "bot"
+                    msg_text = ""
+                    for part in content.parts:
+                        if hasattr(part, "text") and part.text:
+                            msg_text += part.text + " "
+                        elif hasattr(part, "function_call") and part.function_call:
+                            args_str = ""
+                            if part.function_call.args:
+                                args_str = ", ".join(f"{k}={v}" for k, v in part.function_call.args.items())
+                            msg_text += f"[Requested action: {part.function_call.name}({args_str})] "
+                        elif hasattr(part, "function_response") and part.function_response:
+                            resp_str = str(part.function_response.response)
+                            msg_text += f"[Action output: {resp_str}] "
+                    
+                    msg_text = msg_text.strip()
+                    if msg_text:
+                        transcript.append({"role": role, "msg": msg_text})
+                
+                # Only save if there is some conversation history
+                if transcript:
+                    call_log = {
+                        "call_id": call_id,
+                        "duration_seconds": round(duration, 2),
+                        "transcript": transcript,
+                        "timestamp": __import__("datetime").datetime.utcnow(),
+                        "to_number": session_state.get("to_phone", "default"),
+                        "direction": "inbound"  # Modular mode is inbound trunk-based
+                    }
+                    from core.mongo_manager import mongo_db
+                    asyncio.create_task(mongo_db.save_call_log(call_log))
+            except Exception as db_err:
+                logger.error(f"❌ Failed to save modular call log to MongoDB: {db_err}")
+
             del self.connections[call_id]
             
         logger.info(f"🧹 Cleanup complete for call: {call_id}")
