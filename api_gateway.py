@@ -1171,19 +1171,19 @@ async def admin_portal():
                                         <div style="font-weight: 500;">${{log.call_date || '-'}}</div>
                                         <div style="font-size: 0.75rem; color: var(--text-muted);">${{log.time || '-'}}</div>
                                     </td>
-                                    <td>\${callerDetailsHtml}</td>
-                                    <td><strong>\${log.name || 'Not provided'}</strong></td>
-                                    <td><span style="font-size: 0.8rem; background: rgba(59,130,246,0.1); color: #3b82f6; padding: 0.25rem 0.5rem; border-radius: 4px;">\${log.business_interest || 'Not provided'}</span></td>
-                                    <td>\${badgeCell}</td>
+                                    <td>${{callerDetailsHtml}}</td>
+                                    <td><strong>${{log.name || 'Not provided'}}</strong></td>
+                                    <td><span style="font-size: 0.8rem; background: rgba(59,130,246,0.1); color: #3b82f6; padding: 0.25rem 0.5rem; border-radius: 4px;">${{log.business_interest || 'Not provided'}}</span></td>
+                                    <td>${{badgeCell}}</td>
                                     <td>
                                         <div style="font-size: 0.8rem; max-width: 250px; white-space: normal; word-wrap: break-word;">
-                                            \${log.call_summary || 'Not provided'}
+                                            ${{log.call_summary || 'Not provided'}}
                                         </div>
                                     </td>
                                     <td>
                                         <div style="display: flex; gap: 0.5rem; align-items: center;">
-                                            <button class="btn btn-primary" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;" onclick="viewTranscript('\${log.call_id}')">🗣️ Transcript</button>
-                                            <button class="btn btn-danger" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;" onclick="handleDeleteCallLog('\${log.call_id}')">🗑️</button>
+                                            <button class="btn btn-primary" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;" onclick="viewTranscript('${{log.call_id}}')">🗣️ Transcript</button>
+                                            <button class="btn btn-danger" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;" onclick="handleDeleteCallLog('${{log.call_id}}')">🗑️</button>
                                         </div>
                                     </td>
                                 </tr>
@@ -1191,7 +1191,7 @@ async def admin_portal():
                         }}).join('');
                     }}
                 }} catch (err) {{
-                    listEl.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--error); padding: 2rem;">Error loading call logs: \${err.message}</td></tr>`;
+                    listEl.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--error); padding: 2rem;">Error loading call logs: ${{err.message}}</td></tr>`;
                 }}
             }}
 
@@ -1200,7 +1200,7 @@ async def admin_portal():
                 if (!log) return;
                 
                 const modalBody = document.getElementById('modal-body');
-                document.getElementById('modal-title').innerText = `Transcript: Call ID \${callId}`;
+                document.getElementById('modal-title').innerText = `Transcript: Call ID ${{callId}}`;
                 
                 if (!log.transcript || log.transcript.length === 0) {{
                     modalBody.innerHTML = '<p style="color: var(--text-muted); text-align: center; margin-top: 2rem;">No speech items registered in transcript.</p>';
@@ -1212,10 +1212,10 @@ async def admin_portal():
                         const borderClr = isBot ? 'rgba(59, 130, 246, 0.3)' : 'var(--border)';
                         
                         return `
-                            <div style="display: flex; flex-direction: column; align-items: \${isBot ? 'flex-start' : 'flex-end'}; margin-bottom: 1rem;">
-                                <span style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">\${name}</span>
-                                <div style="background: \${bubbleBg}; border: 1px solid \${borderClr}; border-radius: 12px; padding: 0.75rem 1rem; max-width: 80%; font-size: 0.85rem; color: var(--text); word-wrap: break-word; white-space: pre-wrap;">
-                                    \${t.msg}
+                            <div style="display: flex; flex-direction: column; align-items: ${{isBot ? 'flex-start' : 'flex-end'}}; margin-bottom: 1rem;">
+                                <span style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">${{name}}</span>
+                                <div style="background: ${{bubbleBg}}; border: 1px solid ${{borderClr}}; border-radius: 12px; padding: 0.75rem 1rem; max-width: 80%; font-size: 0.85rem; color: var(--text); word-wrap: break-word; white-space: pre-wrap;">
+                                    ${{t.msg}}
                                 </div>
                             </div>
                         `;
@@ -1232,13 +1232,13 @@ async def admin_portal():
             async function handleDeleteCallLog(callId) {{
                 if (!confirm('Are you sure you want to permanently delete this call log from MongoDB?')) return;
                 try {{
-                    const response = await fetch(`/api/v1/calls/logs/\${callId}`, {{
+                    const response = await fetch(`/api/v1/calls/logs/${{callId}}`, {{
                         method: 'DELETE'
                     }});
                     if (!response.ok) throw new Error('Failed to delete call log');
                     showAlert('calls-alert', 'Call log deleted successfully!');
                     loadCallLogs();
-                } catch (err) {{
+                }} catch (err) {{
                     showAlert('calls-alert', err.message, true);
                 }}
             }}
