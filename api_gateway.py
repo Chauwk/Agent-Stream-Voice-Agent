@@ -1186,10 +1186,14 @@ async def admin_portal():
 
                     // Call summary: truncate with "see more"
                     const summary = log.call_summary || '';
-                    const summaryHtml = summary.length > 120
-                        ? `<span class="summary-short">${{summary.substring(0,120)}}… <a href="#" onclick="this.parentElement.style.display='none';this.parentElement.nextElementSibling.style.display='block';return false;" style="color:var(--accent);font-size:0.72rem;">See more</a></span>
-                           <span class="summary-full" style="display:none">${{summary}} <a href="#" onclick="this.parentElement.style.display='none';this.parentElement.previousElementSibling.style.display='block';return false;" style="color:var(--accent);font-size:0.72rem;">See less</a></span>`
-                        : (summary || '<span style="color:var(--text-muted)">—</span>');
+                    let summaryHtml;
+                    if (summary.length > 120) {{
+                        const short = summary.substring(0, 120) + '\u2026';
+                        summaryHtml = '<span class=summary-short>' + short + ' <a href=# onclick="this.parentElement.style.display=\'none\';this.parentElement.nextElementSibling.style.display=\'block\';return false" style="color:var(--accent);font-size:0.72rem">See more</a></span>'
+                                    + '<span class=summary-full style="display:none">' + summary + ' <a href=# onclick="this.parentElement.style.display=\'none\';this.parentElement.previousElementSibling.style.display=\'block\';return false" style="color:var(--accent);font-size:0.72rem">See less</a></span>';
+                    }} else {{
+                        summaryHtml = summary || '<span style="color:var(--text-muted)">&#8212;</span>';
+                    }}
 
                     const bizBadge = log.business_interest && log.business_interest !== 'Not provided'
                         ? `<span style="font-size: 0.75rem; background: rgba(59,130,246,0.12); color: #60a5fa; padding: 0.2rem 0.55rem; border-radius: 20px; white-space:nowrap;">${{log.business_interest}}</span>`
@@ -1253,7 +1257,8 @@ async def admin_portal():
                 const headers = ['Sr.No.','Call Date','Time','Duration','Agent Name','Company Name',
                     'Caller Phone No.','Lead Phone No.','Name','Address','Email ID',
                     'Caller Meeting Consent','Field Visit Request','Business Interest','Call Summary'];
-                const escape = v => `"${{String(v ?? '').replace(/"/g,'""')}}"`;
+                const dq = String.fromCharCode(34);
+                const escape = v => dq + String(v ?? '').split(dq).join(dq + dq) + dq;
                 const csvLines = [
                     headers.map(escape).join(','),
                     ...rows.map((log, i) => [
@@ -1265,10 +1270,11 @@ async def admin_portal():
                         log.call_summary||''
                     ].map(escape).join(','))
                 ];
-                const blob = new Blob([csvLines.join('\n')], {{type: 'text/csv;charset=utf-8;'}});
+                const newline = String.fromCharCode(10);
+                const blob = new Blob([csvLines.join(newline)], {{type: 'text/csv;charset=utf-8;'}});
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
-                a.href = url; a.download = `call_analytics_${{new Date().toISOString().split('T')[0]}}.csv`;
+                a.href = url; a.download = 'call_analytics_' + new Date().toISOString().split('T')[0] + '.csv';
                 a.click(); URL.revokeObjectURL(url);
             }}
 
