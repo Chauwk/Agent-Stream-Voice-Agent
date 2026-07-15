@@ -120,6 +120,13 @@ class OpenAIRealtimeSalesBot:
             input_format = session_config['audio']['input']['format']['type']
             output_format = session_config['audio']['output']['format']['type']
             
+            # Resolve called virtual DID number
+            to_phone = "default"
+            if self.sip_server and stream_id in self.sip_server.sip_calls:
+                sip_call = self.sip_server.sip_calls[stream_id]
+                from controllers.bot_controller import extract_phone_number_from_uri
+                to_phone = extract_phone_number_from_uri(sip_call.to_uri)
+                
             self.openai_connections[stream_id] = {
                 "websocket": openai_ws,
                 "start_time": time.time(),
@@ -128,7 +135,8 @@ class OpenAIRealtimeSalesBot:
                 "output_format": output_format,
                 "session_config": session_config,
                 "user_speaking": False,
-                "transcript": []
+                "transcript": [],
+                "to_phone": to_phone
             }
             
             logger.info(f"✅ ENHANCED OPENAI CONNECTED for {stream_id} @ {sample_rate}Hz")
@@ -890,18 +898,21 @@ class OpenAIRealtimeSalesBot:
             if stream_id in self.openai_connections:
                 openai_config = self.openai_connections[stream_id]
                 
-                # --- MONGODB SAVE LOGIC ---
+                # --- MONGODB SAVE LOGIC (ENRICHED ANALYTICS) ---
                 try:
                     duration = time.time() - openai_config["start_time"]
                     transcript = openai_config.get("transcript", [])
                     if transcript:
-                        call_log = {
-                            "call_id": stream_id,
-                            "duration_seconds": round(duration, 2),
-                            "transcript": transcript,
-                            "timestamp": __import__("datetime").datetime.utcnow()
-                        }
-                        asyncio.create_task(mongo_db.save_call_log(call_log))
+                        from core.analytics_manager import save_enriched_call_log
+                        asyncio.create_task(
+                            save_enriched_call_log(
+                                call_id=stream_id,
+                                duration=duration,
+                                transcript=transcript,
+                                to_phone=openai_config.get("to_phone", "default"),
+                                direction="outbound"
+                            )
+                        )
                 except Exception as db_err:
                     logger.error(f"Failed to save call log: {db_err}")
                 

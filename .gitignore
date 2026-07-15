@@ -143,3 +143,9 @@ tmp_build/
 # GCP Keys & SSH Keys
 project-*.json
 *.pem
+
+# Local scratch files, local DBs, and instructions PDFs
+scratch/
+metadata.db
+*.docx
+*.pdf

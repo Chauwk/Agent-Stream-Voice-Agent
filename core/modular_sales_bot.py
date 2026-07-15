@@ -1427,7 +1427,7 @@ class ModularSalesBot:
                     
         # Remove connection
         if call_id in self.connections:
-            # --- MONGODB SAVE LOGIC ---
+            # --- MONGODB SAVE LOGIC (ENRICHED ANALYTICS) ---
             try:
                 duration = time.time() - session_state["start_time"]
                 history = session_state.get("history", [])
@@ -1455,18 +1455,27 @@ class ModularSalesBot:
                 
                 # Only save if there is some conversation history
                 if transcript:
-                    call_log = {
-                        "call_id": call_id,
-                        "duration_seconds": round(duration, 2),
-                        "transcript": transcript,
-                        "timestamp": __import__("datetime").datetime.utcnow(),
-                        "to_number": session_state.get("to_phone", "default"),
-                        "direction": "inbound"  # Modular mode is inbound trunk-based
-                    }
-                    from core.mongo_manager import mongo_db
-                    asyncio.create_task(mongo_db.save_call_log(call_log))
+                    from core.analytics_manager import save_enriched_call_log
+                    asyncio.create_task(
+                        save_enriched_call_log(
+                            call_id=call_id,
+                            duration=duration,
+                            transcript=transcript,
+                            to_phone=session_state.get("to_phone", "default"),
+                            direction="inbound"
+                        )
+                    )
                     # Trigger async email notifications
-                    asyncio.create_task(trigger_post_call_emails(call_log))
+                    try:
+                        from core.modular_sales_bot import trigger_post_call_emails
+                        asyncio.create_task(trigger_post_call_emails({
+                            "call_id": call_id,
+                            "duration_seconds": round(duration, 2),
+                            "transcript": transcript,
+                            "to_number": session_state.get("to_phone", "default")
+                        }))
+                    except ImportError:
+                        pass
             except Exception as db_err:
                 logger.error(f"❌ Failed to save modular call log to MongoDB: {db_err}")
 

@@ -191,11 +191,24 @@ async def upload_documents(
     started_jobs = []
 
     for upload in files:
+        # Check if file with same name has already been uploaded for this company
+        existing_doc = db.query(DocumentLog).filter(
+            DocumentLog.company_id == company_id,
+            DocumentLog.filename == upload.filename,
+            DocumentLog.status != "failed"
+        ).first()
+        if existing_doc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Document '{upload.filename}' already exists or is being processed. Please delete it first if you want to re-upload it."
+            )
+
         body = await upload.read()
         try:
             text = extract_text_from_file(upload.filename, body)
         except ValueError as val_err:
             raise HTTPException(status_code=400, detail=str(val_err))
+
 
         # Create DB log immediately (status=processing)
         doc_log = DocumentLog(

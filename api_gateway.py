@@ -118,6 +118,50 @@ app.include_router(call_router)
 app.include_router(bot_router)
 app.include_router(company_router)
 
+from fastapi import APIRouter
+calls_log_router = APIRouter(prefix="/api/v1/calls", tags=["Call Logs"])
+
+@calls_log_router.get("/logs")
+async def get_call_logs(limit: int = 100):
+    """Retrieve call logs from MongoDB ordered descending by date and time"""
+    from core.mongo_manager import mongo_db
+    if mongo_db.call_logs_collection is None:
+        return []
+    try:
+        # Fetch matching logs sorted descending
+        cursor = mongo_db.call_logs_collection.find({}).sort("timestamp", -1).limit(limit)
+        logs = []
+        async for doc in cursor:
+            # Format _id to string for JSON serialization
+            doc["_id"] = str(doc["_id"])
+            # Format datetime field
+            if "timestamp" in doc and doc["timestamp"]:
+                doc["timestamp"] = doc["timestamp"].isoformat()
+            logs.append(doc)
+        return logs
+    except Exception as e:
+        logger.error(f"❌ Failed to fetch call logs: {e}")
+        return []
+
+@calls_log_router.delete("/logs/{call_id}")
+async def delete_call_log(call_id: str):
+    """Delete a call log by its call ID"""
+    from core.mongo_manager import mongo_db
+    if mongo_db.call_logs_collection is None:
+        return {"status": "error", "message": "MongoDB not initialized"}
+    try:
+        result = await mongo_db.call_logs_collection.delete_one({"call_id": call_id})
+        if result.deleted_count > 0:
+            return {"status": "success", "message": f"Deleted log for call {call_id}"}
+        else:
+            return {"status": "error", "message": "Call log not found"}
+    except Exception as e:
+        logger.error(f"❌ Failed to delete call log {call_id}: {e}")
+        return {"status": "error", "message": str(e)}
+
+app.include_router(calls_log_router)
+
+
 # ==============================================================================
 # FastAPI WebSocket Telephony Adapter
 # ==============================================================================
@@ -728,6 +772,9 @@ async def admin_portal():
                 <button class="tab-btn" onclick="switchTab('outbound-panel', this)">
                     📞 Outbound Call Center
                 </button>
+                <button class="tab-btn" onclick="switchTab('calls-panel', this)">
+                    📈 Call Analytics & Logs
+                </button>
             </div>
 
             <!-- Content Panels -->
@@ -1010,6 +1057,55 @@ async def admin_portal():
                         </tbody>
                     </table>
                 </div>
+
+                <!-- Tab 6: Call Analytics -->
+                <div id="calls-panel" class="panel">
+                    <h2>Call Analytics & Logs</h2>
+                    <p class="panel-desc">Real-time repository of call transcripts, durations, and AI-extracted customer insights.</p>
+                    
+                    <div id="calls-alert" class="alert"></div>
+                    
+                    <div style="display: flex; justify-content: flex-end; margin-bottom: 1rem;">
+                        <button class="btn btn-secondary" onclick="loadCallLogs()">🔄 Refresh Logs</button>
+                    </div>
+
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
+                            <thead>
+                                <tr>
+                                    <th>Date & Time</th>
+                                    <th>Caller Info</th>
+                                    <th>Caller Name</th>
+                                    <th>Business Interest</th>
+                                    <th>Consents & Visits</th>
+                                    <th>Call Summary</th>
+                                    <th>Details</th>
+                                </tr>
+                            </thead>
+                            <tbody id="calls-list">
+                                <tr>
+                                    <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading call logs from MongoDB...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Call Transcript Modal -->
+                <div id="transcript-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center;">
+                    <div style="background: #0f172a; border: 1px solid var(--border); border-radius: 16px; padding: 2rem; width: 90%; max-width: 700px; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 1rem;">
+                            <h3 id="modal-title" style="margin: 0; color: var(--text);">Call Transcript</h3>
+                            <button onclick="closeTranscriptModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer; transition: color 0.2s;" onmouseover="this.style.color='#html_content'" onmouseout="this.style.color='var(--text-muted)'">&times;</button>
+                        </div>
+                        <div id="modal-body" style="overflow-y: auto; flex-grow: 1; margin-bottom: 1.5rem; padding-right: 0.5rem; max-height: 50vh;">
+                            <!-- Conversation turns loaded here -->
+                        </div>
+                        <div style="display: flex; justify-content: flex-end;">
+                            <button onclick="closeTranscriptModal()" class="btn btn-primary">Close</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -1028,6 +1124,122 @@ async def admin_portal():
                 
                 if (panelId === 'companies-panel' || panelId === 'docs-panel' || panelId === 'sandbox-panel') {{
                     loadCompanies();
+                }}
+                if (panelId === 'calls-panel') {{
+                    loadCallLogs();
+                }}
+            }}
+
+            // Call logs array cache
+            let cachedCallLogs = [];
+
+            async function loadCallLogs() {{
+                const listEl = document.getElementById('calls-list');
+                try {{
+                    const response = await fetch('/api/v1/calls/logs');
+                    if (!response.ok) throw new Error('Failed to load call logs');
+                    const data = await response.json();
+                    cachedCallLogs = data;
+                    
+                    if (data.length === 0) {{
+                        listEl.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">No call logs found in MongoDB. Make a call to log analytics!</td></tr>`;
+                    }} else {{
+                        listEl.innerHTML = data.map((log, index) => {{
+                            // Prepare consents/visits badge text
+                            const meetingConsent = log.caller_meeting_consent === 'Yes' ? 
+                                '<span style="background: rgba(16,185,129,0.15); color: #10b981; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; margin-right: 4px;">🤝 Meeting</span>' : '';
+                            const visitConsent = log.customer_request_raised_field_visit === 'Yes' ? 
+                                '<span style="background: rgba(139,92,246,0.15); color: #8b5cf6; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">🚗 Field Visit</span>' : '';
+                            const badgeCell = (meetingConsent || visitConsent) ? `${meetingConsent}${visitConsent}` : '<span style="color: var(--text-muted); font-size: 0.75rem;">None</span>';
+                            
+                            // Format caller details
+                            const phoneVal = log.caller_phone_no || 'Unknown';
+                            const emailVal = log.email_id || 'Not provided';
+                            const addressVal = log.address || 'Not provided';
+                            
+                            const callerDetailsHtml = `
+                                <div style="font-size: 0.8rem; color: var(--text-muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                    <strong>Phone:</strong> <code>${{phoneVal}}</code><br/>
+                                    <strong>Email:</strong> ${{emailVal}}<br/>
+                                    <strong>Address:</strong> ${{addressVal}}
+                                </div>
+                            `;
+
+                            return `
+                                <tr style="border-bottom: 1px solid var(--border);">
+                                    <td>
+                                        <div style="font-weight: 500;">${{log.call_date || '-'}}</div>
+                                        <div style="font-size: 0.75rem; color: var(--text-muted);">${{log.time || '-'}}</div>
+                                    </td>
+                                    <td>\${callerDetailsHtml}</td>
+                                    <td><strong>\${log.name || 'Not provided'}</strong></td>
+                                    <td><span style="font-size: 0.8rem; background: rgba(59,130,246,0.1); color: #3b82f6; padding: 0.25rem 0.5rem; border-radius: 4px;">\${log.business_interest || 'Not provided'}</span></td>
+                                    <td>\${badgeCell}</td>
+                                    <td>
+                                        <div style="font-size: 0.8rem; max-width: 250px; white-space: normal; word-wrap: break-word;">
+                                            \${log.call_summary || 'Not provided'}
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                            <button class="btn btn-primary" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;" onclick="viewTranscript('\${log.call_id}')">🗣️ Transcript</button>
+                                            <button class="btn btn-danger" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;" onclick="handleDeleteCallLog('\${log.call_id}')">🗑️</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `;
+                        }}).join('');
+                    }}
+                }} catch (err) {{
+                    listEl.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--error); padding: 2rem;">Error loading call logs: \${err.message}</td></tr>`;
+                }}
+            }}
+
+            function viewTranscript(callId) {{
+                const log = cachedCallLogs.find(l => l.call_id === callId);
+                if (!log) return;
+                
+                const modalBody = document.getElementById('modal-body');
+                document.getElementById('modal-title').innerText = `Transcript: Call ID \${callId}`;
+                
+                if (!log.transcript || log.transcript.length === 0) {{
+                    modalBody.innerHTML = '<p style="color: var(--text-muted); text-align: center; margin-top: 2rem;">No speech items registered in transcript.</p>';
+                }} else {{
+                    modalBody.innerHTML = log.transcript.map(t => {{
+                        const isBot = t.role === 'bot';
+                        const name = isBot ? log.agent_name || 'Bot' : 'Customer';
+                        const bubbleBg = isBot ? 'rgba(59, 130, 246, 0.15)' : 'rgba(255, 255, 255, 0.05)';
+                        const borderClr = isBot ? 'rgba(59, 130, 246, 0.3)' : 'var(--border)';
+                        
+                        return `
+                            <div style="display: flex; flex-direction: column; align-items: \${isBot ? 'flex-start' : 'flex-end'}; margin-bottom: 1rem;">
+                                <span style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">\${name}</span>
+                                <div style="background: \${bubbleBg}; border: 1px solid \${borderClr}; border-radius: 12px; padding: 0.75rem 1rem; max-width: 80%; font-size: 0.85rem; color: var(--text); word-wrap: break-word; white-space: pre-wrap;">
+                                    \${t.msg}
+                                </div>
+                            </div>
+                        `;
+                    }}).join('');
+                }}
+                
+                document.getElementById('transcript-modal').style.display = 'flex';
+            }}
+
+            function closeTranscriptModal() {{
+                document.getElementById('transcript-modal').style.display = 'none';
+            }}
+
+            async function handleDeleteCallLog(callId) {{
+                if (!confirm('Are you sure you want to permanently delete this call log from MongoDB?')) return;
+                try {{
+                    const response = await fetch(`/api/v1/calls/logs/\${callId}`, {{
+                        method: 'DELETE'
+                    }});
+                    if (!response.ok) throw new Error('Failed to delete call log');
+                    showAlert('calls-alert', 'Call log deleted successfully!');
+                    loadCallLogs();
+                } catch (err) {{
+                    showAlert('calls-alert', err.message, true);
                 }}
             }}
 
