@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from config import Config
 
 # Import routes
@@ -112,6 +113,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files directory
+import os as _os
+_static_dir = _os.path.join(_os.path.dirname(__file__), "static")
+_os.makedirs(_static_dir, exist_ok=True)
+app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
 # Register routers
 app.include_router(call_router)
@@ -1148,182 +1155,20 @@ async def admin_portal():
                 }}
             }}
 
-            // Call logs array cache
-            let cachedCallLogs = [];
-            let filteredCallLogs = [];
 
-            // Helper: yes/no badge
-            function yesNoBadge(val, yesColor, yesLabel) {{
-                if (val === 'Yes') {{
-                    return `<span style="background: rgba(${{yesColor}},0.15); color: rgb(${{yesColor}}); padding: 0.2rem 0.55rem; border-radius: 20px; font-size: 0.72rem; font-weight: 700; white-space: nowrap;">${{yesLabel}}</span>`;
-                }}
-                return `<span style="color: var(--text-muted); font-size: 0.75rem;">No</span>`;
-            }}
+            // ── Call Analytics loaded from external static file (no f-string escaping issues) ──
+            
 
-            function renderCallRows(logs) {{
-                const listEl = document.getElementById('calls-list');
-                const countEl = document.getElementById('calls-count');
-                if (logs.length === 0) {{
-                    listEl.innerHTML = `<tr><td colspan="17" style="text-align: center; color: var(--text-muted); padding: 2.5rem;">No matching call logs found.</td></tr>`;
-                    if (countEl) countEl.textContent = '';
-                    return;
-                }}
-                if (countEl) countEl.textContent = `Showing ${{logs.length}} record${{logs.length !== 1 ? 's' : ''}}`;
 
-                const td = (content, extra='') => `<td style="padding: 0.55rem 0.75rem; vertical-align: top; border-bottom: 1px solid var(--border); ${{extra}}">${{content}}</td>`;
-                const muted = (v) => v || '<span style="color:var(--text-muted)">—</span>';
-
-                listEl.innerHTML = logs.map((log, index) => {{
-                    const meetingBadge = yesNoBadge(log.caller_meeting_consent, '16,185,129', '✅ Yes');
-                    const visitBadge   = yesNoBadge(log.customer_request_raised_field_visit, '139,92,246', '✅ Yes');
-
-                    // Duration pretty
-                    let durLabel = log.duration || '—';
-                    if (log.duration_seconds !== undefined) {{
-                        const s = Math.round(log.duration_seconds);
-                        durLabel = s >= 60 ? `${{Math.floor(s/60)}}m ${{s%60}}s` : `${{s}}s`;
-                    }}
-
-                    // Call summary: truncate with "see more"
-                    const summary = log.call_summary || '';
-                    let summaryHtml;
-                    if (summary.length > 120) {{
-                        const short = summary.substring(0, 120) + '\u2026';
-                        summaryHtml = '<span class=summary-short>' + short + ' <a href=# onclick="this.parentElement.style.display=\'none\';this.parentElement.nextElementSibling.style.display=\'block\';return false" style="color:var(--accent);font-size:0.72rem">See more</a></span>'
-                                    + '<span class=summary-full style="display:none">' + summary + ' <a href=# onclick="this.parentElement.style.display=\'none\';this.parentElement.previousElementSibling.style.display=\'block\';return false" style="color:var(--accent);font-size:0.72rem">See less</a></span>';
-                    }} else {{
-                        summaryHtml = summary || '<span style="color:var(--text-muted)">&#8212;</span>';
-                    }}
-
-                    const bizBadge = log.business_interest && log.business_interest !== 'Not provided'
-                        ? `<span style="font-size: 0.75rem; background: rgba(59,130,246,0.12); color: #60a5fa; padding: 0.2rem 0.55rem; border-radius: 20px; white-space:nowrap;">${{log.business_interest}}</span>`
-                        : '<span style="color:var(--text-muted)">—</span>';
-
-                    return `<tr style="transition: background 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.025)'" onmouseout="this.style.background=''">
-                        ${{td(`<span style="color:var(--text-muted)">${{index+1}}</span>`)}}
-                        ${{td(`<span style="white-space:nowrap;font-weight:500">${{log.call_date || '—'}}</span>`)}}
-                        ${{td(`<span style="white-space:nowrap;color:var(--text-muted)">${{log.time || '—'}}</span>`)}}
-                        ${{td(`<span style="white-space:nowrap;font-variant-numeric:tabular-nums">${{durLabel}}</span>`)}}
-                        ${{td(muted(log.agent_name))}}
-                        ${{td(muted(log.company_name))}}
-                        ${{td(`<code style="font-size:0.78rem;color:#93c5fd">${{log.caller_phone_no || '—'}}</code>`)}}
-                        ${{td(`<code style="font-size:0.78rem;color:#c4b5fd">${{log.lead_phone_no || '—'}}</code>`)}}
-                        ${{td(`<strong>${{log.name || '—'}}</strong>`)}}
-                        ${{td(`<span style="font-size:0.78rem;max-width:130px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${{log.address || ''}}">${{log.address || '—'}}</span>`)}}
-                        ${{td(`<span style="font-size:0.78rem;max-width:140px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${{log.email_id || ''}}">${{log.email_id || '—'}}</span>`)}}
-                        ${{td(meetingBadge)}}
-                        ${{td(visitBadge)}}
-                        ${{td(bizBadge)}}
-                        ${{td(`<div style="font-size:0.78rem;max-width:220px;white-space:normal;word-wrap:break-word;line-height:1.45;">${{summaryHtml}}</div>`)}}
-                        ${{td(`<button class="btn btn-primary" style="padding:0.35rem 0.7rem;font-size:0.78rem;white-space:nowrap;" onclick="viewTranscript('${{log.call_id}}')">📄 View</button>`)}}
-                        ${{td(`<button class="btn btn-danger" style="padding:0.35rem 0.7rem;font-size:0.78rem;" onclick="handleDeleteCallLog('${{log.call_id}}')">🗑️</button>`)}}
-                    </tr>`;
-                }}).join('');
-            }}
-
-            async function loadCallLogs() {{
-                const listEl = document.getElementById('calls-list');
-                listEl.innerHTML = `<tr><td colspan="17" style="text-align:center;color:var(--text-muted);padding:2.5rem;">⏳ Loading call logs from MongoDB…</td></tr>`;
-                try {{
-                    const response = await fetch('/api/v1/calls/logs');
-                    if (!response.ok) throw new Error('Failed to load call logs');
-                    const data = await response.json();
-                    cachedCallLogs = data;
-                    filteredCallLogs = data;
-                    renderCallRows(data);
-                }} catch (err) {{
-                    listEl.innerHTML = `<tr><td colspan="17" style="text-align:center;color:var(--error);padding:2.5rem;">❌ Error loading call logs: ${{err.message}}</td></tr>`;
-                }}
-            }}
-
-            function filterCallLogs() {{
-                const q = (document.getElementById('calls-search').value || '').toLowerCase().trim();
-                if (!q) {{
-                    filteredCallLogs = cachedCallLogs;
-                }} else {{
-                    filteredCallLogs = cachedCallLogs.filter(log => {{
-                        const haystack = [log.name, log.caller_phone_no, log.lead_phone_no, log.email_id,
-                            log.business_interest, log.company_name, log.agent_name, log.address,
-                            log.call_date, log.call_summary].join(' ').toLowerCase();
-                        return haystack.includes(q);
-                    }});
-                }}
-                renderCallRows(filteredCallLogs);
-            }}
-
-            function exportCallLogsCSV() {{
-                const rows = filteredCallLogs.length > 0 ? filteredCallLogs : cachedCallLogs;
-                if (rows.length === 0) {{ alert('No data to export.'); return; }}
-                const headers = ['Sr.No.','Call Date','Time','Duration','Agent Name','Company Name',
-                    'Caller Phone No.','Lead Phone No.','Name','Address','Email ID',
-                    'Caller Meeting Consent','Field Visit Request','Business Interest','Call Summary'];
-                const dq = String.fromCharCode(34);
-                const escape = v => dq + String(v ?? '').split(dq).join(dq + dq) + dq;
-                const csvLines = [
-                    headers.map(escape).join(','),
-                    ...rows.map((log, i) => [
-                        i+1, log.call_date||'', log.time||'', log.duration||'',
-                        log.agent_name||'', log.company_name||'', log.caller_phone_no||'',
-                        log.lead_phone_no||'', log.name||'', log.address||'',
-                        log.email_id||'', log.caller_meeting_consent||'',
-                        log.customer_request_raised_field_visit||'', log.business_interest||'',
-                        log.call_summary||''
-                    ].map(escape).join(','))
-                ];
-                const newline = String.fromCharCode(10);
-                const blob = new Blob([csvLines.join(newline)], {{type: 'text/csv;charset=utf-8;'}});
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url; a.download = 'call_analytics_' + new Date().toISOString().split('T')[0] + '.csv';
-                a.click(); URL.revokeObjectURL(url);
-            }}
-
-            function viewTranscript(callId) {{
-                const log = cachedCallLogs.find(l => l.call_id === callId);
-                if (!log) return;
-                
-                const modalBody = document.getElementById('modal-body');
-                document.getElementById('modal-title').innerText = `Transcript: Call ID ${{callId}}`;
-                
-                if (!log.transcript || log.transcript.length === 0) {{
-                    modalBody.innerHTML = '<p style="color: var(--text-muted); text-align: center; margin-top: 2rem;">No speech items registered in transcript.</p>';
-                }} else {{
-                    modalBody.innerHTML = log.transcript.map(t => {{
-                        const isBot = t.role === 'bot';
-                        const name = isBot ? log.agent_name || 'Bot' : 'Customer';
-                        const bubbleBg = isBot ? 'rgba(59, 130, 246, 0.15)' : 'rgba(255, 255, 255, 0.05)';
-                        const borderClr = isBot ? 'rgba(59, 130, 246, 0.3)' : 'var(--border)';
-                        
-                        return `
-                            <div style="display: flex; flex-direction: column; align-items: ${{isBot ? 'flex-start' : 'flex-end'}}; margin-bottom: 1rem;">
-                                <span style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">${{name}}</span>
-                                <div style="background: ${{bubbleBg}}; border: 1px solid ${{borderClr}}; border-radius: 12px; padding: 0.75rem 1rem; max-width: 80%; font-size: 0.85rem; color: var(--text); word-wrap: break-word; white-space: pre-wrap;">
-                                    ${{t.msg}}
-                                </div>
-                            </div>
-                        `;
-                    }}).join('');
-                }}
-                
-                document.getElementById('transcript-modal').style.display = 'flex';
-            }}
-
-            function closeTranscriptModal() {{
-                document.getElementById('transcript-modal').style.display = 'none';
-            }}
-
-            async function handleDeleteCallLog(callId) {{
-                if (!confirm('Are you sure you want to permanently delete this call log from MongoDB?')) return;
-                try {{
-                    const response = await fetch(`/api/v1/calls/logs/${{callId}}`, {{
-                        method: 'DELETE'
-                    }});
-                    if (!response.ok) throw new Error('Failed to delete call log');
-                    showAlert('calls-alert', 'Call log deleted successfully!');
-                    loadCallLogs();
-                }} catch (err) {{
-                    showAlert('calls-alert', err.message, true);
-                }}
+            // Show alert box
+            function showAlert(alertId, message, isError = false) {{
+                const alertEl = document.getElementById(alertId);
+                alertEl.innerText = message;
+                alertEl.className = 'alert ' + (isError ? 'alert-error' : 'alert-success');
+                alertEl.style.display = 'block';
+                setTimeout(() => {{
+                    alertEl.style.display = 'none';
+                }}, 6000);
             }}
 
             // Show alert box
@@ -1851,6 +1696,7 @@ async def admin_portal():
             loadTelemetry();
             setInterval(loadTelemetry, 5000);
         </script>
+        <script src="/static/call_analytics.js"></script>
     </body>
     </html>
     """
