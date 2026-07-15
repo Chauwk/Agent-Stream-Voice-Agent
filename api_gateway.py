@@ -1064,31 +1064,49 @@ async def admin_portal():
                     <p class="panel-desc">Real-time repository of call transcripts, durations, and AI-extracted customer insights.</p>
                     
                     <div id="calls-alert" class="alert"></div>
-                    
-                    <div style="display: flex; justify-content: flex-end; margin-bottom: 1rem;">
-                        <button class="btn btn-secondary" onclick="loadCallLogs()">🔄 Refresh Logs</button>
+
+                    <!-- Toolbar: search + refresh + export -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; gap: 1rem; flex-wrap: wrap;">
+                        <input id="calls-search" type="text" placeholder="🔍  Search by name, phone, email, interest…"
+                            oninput="filterCallLogs()"
+                            style="flex: 1; min-width: 220px; padding: 0.6rem 1rem; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-family: inherit; font-size: 0.9rem; outline: none;">
+                        <div style="display:flex;gap:0.6rem;">
+                            <button class="btn btn-secondary" onclick="exportCallLogsCSV()" title="Export to CSV">📥 Export CSV</button>
+                            <button class="btn btn-secondary" onclick="loadCallLogs()">🔄 Refresh</button>
+                        </div>
                     </div>
 
                     <div style="overflow-x: auto;">
-                        <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
+                        <table id="calls-analytics-table" style="width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.82rem;">
                             <thead>
-                                <tr>
-                                    <th>Date & Time</th>
-                                    <th>Caller Info</th>
-                                    <th>Caller Name</th>
-                                    <th>Business Interest</th>
-                                    <th>Consents & Visits</th>
-                                    <th>Call Summary</th>
-                                    <th>Details</th>
+                                <tr style="text-align: left; border-bottom: 2px solid var(--border);">
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap;">#</th>
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap;">Call Date</th>
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap;">Time</th>
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap;">Duration</th>
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap;">Agent Name</th>
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap;">Company Name</th>
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap;">Caller Phone No.</th>
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap;">Lead Phone No.</th>
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap;">Name</th>
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap;">Address</th>
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap;">Email ID</th>
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap;">Meeting Consent</th>
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap;">Field Visit</th>
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap;">Business Interest</th>
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap; max-width: 220px;">Call Summary</th>
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap;">Transcript</th>
+                                    <th style="padding: 0.65rem 0.75rem; color: var(--text-muted); white-space: nowrap;">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="calls-list">
                                 <tr>
-                                    <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading call logs from MongoDB...</td>
+                                    <td colspan="17" style="text-align: center; color: var(--text-muted); padding: 2.5rem;">Loading call logs from MongoDB…</td>
                                 </tr>
                             </tbody>
                         </table>
                     </div>
+                    <div id="calls-count" style="margin-top: 0.75rem; color: var(--text-muted); font-size: 0.8rem; text-align: right;"></div>
                 </div>
 
                 <!-- Call Transcript Modal -->
@@ -1132,67 +1150,126 @@ async def admin_portal():
 
             // Call logs array cache
             let cachedCallLogs = [];
+            let filteredCallLogs = [];
+
+            // Helper: yes/no badge
+            function yesNoBadge(val, yesColor, yesLabel) {{
+                if (val === 'Yes') {{
+                    return `<span style="background: rgba(${{yesColor}},0.15); color: rgb(${{yesColor}}); padding: 0.2rem 0.55rem; border-radius: 20px; font-size: 0.72rem; font-weight: 700; white-space: nowrap;">${{yesLabel}}</span>`;
+                }}
+                return `<span style="color: var(--text-muted); font-size: 0.75rem;">No</span>`;
+            }}
+
+            function renderCallRows(logs) {{
+                const listEl = document.getElementById('calls-list');
+                const countEl = document.getElementById('calls-count');
+                if (logs.length === 0) {{
+                    listEl.innerHTML = `<tr><td colspan="17" style="text-align: center; color: var(--text-muted); padding: 2.5rem;">No matching call logs found.</td></tr>`;
+                    if (countEl) countEl.textContent = '';
+                    return;
+                }}
+                if (countEl) countEl.textContent = `Showing ${{logs.length}} record${{logs.length !== 1 ? 's' : ''}}`;
+
+                const td = (content, extra='') => `<td style="padding: 0.55rem 0.75rem; vertical-align: top; border-bottom: 1px solid var(--border); ${{extra}}">${{content}}</td>`;
+                const muted = (v) => v || '<span style="color:var(--text-muted)">—</span>';
+
+                listEl.innerHTML = logs.map((log, index) => {{
+                    const meetingBadge = yesNoBadge(log.caller_meeting_consent, '16,185,129', '✅ Yes');
+                    const visitBadge   = yesNoBadge(log.customer_request_raised_field_visit, '139,92,246', '✅ Yes');
+
+                    // Duration pretty
+                    let durLabel = log.duration || '—';
+                    if (log.duration_seconds !== undefined) {{
+                        const s = Math.round(log.duration_seconds);
+                        durLabel = s >= 60 ? `${{Math.floor(s/60)}}m ${{s%60}}s` : `${{s}}s`;
+                    }}
+
+                    // Call summary: truncate with "see more"
+                    const summary = log.call_summary || '';
+                    const summaryHtml = summary.length > 120
+                        ? `<span class="summary-short">${{summary.substring(0,120)}}… <a href="#" onclick="this.parentElement.style.display='none';this.parentElement.nextElementSibling.style.display='block';return false;" style="color:var(--accent);font-size:0.72rem;">See more</a></span>
+                           <span class="summary-full" style="display:none">${{summary}} <a href="#" onclick="this.parentElement.style.display='none';this.parentElement.previousElementSibling.style.display='block';return false;" style="color:var(--accent);font-size:0.72rem;">See less</a></span>`
+                        : (summary || '<span style="color:var(--text-muted)">—</span>');
+
+                    const bizBadge = log.business_interest && log.business_interest !== 'Not provided'
+                        ? `<span style="font-size: 0.75rem; background: rgba(59,130,246,0.12); color: #60a5fa; padding: 0.2rem 0.55rem; border-radius: 20px; white-space:nowrap;">${{log.business_interest}}</span>`
+                        : '<span style="color:var(--text-muted)">—</span>';
+
+                    return `<tr style="transition: background 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.025)'" onmouseout="this.style.background=''">
+                        ${{td(`<span style="color:var(--text-muted)">${{index+1}}</span>`)}}
+                        ${{td(`<span style="white-space:nowrap;font-weight:500">${{log.call_date || '—'}}</span>`)}}
+                        ${{td(`<span style="white-space:nowrap;color:var(--text-muted)">${{log.time || '—'}}</span>`)}}
+                        ${{td(`<span style="white-space:nowrap;font-variant-numeric:tabular-nums">${{durLabel}}</span>`)}}
+                        ${{td(muted(log.agent_name))}}
+                        ${{td(muted(log.company_name))}}
+                        ${{td(`<code style="font-size:0.78rem;color:#93c5fd">${{log.caller_phone_no || '—'}}</code>`)}}
+                        ${{td(`<code style="font-size:0.78rem;color:#c4b5fd">${{log.lead_phone_no || '—'}}</code>`)}}
+                        ${{td(`<strong>${{log.name || '—'}}</strong>`)}}
+                        ${{td(`<span style="font-size:0.78rem;max-width:130px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${{log.address || ''}}">${{log.address || '—'}}</span>`)}}
+                        ${{td(`<span style="font-size:0.78rem;max-width:140px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${{log.email_id || ''}}">${{log.email_id || '—'}}</span>`)}}
+                        ${{td(meetingBadge)}}
+                        ${{td(visitBadge)}}
+                        ${{td(bizBadge)}}
+                        ${{td(`<div style="font-size:0.78rem;max-width:220px;white-space:normal;word-wrap:break-word;line-height:1.45;">${{summaryHtml}}</div>`)}}
+                        ${{td(`<button class="btn btn-primary" style="padding:0.35rem 0.7rem;font-size:0.78rem;white-space:nowrap;" onclick="viewTranscript('${{log.call_id}}')">📄 View</button>`)}}
+                        ${{td(`<button class="btn btn-danger" style="padding:0.35rem 0.7rem;font-size:0.78rem;" onclick="handleDeleteCallLog('${{log.call_id}}')">🗑️</button>`)}}
+                    </tr>`;
+                }}).join('');
+            }}
 
             async function loadCallLogs() {{
                 const listEl = document.getElementById('calls-list');
+                listEl.innerHTML = `<tr><td colspan="17" style="text-align:center;color:var(--text-muted);padding:2.5rem;">⏳ Loading call logs from MongoDB…</td></tr>`;
                 try {{
                     const response = await fetch('/api/v1/calls/logs');
                     if (!response.ok) throw new Error('Failed to load call logs');
                     const data = await response.json();
                     cachedCallLogs = data;
-                    
-                    if (data.length === 0) {{
-                        listEl.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">No call logs found in MongoDB. Make a call to log analytics!</td></tr>`;
-                    }} else {{
-                        listEl.innerHTML = data.map((log, index) => {{
-                            // Prepare consents/visits badge text
-                            const meetingConsent = log.caller_meeting_consent === 'Yes' ? 
-                                '<span style="background: rgba(16,185,129,0.15); color: #10b981; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; margin-right: 4px;">🤝 Meeting</span>' : '';
-                            const visitConsent = log.customer_request_raised_field_visit === 'Yes' ? 
-                                '<span style="background: rgba(139,92,246,0.15); color: #8b5cf6; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">🚗 Field Visit</span>' : '';
-                            const badgeCell = (meetingConsent || visitConsent) ? `${{meetingConsent}}${{visitConsent}}` : '<span style="color: var(--text-muted); font-size: 0.75rem;">None</span>';
-                            
-                            // Format caller details
-                            const phoneVal = log.caller_phone_no || 'Unknown';
-                            const emailVal = log.email_id || 'Not provided';
-                            const addressVal = log.address || 'Not provided';
-                            
-                            const callerDetailsHtml = `
-                                <div style="font-size: 0.8rem; color: var(--text-muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                    <strong>Phone:</strong> <code>${{phoneVal}}</code><br/>
-                                    <strong>Email:</strong> ${{emailVal}}<br/>
-                                    <strong>Address:</strong> ${{addressVal}}
-                                </div>
-                            `;
-
-                            return `
-                                <tr style="border-bottom: 1px solid var(--border);">
-                                    <td>
-                                        <div style="font-weight: 500;">${{log.call_date || '-'}}</div>
-                                        <div style="font-size: 0.75rem; color: var(--text-muted);">${{log.time || '-'}}</div>
-                                    </td>
-                                    <td>${{callerDetailsHtml}}</td>
-                                    <td><strong>${{log.name || 'Not provided'}}</strong></td>
-                                    <td><span style="font-size: 0.8rem; background: rgba(59,130,246,0.1); color: #3b82f6; padding: 0.25rem 0.5rem; border-radius: 4px;">${{log.business_interest || 'Not provided'}}</span></td>
-                                    <td>${{badgeCell}}</td>
-                                    <td>
-                                        <div style="font-size: 0.8rem; max-width: 250px; white-space: normal; word-wrap: break-word;">
-                                            ${{log.call_summary || 'Not provided'}}
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <div style="display: flex; gap: 0.5rem; align-items: center;">
-                                            <button class="btn btn-primary" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;" onclick="viewTranscript('${{log.call_id}}')">🗣️ Transcript</button>
-                                            <button class="btn btn-danger" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;" onclick="handleDeleteCallLog('${{log.call_id}}')">🗑️</button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            `;
-                        }}).join('');
-                    }}
+                    filteredCallLogs = data;
+                    renderCallRows(data);
                 }} catch (err) {{
-                    listEl.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--error); padding: 2rem;">Error loading call logs: ${{err.message}}</td></tr>`;
+                    listEl.innerHTML = `<tr><td colspan="17" style="text-align:center;color:var(--error);padding:2.5rem;">❌ Error loading call logs: ${{err.message}}</td></tr>`;
                 }}
+            }}
+
+            function filterCallLogs() {{
+                const q = (document.getElementById('calls-search').value || '').toLowerCase().trim();
+                if (!q) {{
+                    filteredCallLogs = cachedCallLogs;
+                }} else {{
+                    filteredCallLogs = cachedCallLogs.filter(log => {{
+                        const haystack = [log.name, log.caller_phone_no, log.lead_phone_no, log.email_id,
+                            log.business_interest, log.company_name, log.agent_name, log.address,
+                            log.call_date, log.call_summary].join(' ').toLowerCase();
+                        return haystack.includes(q);
+                    }});
+                }}
+                renderCallRows(filteredCallLogs);
+            }}
+
+            function exportCallLogsCSV() {{
+                const rows = filteredCallLogs.length > 0 ? filteredCallLogs : cachedCallLogs;
+                if (rows.length === 0) {{ alert('No data to export.'); return; }}
+                const headers = ['Sr.No.','Call Date','Time','Duration','Agent Name','Company Name',
+                    'Caller Phone No.','Lead Phone No.','Name','Address','Email ID',
+                    'Caller Meeting Consent','Field Visit Request','Business Interest','Call Summary'];
+                const escape = v => `"${{String(v ?? '').replace(/"/g,'""')}}"`;
+                const csvLines = [
+                    headers.map(escape).join(','),
+                    ...rows.map((log, i) => [
+                        i+1, log.call_date||'', log.time||'', log.duration||'',
+                        log.agent_name||'', log.company_name||'', log.caller_phone_no||'',
+                        log.lead_phone_no||'', log.name||'', log.address||'',
+                        log.email_id||'', log.caller_meeting_consent||'',
+                        log.customer_request_raised_field_visit||'', log.business_interest||'',
+                        log.call_summary||''
+                    ].map(escape).join(','))
+                ];
+                const blob = new Blob([csvLines.join('\n')], {{type: 'text/csv;charset=utf-8;'}});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = `call_analytics_${{new Date().toISOString().split('T')[0]}}.csv`;
+                a.click(); URL.revokeObjectURL(url);
             }}
 
             function viewTranscript(callId) {{
