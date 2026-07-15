@@ -81,6 +81,14 @@ class Config:
     EXOTEL_FROM_NUMBER = os.getenv('EXOTEL_FROM_NUMBER', '')  # Your virtual number
     EXOTEL_SUBDOMAIN = os.getenv('EXOTEL_SUBDOMAIN', 'api.in.exotel.com')  # e.g., api.in.exotel.com for Mumbai
     
+    # ===== SMTP EMAIL CONFIGURATION =====
+    SMTP_HOST = os.getenv('SMTP_HOST', '')
+    SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
+    SMTP_USER = os.getenv('SMTP_USER', '')
+    SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '')
+    SMTP_FROM_NAME = os.getenv('SMTP_FROM_NAME', 'Chauwk Sales Team')
+    SMTP_FROM_EMAIL = os.getenv('SMTP_FROM_EMAIL', '')
+    
     
     # ===== SIP SERVER CONFIGURATION =====
     SIP_SERVER_HOST = os.getenv('SIP_SERVER_HOST', '0.0.0.0')

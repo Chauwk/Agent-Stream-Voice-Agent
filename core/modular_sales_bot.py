@@ -44,6 +44,119 @@ def apply_audio_gain(pcm_data: bytes, gain: float) -> bytes:
         return pcm_data
 
 
+async def trigger_post_call_emails(call_log: dict):
+    """
+    Asynchronously analyze completed call transcript to extract lead data
+    and send follow-up emails to the customer and internal Chauwk sales team.
+    """
+    try:
+        import re
+        call_id = call_log.get("call_id", "")
+        transcript_list = call_log.get("transcript", [])
+        duration_sec = call_log.get("duration_seconds", 0)
+        phone = call_log.get("to_number", "default")
+        
+        # Combine transcript to a single text block
+        transcript_text = "\n".join([f"{item['role'].capitalize()}: {item['msg']}" for item in transcript_list])
+        
+        # Simple extraction rules
+        # Look for emails in transcript using regex
+        email_pattern = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b')
+        emails_found = email_pattern.findall(transcript_text)
+        customer_email = emails_found[0] if emails_found else ""
+        
+        # Look for customer name
+        # Look for patterns like "my name is X", "I am X", "this is X calling"
+        name_patterns = [
+            re.compile(r"my name is\s+([A-Za-z]+(?:\s+[A-Za-z]+)*)", re.IGNORECASE),
+            re.compile(r"this is\s+([A-Za-z]+(?:\s+[A-Za-z]+)*)\s+speaking", re.IGNORECASE),
+            re.compile(r"i am\s+([A-Za-z]+(?:\s+[A-Za-z]+)*)", re.IGNORECASE),
+            re.compile(r"call me\s+([A-Za-z]+(?:\s+[A-Za-z]+)*)", re.IGNORECASE)
+        ]
+        
+        customer_name = "Valued Customer"
+        for pattern in name_patterns:
+            matches = pattern.findall(transcript_text)
+            if matches:
+                customer_name = matches[0].strip()
+                break
+                
+        # Simple sentiment detection
+        pos_words = ["interested", "great", "yes", "like", "good", "perfect", "pricing"]
+        neg_words = ["not interested", "bad", "no", "expensive", "hate", "issue", "problem"]
+        pos_count = sum(1 for word in pos_words if word in transcript_text.lower())
+        neg_count = sum(1 for word in neg_words if word in transcript_text.lower())
+        
+        sentiment = "Neutral"
+        if pos_count > neg_count:
+            sentiment = "Positive Interest"
+        elif neg_count > pos_count:
+            sentiment = "Needs Escalation"
+            
+        # Detect products
+        products_interested = []
+        if hasattr(Config, "PRODUCTS"):
+            for prod in Config.PRODUCTS:
+                prod_name = prod.get("name", "")
+                if prod_name.lower() in transcript_text.lower():
+                    products_interested.append(prod_name)
+        
+        products_str = ", ".join(products_interested) if products_interested else "General Inquiry"
+        
+        # 1. Send Internal Lead Alert
+        internal_recipient = "abhishek.gupta@gmail.com"
+        internal_cc = "partnerships.3@chauwk.com"
+        internal_subject = f"[AI Lead Alert] New Voice Call Lead - {customer_name}"
+        
+        internal_body = (
+            f"Hello Team,\n\n"
+            f"The voice bot has successfully completed a call session. Here are the extracted lead details:\n\n"
+            f"👤 Customer Name: {customer_name}\n"
+            f"📧 Email Address: {customer_email if customer_email else 'Not provided'}\n"
+            f"📞 Contact Number: {phone}\n"
+            f"⏱️ Call Duration: {duration_sec} seconds\n"
+            f"📊 Call Sentiment: {sentiment}\n"
+            f"🛒 Products/Topics of Interest: {products_str}\n\n"
+            f"========================================================\n"
+            f"💬 FULL CONVERSATION TRANSCRIPT:\n"
+            f"========================================================\n"
+            f"{transcript_text}\n\n"
+            f"Best Regards,\n"
+            f"Chauwk Voice Assistant Service"
+        )
+        
+        from core.email_client import SMTPClient
+        # Fire internal alert
+        await SMTPClient.send_email(
+            recipient_email=internal_recipient,
+            subject=internal_subject,
+            body=internal_body,
+            cc_recipient=internal_cc
+        )
+        
+        # 2. Send Customer Follow-Up (only if customer email was provided)
+        if customer_email:
+            customer_subject = "Thank you for contacting Chauwk!"
+            customer_body = (
+                f"Dear {customer_name},\n\n"
+                f"Thank you for speaking with our AI Assistant today.\n\n"
+                f"We have noted your interest in: {products_str}.\n"
+                f"A member of our sales and partnerships team will reach out to you shortly to discuss next steps.\n\n"
+                f"If you have any immediate questions, please reply directly to this email.\n\n"
+                f"Best Regards,\n"
+                f"Chauwk Sales Team\n"
+                f"www.chauwk.com"
+            )
+            await SMTPClient.send_email(
+                recipient_email=customer_email,
+                subject=customer_subject,
+                body=customer_body
+            )
+            
+    except Exception as e:
+        logger.error(f"❌ Error during post-call email trigger processing: {e}", exc_info=True)
+
+
 class ModularSalesBot:
     """Modular Voice AI bot integrating Deepgram, Gemini, and Sarvam AI with PJSIP telephony"""
     
@@ -313,9 +426,17 @@ class ModularSalesBot:
                     body: The body content of the email.
                     cc_recipient: Optional CC email address (e.g. for partnerships/proposals).
                 """
-                cc_info = f" (CC: {cc_recipient})" if cc_recipient else ""
-                logger.info(f"📧 [Email Tool] Sending email to {recipient_email}{cc_info}. Subject: '{subject}'. Body: '{body}'")
-                return f"Email successfully sent to {recipient_email}"
+                from core.email_client import SMTPClient
+                success = await SMTPClient.send_email(
+                    recipient_email=recipient_email,
+                    subject=subject,
+                    body=body,
+                    cc_recipient=cc_recipient
+                )
+                if success:
+                    return f"Email successfully sent to {recipient_email}"
+                else:
+                    return f"Failed to send email to {recipient_email}. Please check SMTP configurations."
 
             # Format company products/services for prompt injection
             products_summary = "; ".join([f"{p['name']} at {p['price']} ({p['description']})" for p in Config.PRODUCTS])
@@ -1344,6 +1465,8 @@ class ModularSalesBot:
                     }
                     from core.mongo_manager import mongo_db
                     asyncio.create_task(mongo_db.save_call_log(call_log))
+                    # Trigger async email notifications
+                    asyncio.create_task(trigger_post_call_emails(call_log))
             except Exception as db_err:
                 logger.error(f"❌ Failed to save modular call log to MongoDB: {db_err}")
 
