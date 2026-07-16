@@ -15,20 +15,28 @@ async def extract_call_analytics(transcript_list: list) -> dict:
     for turn in transcript_list:
         role = turn.get("role", "user").upper()
         msg = turn.get("msg", "")
+        # Skip internal system prompt messages if present
+        if msg.startswith("System:"):
+            continue
         formatted_transcript += f"{role}: {msg}\n"
         
     prompt = f"""
-Analyze the following telephone conversation transcript between an AI sales agent (BOT) and a customer (USER).
-Extract the following structured fields in JSON format:
-1. "name": The name of the customer/caller (or "Not provided" if not found).
-2. "address": The physical address or location details of the customer/caller (or "Not provided" if not found).
-3. "email_id": The email address of the customer/caller (or "Not provided" if not found).
-4. "caller_meeting_consent": "Yes" if the customer agreed to schedule a follow-up meeting/call, otherwise "No".
-5. "customer_request_raised_field_visit": "Yes" if the customer explicitly requested a physical field visit or site visit, otherwise "No".
-6. "business_interest": The category, product, or service the customer showed interest in (or "Not provided" if not found).
-7. "call_summary": A concise 2-3 sentence summary of the key discussion points and outcome.
+Analyze the following telephone conversation transcript between an AI sales agent (BOT) and a customer (USER) with high accuracy and strict adherence to the facts. Do not assume or extrapolate any information.
 
-Return ONLY a valid JSON object matching the keys above. Do not include markdown code block formatting or backticks.
+Extract the following structured fields in JSON format:
+1. "name": The full name of the customer/caller. Only extract if explicitly stated by the user. Do not guess. If not mentioned, set to "Not provided".
+2. "address": The physical address or location details of the customer. Do not guess. If not mentioned, set to "Not provided".
+3. "email_id": The email address of the customer. Ensure it is a valid email format or spelled-out email (e.g. "name at gmail dot com" should be formatted as "name@gmail.com"). If not mentioned, set to "Not provided".
+4. "provided_phone_no": The phone number provided or mentioned by the customer during the conversation. Format it as digits only. If not mentioned, set to "Not provided".
+5. "caller_meeting_consent": Strictly set to "Yes" if the customer clearly agreed, consented, or said yes to scheduling a meeting, demo, or follow-up call. Otherwise, set to "No".
+6. "customer_request_raised_field_visit": Strictly set to "Yes" if the customer explicitly requested a physical field visit, site visit, or physical meeting. Otherwise, set to "No".
+7. "business_interest": The specific category, product, or service the customer showed interest in (e.g. Healthcare, Retail, AI Bot, Consulting). If not mentioned, set to "Not provided".
+8. "call_summary": A concise, factual 2-3 sentence summary of the key discussion points and final outcome. Avoid vague language.
+
+Guardrails:
+- Strict Factuality: If any information is not explicitly present in the transcript, set it to "Not provided" or "No". Never invent data.
+- User Intent: Do not count general conversation setup or system prompts as part of the customer's provided details.
+- Output Format: Return ONLY a valid JSON object. Do not wrap the JSON in markdown code blocks or backticks.
 
 Transcript:
 {formatted_transcript}
@@ -36,8 +44,16 @@ Transcript:
     try:
         import google.genai as genai
         from google.genai import types
-        # Initialize client
-        client = genai.Client()
+        import os
+        
+        # Initialize client using Config.GEMINI_API_KEY or Vertex AI
+        gcp_key_path = "/app/project-gcp-key.json"
+        if os.path.exists(gcp_key_path):
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_key_path
+            client = genai.Client(vertexai=True)
+        else:
+            client = genai.Client(api_key=Config.GEMINI_API_KEY)
+            
         response = await client.aio.models.generate_content(
             model=Config.GEMINI_MODEL,
             contents=prompt,
@@ -57,7 +73,7 @@ Transcript:
             
         data = json.loads(content_text)
         # Validate keys
-        keys = ["name", "address", "email_id", "caller_meeting_consent", 
+        keys = ["name", "address", "email_id", "provided_phone_no", "caller_meeting_consent", 
                 "customer_request_raised_field_visit", "business_interest", "call_summary"]
         for k in keys:
             if k not in data:
@@ -69,6 +85,7 @@ Transcript:
             "name": "Not provided",
             "address": "Not provided",
             "email_id": "Not provided",
+            "provided_phone_no": "Not provided",
             "caller_meeting_consent": "No",
             "customer_request_raised_field_visit": "No",
             "business_interest": "Not provided",
@@ -81,10 +98,13 @@ async def save_enriched_call_log(call_id: str, duration: float, transcript: list
         logger.info(f"🧠 Generating Gemini analytics extraction for call {call_id}...")
         analytics = await extract_call_analytics(transcript)
         
-        now = datetime.datetime.utcnow()
-        # Format date and time fields for the analytics tables
-        call_date = now.strftime("%Y-%m-%d")
-        call_time = now.strftime("%I:%M %p")
+        utc_now = datetime.datetime.utcnow()
+        # Convert UTC to Indian Standard Time (IST: UTC + 5:30)
+        ist_now = utc_now + datetime.timedelta(hours=5, minutes=30)
+        
+        # Format date and time fields in IST for the analytics tables
+        call_date = ist_now.strftime("%Y-%m-%d")
+        call_time = ist_now.strftime("%I:%M %p")
         
         call_log = {
             "call_id": call_id,
@@ -95,8 +115,8 @@ async def save_enriched_call_log(call_id: str, duration: float, transcript: list
             "agent_name": Config.SALES_BOT_NAME,
             "company_name": Config.COMPANY_NAME,
             "caller_phone_no": to_phone,
-            "lead_phone_no": to_phone if to_phone != "default" else "Web Caller",
-            "timestamp": now,
+            "lead_phone_no": analytics.get("provided_phone_no", "Not provided"),
+            "timestamp": ist_now,
             
             # Transcript and summary
             "transcript": transcript,
