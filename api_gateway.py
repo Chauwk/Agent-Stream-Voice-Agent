@@ -840,16 +840,51 @@ async def admin_portal():
                         
                         <div id="config-voice-alert" class="alert" style="margin-top: 1rem;"></div>
                         
-                        <form id="voice-settings-form" onsubmit="handleUpdateVoiceConfig(event)" style="margin-top: 1.5rem; display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 1.25rem; align-items: end;">
+                        <form id="voice-settings-form" onsubmit="handleUpdateVoiceConfig(event)" style="margin-top: 1.5rem; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap: 1.25rem; align-items: end;">
                             <div class="form-group" style="margin-bottom: 0;">
                                 <label for="cfg-speaker">Sarvam Voice (Speaker)</label>
                                 <select id="cfg-speaker" required>
-                                    <option value="neha">Neha (Female - Default)</option>
-                                    <option value="shubh">Shubh (Male - Friendly)</option>
-                                    <option value="ishita">Ishita (Female - Expressive)</option>
-                                    <option value="aditya">Aditya (Male)</option>
+                                    <option value="neha">Neha (Female)</option>
+                                    <option value="shubh">Shubh (Male)</option>
+                                    <option value="ritu">Ritu (Female)</option>
                                     <option value="priya">Priya (Female)</option>
-                                    <option value="manan">Manan (Male - Conversational)</option>
+                                    <option value="pooja">Pooja (Female)</option>
+                                    <option value="simran">Simran (Female)</option>
+                                    <option value="kavya">Kavya (Female)</option>
+                                    <option value="ishita">Ishita (Female)</option>
+                                    <option value="shreya">Shreya (Female)</option>
+                                    <option value="roopa">Roopa (Female)</option>
+                                    <option value="amelia">Amelia (Female)</option>
+                                    <option value="sophia">Sophia (Female)</option>
+                                    <option value="aditya">Aditya (Male)</option>
+                                    <option value="rahul">Rahul (Male)</option>
+                                    <option value="rohan">Rohan (Male)</option>
+                                    <option value="amit">Amit (Male)</option>
+                                    <option value="dev">Dev (Male)</option>
+                                    <option value="ratan">Ratan (Male)</option>
+                                    <option value="varun">Varun (Male)</option>
+                                    <option value="manan">Manan (Male)</option>
+                                    <option value="sumit">Sumit (Male)</option>
+                                    <option value="kabir">Kabir (Male)</option>
+                                    <option value="aayan">Aayan (Male)</option>
+                                    <option value="ashutosh">Ashutosh (Male)</option>
+                                    <option value="advait">Advait (Male)</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="cfg-lang">Language Code</label>
+                                <select id="cfg-lang" required>
+                                    <option value="en-IN">English (en-IN)</option>
+                                    <option value="hi-IN">Hindi (hi-IN)</option>
+                                    <option value="te-IN">Telugu (te-IN)</option>
+                                    <option value="ta-IN">Tamil (ta-IN)</option>
+                                    <option value="kn-IN">Kannada (kn-IN)</option>
+                                    <option value="ml-IN">Malayalam (ml-IN)</option>
+                                    <option value="mr-IN">Marathi (mr-IN)</option>
+                                    <option value="gu-IN">Gujarati (gu-IN)</option>
+                                    <option value="bn-IN">Bengali (bn-IN)</option>
+                                    <option value="pa-IN">Punjabi (pa-IN)</option>
+                                    <option value="od-IN">Odia (od-IN)</option>
                                 </select>
                             </div>
                             <div class="form-group" style="margin-bottom: 0;">
@@ -1238,12 +1273,17 @@ async def admin_portal():
 
                     // Populate voice config inputs once
                     const speakerInput = document.getElementById('cfg-speaker');
+                    const langInput = document.getElementById('cfg-lang');
                     const paceInput = document.getElementById('cfg-pace');
                     const gainInput = document.getElementById('cfg-gain');
                     
                     if (speakerInput && !speakerInput.dataset.initialized) {{
                         speakerInput.value = data.modular_settings.sarvam_speaker;
                         speakerInput.dataset.initialized = "true";
+                    }}
+                    if (langInput && !langInput.dataset.initialized) {{
+                        langInput.value = data.modular_settings.sarvam_language_code;
+                        langInput.dataset.initialized = "true";
                     }}
                     if (paceInput && !paceInput.dataset.initialized) {{
                         paceInput.value = data.modular_settings.sarvam_pace;
@@ -1668,6 +1708,7 @@ async def admin_portal():
             async function handleUpdateVoiceConfig(e) {{
                 e.preventDefault();
                 const speaker = document.getElementById('cfg-speaker').value;
+                const lang = document.getElementById('cfg-lang').value;
                 const pace = parseFloat(document.getElementById('cfg-pace').value);
                 const gain = parseFloat(document.getElementById('cfg-gain').value);
                 const alertEl = document.getElementById('config-voice-alert');
@@ -1678,6 +1719,7 @@ async def admin_portal():
                         headers: {{ 'Content-Type': 'application/json' }},
                         body: JSON.stringify({{
                             sarvam_speaker: speaker,
+                            sarvam_language_code: lang,
                             sarvam_pace: pace,
                             audio_gain: gain
                         }})
