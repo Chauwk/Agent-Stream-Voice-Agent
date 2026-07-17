@@ -19,6 +19,7 @@ from config import Config
 from routes.call_routes import router as call_router
 from routes.bot_routes import router as bot_router
 from routes.company_routes import router as company_router
+from routes.agent_routes import router as agent_router
 
 # Configure Logger
 logging.basicConfig(level=logging.INFO, format=Config.LOG_FORMAT)
@@ -124,6 +125,7 @@ app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 app.include_router(call_router)
 app.include_router(bot_router)
 app.include_router(company_router)
+app.include_router(agent_router)
 
 from fastapi import APIRouter
 calls_log_router = APIRouter(prefix="/api/v1/calls", tags=["Call Logs"])

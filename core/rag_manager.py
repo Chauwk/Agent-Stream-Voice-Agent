@@ -47,7 +47,8 @@ class RAGManager:
             logger.info("ℹ️ project-gcp-key.json not found. Initializing Gemini Client in Developer API key mode...")
             api_key = Config.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY")
             if not api_key:
-                logger.warning("⚠️ GEMINI_API_KEY not set in configurations. Embedding calls will fail.")
+                logger.warning("⚠️ GEMINI_API_KEY not set in configurations. Using fallback dummy key to prevent startup crash.")
+                api_key = "DUMMY_GEMINI_KEY"
             self.gemini_client = genai.Client(api_key=api_key)
         
         # 3. Connect to S3 for raw document storage
