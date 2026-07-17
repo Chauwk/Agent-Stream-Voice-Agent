@@ -86,6 +86,43 @@ class OpenAIRealtimeSalesBot:
             sample_rate = self.connection_sample_rates.get(stream_id, self.default_sample_rate)
             logger.info(f"🔗 CONNECTING TO OPENAI (ENHANCED) for {stream_id} @ {sample_rate}Hz")
             
+            # Resolve called virtual DID number and agent config first
+            to_phone = "default"
+            agent_config = None
+            if self.sip_server and stream_id in self.sip_server.sip_calls:
+                sip_call = self.sip_server.sip_calls[stream_id]
+                from controllers.bot_controller import extract_phone_number_from_uri
+                to_phone = extract_phone_number_from_uri(sip_call.to_uri)
+                logger.info(f"Resolved called DID number: {to_phone}")
+                
+                # Resolve agent config dynamically
+                try:
+                    from core.agent_resolver import resolve_agent_config
+                    agent_config = await resolve_agent_config(to_phone)
+                except Exception as e:
+                    logger.error(f"⚠️ Failed to dynamically resolve agent for DID {to_phone}: {e}")
+
+            # Determine voice and instructions dynamically
+            voice = self.openai_voice
+            instructions = None
+            if agent_config:
+                agent_name = agent_config.get("name", Config.SALES_BOT_NAME)
+                agent_instructions = agent_config.get("instructions", "")
+                
+                # Check if voiceId is a valid OpenAI voice
+                candidate_voice = agent_config.get("voiceId", "").lower()
+                if candidate_voice in ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]:
+                    voice = candidate_voice
+                    
+                instructions = (
+                    f"You are a professional sales representative named {agent_name}. Here are your custom instructions:\n"
+                    f"{agent_instructions}\n\n"
+                    "You must speak and respond EXCLUSIVELY in English. "
+                    "Even if the user speaks in another language, or if there is noise, keep your responses in English. "
+                    "Keep responses very concise, short, and natural (1-2 sentences). "
+                    "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
+                )
+
             # Enhanced URL for latest OpenAI Realtime API
             url = f"wss://api.openai.com/v1/realtime?model={self.openai_model}"
             
@@ -115,18 +152,13 @@ class OpenAIRealtimeSalesBot:
             openai_ws = await websockets.connect(url, **connect_kwargs)
             
             # Get enhanced session configuration
-            session_config = Config.get_enhanced_session_config(sample_rate, self.openai_voice)
+            session_config = Config.get_enhanced_session_config(sample_rate, voice)
+            if instructions:
+                session_config['instructions'] = instructions
             
             input_format = session_config['audio']['input']['format']['type']
             output_format = session_config['audio']['output']['format']['type']
             
-            # Resolve called virtual DID number
-            to_phone = "default"
-            if self.sip_server and stream_id in self.sip_server.sip_calls:
-                sip_call = self.sip_server.sip_calls[stream_id]
-                from controllers.bot_controller import extract_phone_number_from_uri
-                to_phone = extract_phone_number_from_uri(sip_call.to_uri)
-                
             self.openai_connections[stream_id] = {
                 "websocket": openai_ws,
                 "start_time": time.time(),
@@ -136,14 +168,15 @@ class OpenAIRealtimeSalesBot:
                 "session_config": session_config,
                 "user_speaking": False,
                 "transcript": [],
-                "to_phone": to_phone
+                "to_phone": to_phone,
+                "agent_config": agent_config
             }
             
             logger.info(f"✅ ENHANCED OPENAI CONNECTED for {stream_id} @ {sample_rate}Hz")
             logger.info(f"🎵 Audio Format: {input_format} → {output_format}")
             
             # Configure enhanced OpenAI session
-            await self.configure_openai_session_enhanced(stream_id)
+            await self.configure_openai_session_enhanced(stream_id, agent_config)
             
             # Start listening to OpenAI responses
             asyncio.create_task(self.handle_openai_responses_enhanced(stream_id, openai_ws))
@@ -158,7 +191,7 @@ class OpenAIRealtimeSalesBot:
             elif "websocket" in str(e).lower():
                 logger.error("💡 WebSocket Error - check connection and headers")
 
-    async def configure_openai_session_enhanced(self, stream_id: str):
+    async def configure_openai_session_enhanced(self, stream_id: str, agent_config: dict = None):
         """Configure enhanced OpenAI Realtime session"""
         try:
             openai_connection = self.openai_connections[stream_id]
@@ -185,12 +218,12 @@ class OpenAIRealtimeSalesBot:
             logger.info(f"   🎭 Voice: {voice}")
             
             # Send enhanced initial greeting
-            await self.send_initial_greeting_enhanced(stream_id)
+            await self.send_initial_greeting_enhanced(stream_id, agent_config)
             
         except Exception as e:
             logger.error(f"❌ Error configuring enhanced OpenAI session: {e}")
 
-    async def send_initial_greeting_enhanced(self, stream_id: str):
+    async def send_initial_greeting_enhanced(self, stream_id: str, agent_config: dict = None):
         """Send enhanced initial sales greeting through OpenAI"""
         try:
             openai_ws = self.openai_connections[stream_id]["websocket"]
@@ -211,12 +244,16 @@ class OpenAIRealtimeSalesBot:
             
             await openai_ws.send(json.dumps(greeting_msg))
             
+            greeting_instruction = "Give a warm, professional greeting. Keep it concise and natural."
+            if agent_config and agent_config.get("firstMessage"):
+                greeting_instruction = f"Greet the customer with this exact opening message: '{agent_config['firstMessage']}'"
+
             # Create enhanced response with audio focus
             response_msg = {
                 "type": "response.create",
                 "response": {
                     "output_modalities": ["audio"],
-                    "instructions": "Give a warm, professional greeting. Keep it concise and natural."
+                    "instructions": greeting_instruction
                 }
             }
             await openai_ws.send(json.dumps(response_msg))
