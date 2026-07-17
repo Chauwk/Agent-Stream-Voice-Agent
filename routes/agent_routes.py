@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 rag_manager = RAGManager()
 
 router = APIRouter(
-    prefix="/api/v1",
+    prefix="/api/exotel-sip/agents",
     tags=["Voice Agent Management"],
     responses={
         500: {"description": "Internal Server Error"}
