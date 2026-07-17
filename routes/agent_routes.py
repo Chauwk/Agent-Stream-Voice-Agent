@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 rag_manager = RAGManager()
 
 router = APIRouter(
-    prefix="/api/enterprise-support-agents",
+    prefix="/api/v1",
     tags=["Voice Agent Management"],
     responses={
         500: {"description": "Internal Server Error"}
@@ -171,7 +171,7 @@ async def find_agent_by_id_and_enterprise(agent_id_or_mongo_id: str, enterprise_
 # === API Endpoint Routes ===
 
 @router.post(
-    "/create",
+    "/create-agent",
     response_model=AgentCreateResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create Voice Agent",
