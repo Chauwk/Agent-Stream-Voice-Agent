@@ -230,9 +230,14 @@ def is_valid_exotel_ip_or_domain(uri: str) -> bool:
         return True
         
     # Check if it's a private network IP range (for local developer testing)
-    if domain == '127.0.0.1' or domain == 'localhost' or domain.startswith('192.168.') or domain.startswith('10.'):
-        return True
-    if domain.startswith('172.'):
+    is_production = bool(Config.SIP_PUBLIC_IP)
+    if is_production:
+        if domain == '127.0.0.1' or domain == 'localhost':
+            return True
+    else:
+        if domain == '127.0.0.1' or domain == 'localhost' or domain.startswith('192.168.') or domain.startswith('10.'):
+            return True
+    if not is_production and domain.startswith('172.'):
         # check if it is in private RFC 1918 range (172.16.x.x to 172.31.x.x)
         try:
             second_octet = int(domain.split('.')[1])
