@@ -178,8 +178,13 @@ class ModularSalesBot:
         self.connections = {}
         
         # Initialize Sarvam Clients
-        self.sync_sarvam_client = SarvamAI(api_subscription_key=Config.SARVAM_API_KEY)
-        self.sarvam_client = AsyncSarvamAI(api_subscription_key=Config.SARVAM_API_KEY)
+        if Config.DISABLE_AI_ENGINES:
+            logger.info("⚠️ DISABLE_AI_ENGINES is True. Skipping Sarvam client initialization.")
+            self.sync_sarvam_client = None
+            self.sarvam_client = None
+        else:
+            self.sync_sarvam_client = SarvamAI(api_subscription_key=Config.SARVAM_API_KEY)
+            self.sarvam_client = AsyncSarvamAI(api_subscription_key=Config.SARVAM_API_KEY)
         
         # Pre-generate default greeting audio at startup
         self.cached_greeting_text = f"Hello! Thank you for calling {Config.COMPANY_NAME}. How can I help you today?"
@@ -188,69 +193,71 @@ class ModularSalesBot:
         self.cached_company = Config.COMPANY_NAME
         self.cached_language = Config.SARVAM_LANGUAGE_CODE
         
-        try:
-            logger.info("⏳ Pre-generating and caching startup greeting audio...")
-            kwargs = {
-                "text": self.cached_greeting_text,
-                "target_language_code": Config.SARVAM_LANGUAGE_CODE,
-                "speaker": Config.SARVAM_SPEAKER,
-                "model": Config.SARVAM_MODEL,
-                "output_audio_codec": "linear16",
-                "speech_sample_rate": 16000
-            }
-            pace = getattr(Config, "SARVAM_PACE", 1.15)
-            if pace is not None:
-                kwargs["pace"] = pace
-            pitch = getattr(Config, "SARVAM_PITCH", 0.0)
-            if pitch is not None and pitch != 0.0 and "bulbul:v3" not in Config.SARVAM_MODEL:
-                kwargs["pitch"] = pitch
-                
-            response = self.sync_sarvam_client.text_to_speech.convert(**kwargs)
-            if response and response.audios:
-                base64_audio = response.audios[0]
-                raw_audio = base64.b64decode(base64_audio)
-                self.cached_greeting_audio = apply_audio_gain(raw_audio, getattr(Config, "AUDIO_GAIN", 1.0))
-                logger.info("✅ Startup greeting audio cached successfully (gain applied)!")
-            else:
-                logger.error("❌ Failed to cache greeting: Empty response from Sarvam")
-        except Exception as e:
-            logger.error(f"❌ Failed to pre-generate greeting: {e}")
+        if not Config.DISABLE_AI_ENGINES:
+            try:
+                logger.info("⏳ Pre-generating and caching startup greeting audio...")
+                kwargs = {
+                    "text": self.cached_greeting_text,
+                    "target_language_code": Config.SARVAM_LANGUAGE_CODE,
+                    "speaker": Config.SARVAM_SPEAKER,
+                    "model": Config.SARVAM_MODEL,
+                    "output_audio_codec": "linear16",
+                    "speech_sample_rate": 16000
+                }
+                pace = getattr(Config, "SARVAM_PACE", 1.15)
+                if pace is not None:
+                    kwargs["pace"] = pace
+                pitch = getattr(Config, "SARVAM_PITCH", 0.0)
+                if pitch is not None and pitch != 0.0 and "bulbul:v3" not in Config.SARVAM_MODEL:
+                    kwargs["pitch"] = pitch
+                    
+                response = self.sync_sarvam_client.text_to_speech.convert(**kwargs)
+                if response and response.audios:
+                    base64_audio = response.audios[0]
+                    raw_audio = base64.b64decode(base64_audio)
+                    self.cached_greeting_audio = apply_audio_gain(raw_audio, getattr(Config, "AUDIO_GAIN", 1.0))
+                    logger.info("✅ Startup greeting audio cached successfully (gain applied)!")
+                else:
+                    logger.error("❌ Failed to cache greeting: Empty response from Sarvam")
+            except Exception as e:
+                logger.error(f"❌ Failed to pre-generate greeting: {e}")
             
         # Initialize Gemini Client once to avoid cold starts on first call
         self.gemini_client = None
         try:
-            import os
-            gcp_key = os.getenv('GCP_SERVICE_ACCOUNT_KEY') or os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-            
-            # Autodetect in root directory if not specified in env
-            if not gcp_key:
-                for f in os.listdir('.'):
-                    if f.endswith('.json') and f.startswith('project-'):
-                        gcp_key = f
-                        break
-                        
-            if gcp_key and os.path.exists(gcp_key):
-                logger.info(f"🔑 Pre-configuring Gemini Client with GCP Service Account (Vertex AI): {gcp_key}")
-                from google.oauth2 import service_account
-                creds = service_account.Credentials.from_service_account_file(
-                    gcp_key,
-                    scopes=['https://www.googleapis.com/auth/cloud-platform']
-                )
-                with open(gcp_key, 'r') as f:
-                    key_data = json.load(f)
-                project_id = key_data.get('project_id')
+            if not Config.DISABLE_AI_ENGINES:
+                import os
+                gcp_key = os.getenv('GCP_SERVICE_ACCOUNT_KEY') or os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
                 
-                self.gemini_client = genai.Client(
-                    vertexai=True,
-                    project=project_id,
-                    location="asia-south1",
-                    credentials=creds
-                )
-            else:
-                logger.info("🔑 Pre-configuring Gemini Client with API Key (AI Studio)")
-                self.gemini_client = genai.Client(api_key=Config.GEMINI_API_KEY)
-                
-            self.gemini_warmed_up = False
+                # Autodetect in root directory if not specified in env
+                if not gcp_key:
+                    for f in os.listdir('.'):
+                        if f.endswith('.json') and f.startswith('project-'):
+                            gcp_key = f
+                            break
+                            
+                if gcp_key and os.path.exists(gcp_key):
+                    logger.info(f"🔑 Pre-configuring Gemini Client with GCP Service Account (Vertex AI): {gcp_key}")
+                    from google.oauth2 import service_account
+                    creds = service_account.Credentials.from_service_account_file(
+                        gcp_key,
+                        scopes=['https://www.googleapis.com/auth/cloud-platform']
+                    )
+                    with open(gcp_key, 'r') as f:
+                        key_data = json.load(f)
+                    project_id = key_data.get('project_id')
+                    
+                    self.gemini_client = genai.Client(
+                        vertexai=True,
+                        project=project_id,
+                        location="asia-south1",
+                        credentials=creds
+                    )
+                else:
+                    logger.info("🔑 Pre-configuring Gemini Client with API Key (AI Studio)")
+                    self.gemini_client = genai.Client(api_key=Config.GEMINI_API_KEY)
+                    
+                self.gemini_warmed_up = False
         except Exception as e:
             logger.error(f"❌ Failed to pre-configure Gemini client: {e}")
             

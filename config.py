@@ -89,6 +89,9 @@ class Config:
     SMTP_FROM_NAME = os.getenv('SMTP_FROM_NAME', 'Chauwk Sales Team')
     SMTP_FROM_EMAIL = os.getenv('SMTP_FROM_EMAIL', '')
     
+    # ===== DISABLE AI ENGINES (FOR TESTING / SAVING CREDITS) =====
+    DISABLE_AI_ENGINES = os.getenv('DISABLE_AI_ENGINES', 'false').lower() == 'true'
+    
     
     # ===== SIP SERVER CONFIGURATION =====
     SIP_SERVER_HOST = os.getenv('SIP_SERVER_HOST', '0.0.0.0')
@@ -152,6 +155,10 @@ class Config:
     @classmethod
     def validate(cls):
         """Validate required configuration"""
+        if getattr(cls, 'DISABLE_AI_ENGINES', False):
+            # Skip AI key validations when disabled
+            return True
+            
         errors = []
         
         if cls.VOICE_BOT_MODE == "modular":

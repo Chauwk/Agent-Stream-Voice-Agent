@@ -288,6 +288,14 @@ class MyAccount(AccountBase):
                 call.answer(call_prm)
                 return
 
+            # Reject all calls if AI engines are disabled
+            if getattr(Config, 'DISABLE_AI_ENGINES', False):
+                logger.info(f"🚫 REJECTED SIP CALL (AI Engines Disabled): remote={remote_uri}")
+                call_prm = pj.CallOpParam()
+                call_prm.statusCode = 503  # Service Unavailable
+                call.answer(call_prm)
+                return
+
             # Security check: verify that the call is from Exotel carrier trunk
             is_valid_exotel = is_valid_exotel_ip_or_domain(remote_uri) or is_valid_exotel_ip_or_domain(local_uri)
             
