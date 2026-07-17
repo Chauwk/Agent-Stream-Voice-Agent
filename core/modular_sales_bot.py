@@ -56,6 +56,12 @@ async def trigger_post_call_emails(call_log: dict):
         duration_sec = call_log.get("duration_seconds", 0)
         phone = call_log.get("to_number", "default")
         
+        # Avoid triggering emails for empty health check, ping, or abandoned calls
+        has_user_interaction = any(item.get("role") == "user" for item in transcript_list)
+        if not has_user_interaction:
+            logger.info(f"ℹ️ Skipping post-call emails for call {call_id}: No customer interaction recorded.")
+            return
+            
         # Combine transcript to a single text block
         transcript_text = "\n".join([f"{item['role'].capitalize()}: {item['msg']}" for item in transcript_list])
         
