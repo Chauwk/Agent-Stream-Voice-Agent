@@ -3,6 +3,7 @@ import json
 import datetime
 import asyncio
 import time
+from typing import Optional
 from config import Config
 from core.mongo_manager import mongo_db
 
@@ -92,7 +93,16 @@ Transcript:
             "call_summary": "Failed to analyze transcript"
         }
 
-async def save_enriched_call_log(call_id: str, duration: float, transcript: list, to_phone: str, direction: str):
+async def save_enriched_call_log(
+    call_id: str,
+    duration: float,
+    transcript: list,
+    to_phone: str,
+    direction: str,
+    agent_name: Optional[str] = None,
+    company_name: Optional[str] = None,
+    agent_id: Optional[str] = None
+):
     """Enriches transcript using Gemini and saves the complete call analytics document to MongoDB."""
     try:
         logger.info(f"🧠 Generating Gemini analytics extraction for call {call_id}...")
@@ -112,8 +122,9 @@ async def save_enriched_call_log(call_id: str, duration: float, transcript: list
             "time": call_time,
             "duration_seconds": round(duration, 2),
             "duration": f"{round(duration, 2)}s",
-            "agent_name": Config.SALES_BOT_NAME,
-            "company_name": Config.COMPANY_NAME,
+            "agent_name": agent_name or Config.SALES_BOT_NAME,
+            "company_name": company_name or Config.COMPANY_NAME,
+            "agent_id": agent_id,
             "caller_phone_no": to_phone,
             "lead_phone_no": analytics.get("provided_phone_no", "Not provided"),
             "timestamp": ist_now,

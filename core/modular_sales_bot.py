@@ -1554,6 +1554,19 @@ class ModularSalesBot:
                 
                 # Only save if there is some conversation history
                 if transcript:
+                    agent_name = None
+                    company_name = None
+                    agent_id = None
+                    agent_config = session_state.get("agent_config")
+                    if agent_config:
+                        agent_name = agent_config.get("name")
+                        agent_id = agent_config.get("agentId")
+                        try:
+                            from core.agent_resolver import get_company_name
+                            company_name = get_company_name(agent_config.get("enterprise"))
+                        except Exception:
+                            pass
+
                     from core.analytics_manager import save_enriched_call_log
                     asyncio.create_task(
                         save_enriched_call_log(
@@ -1561,7 +1574,10 @@ class ModularSalesBot:
                             duration=duration,
                             transcript=transcript,
                             to_phone=session_state.get("to_phone", "default"),
-                            direction="inbound"
+                            direction="inbound",
+                            agent_name=agent_name,
+                            company_name=company_name,
+                            agent_id=agent_id
                         )
                     )
                     # Trigger async email notifications

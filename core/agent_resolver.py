@@ -50,3 +50,16 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
         logger.error(f"❌ Failed to resolve agent config: {e}")
         
     return None
+
+def get_company_name(company_id: str) -> str | None:
+    """Helper to query SQLite metadata database for company name by ID"""
+    try:
+        from models.database import SessionLocal
+        from models.metadata import Company
+        db = SessionLocal()
+        company = db.query(Company).filter(Company.company_id == company_id).first()
+        if company:
+            return company.name
+    except Exception as e:
+        logger.error(f"Failed to lookup company name in SQLite for ID {company_id}: {e}")
+    return None

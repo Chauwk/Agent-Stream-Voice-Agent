@@ -940,6 +940,19 @@ class OpenAIRealtimeSalesBot:
                     duration = time.time() - openai_config["start_time"]
                     transcript = openai_config.get("transcript", [])
                     if transcript:
+                        agent_name = None
+                        company_name = None
+                        agent_id = None
+                        agent_config = openai_config.get("agent_config")
+                        if agent_config:
+                            agent_name = agent_config.get("name")
+                            agent_id = agent_config.get("agentId")
+                            try:
+                                from core.agent_resolver import get_company_name
+                                company_name = get_company_name(agent_config.get("enterprise"))
+                            except Exception:
+                                pass
+
                         from core.analytics_manager import save_enriched_call_log
                         asyncio.create_task(
                             save_enriched_call_log(
@@ -947,7 +960,10 @@ class OpenAIRealtimeSalesBot:
                                 duration=duration,
                                 transcript=transcript,
                                 to_phone=openai_config.get("to_phone", "default"),
-                                direction="outbound"
+                                direction="outbound",
+                                agent_name=agent_name,
+                                company_name=company_name,
+                                agent_id=agent_id
                             )
                         )
                 except Exception as db_err:
