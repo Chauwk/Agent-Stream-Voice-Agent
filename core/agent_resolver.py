@@ -26,6 +26,12 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
         if agent:
             logger.info(f"🎯 Dynamic agent resolved by Agent ID: {agent.get('name')} ({agent.get('agentId')})")
             return agent
+
+        # 1.5 Search by assigned phoneNumber in MongoDB
+        agent = await agents_collection.find_one({"phoneNumber": destination_id, "status": "active"})
+        if agent:
+            logger.info(f"🎯 Dynamic agent resolved by Phone Number: {agent.get('name')} ({agent.get('agentId')})")
+            return agent
             
         # 2. Search by MongoDB ObjectId if it's a valid ObjectId
         if ObjectId.is_valid(destination_id):
