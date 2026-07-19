@@ -196,12 +196,38 @@ async def create_agent(
             resolved_lang = resolved_lang[0]
         else:
             resolved_lang = "en"
-            
-    # 3. Generate unique IDs for our own bot agent
+
+    # 3. Duplicate check: reject if an agent with the same name already exists for this enterprise
+    if mongo_db.client is not None:
+        async def check_duplicate():
+            db = mongo_db.client.get_default_database()
+            agents_collection = db['agents']
+            return await agents_collection.find_one(
+                {"enterprise": enterprise_id, "name": payload.name}
+            )
+        try:
+            existing = await safe_mongo_op(check_duplicate)
+            if existing:
+                existing["_id"] = str(existing["_id"])
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": f"An agent named '{payload.name}' already exists for this enterprise.",
+                        "existing_agent_id": existing.get("agentId"),
+                        "existing_mongo_id": existing.get("_id"),
+                        "hint": "Use the update-agent endpoint to modify it, or choose a different name."
+                    }
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"⚠️ Duplicate check failed (proceeding with creation): {e}")
+
+    # 4. Generate unique IDs for our own bot agent
     mongo_id = str(ObjectId())
     agent_uuid = f"agent_{uuid.uuid4().hex[:12]}"
     
-    # 4. Build agent document matching the schema
+    # 5. Build agent document matching the schema
     now_iso = datetime.datetime.utcnow().isoformat() + "Z"
     agent_data = {
         "_id": mongo_id,
@@ -226,7 +252,7 @@ async def create_agent(
         "__v": 0
     }
     
-    # 5. Save in MongoDB agents collection if connection is active
+    # 6. Save in MongoDB agents collection if connection is active
     async def run_insert():
         db = mongo_db.client.get_default_database()
         agents_collection = db['agents']
@@ -250,6 +276,7 @@ async def create_agent(
         "message": "Agent created successfully",
         "data": agent_data
     }
+
 
 @router.get(
     "/supported-languages",
