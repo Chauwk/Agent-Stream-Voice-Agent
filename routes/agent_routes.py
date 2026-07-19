@@ -10,6 +10,7 @@ import uuid
 import datetime
 from typing import List, Dict, Any, Optional, Union
 from fastapi import APIRouter, HTTPException, Header, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from bson import ObjectId
 
@@ -18,6 +19,28 @@ from core.rag_manager import RAGManager
 
 logger = logging.getLogger(__name__)
 rag_manager = RAGManager()
+
+def bson_safe(obj):
+    """Recursively convert BSON/MongoDB types to JSON-serializable Python types."""
+    if isinstance(obj, dict):
+        return {k: bson_safe(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [bson_safe(i) for i in obj]
+    elif isinstance(obj, ObjectId):
+        return str(obj)
+    elif isinstance(obj, datetime.datetime):
+        return obj.isoformat()
+    elif isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
+    else:
+        try:
+            # Handles Decimal128 and any other BSON types with __str__
+            from bson import Decimal128
+            if isinstance(obj, Decimal128):
+                return float(str(obj))
+        except ImportError:
+            pass
+        return obj
 
 router = APIRouter(
     prefix="/api/exotel-sip/agents",
@@ -396,47 +419,43 @@ async def get_agent_stats(x_enterprise_id: Optional[str] = Header(None, alias="x
     description="Lists every agent across all enterprises stored in MongoDB. Shows agentId, name, enterprise, language, phoneNumber, knowledgeBaseIds, and status."
 )
 async def list_all_agents_admin():
-    """Admin-only: returns all agents in the DB with a summary view."""
+    """Admin-only: returns all agents in the DB. Safe against BSON types."""
+    import json
+
+    if mongo_db.client is None:
+        return JSONResponse(status_code=503, content={
+            "success": False,
+            "error": "MongoDB is not connected. Check DB_URL environment variable."
+        })
+
     async def run_query():
         db = mongo_db.client.get_default_database()
         agents_collection = db['agents']
-        # No projection — fetch all fields, safe for string or ObjectId _id
         cursor = agents_collection.find({})
         agents_list = []
         async for doc in cursor:
-            try:
-                doc["_id"] = str(doc["_id"])
-            except Exception:
-                doc["_id"] = ""
-            # Normalize: surface company_id as enterprise if enterprise is missing
-            if not doc.get("enterprise") and doc.get("company_id"):
-                doc["enterprise"] = doc["company_id"]
-            agents_list.append(doc)
+            # bson_safe converts ObjectId, datetime, Decimal128, bytes → plain Python types
+            safe_doc = bson_safe(dict(doc))
+            # Normalize: expose company_id as enterprise if enterprise field is missing
+            if not safe_doc.get("enterprise") and safe_doc.get("company_id"):
+                safe_doc["enterprise"] = safe_doc["company_id"]
+            agents_list.append(safe_doc)
         return agents_list
 
-    agents = []
-    if mongo_db.client is not None:
-        try:
-            res = await safe_mongo_op(run_query)
-            if res:
-                agents = res
-        except Exception as e:
-            logger.error(f"Failed to fetch all agents: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"MongoDB error: {str(e)}"
-            )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="MongoDB is not connected. Check DB_URL environment variable."
-        )
-
-    return {
-        "success": True,
-        "total": len(agents),
-        "agents": agents
-    }
+    try:
+        agents = await safe_mongo_op(run_query) or []
+        payload = {
+            "success": True,
+            "total": len(agents),
+            "agents": agents
+        }
+        return JSONResponse(status_code=200, content=payload)
+    except Exception as e:
+        logger.error(f"❌ /admin/all failed: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={
+            "success": False,
+            "error": str(e)
+        })
 
 @router.get(
     "/{id}",
