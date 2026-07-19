@@ -1082,3 +1082,63 @@ async def upload_agent_documents(
         "success": True,
         "message": "Documents uploaded and processing in background"
     }
+
+@router.get(
+    "/{id}/exotel-getkb-items",
+    status_code=status.HTTP_200_OK,
+    summary="List Agent Knowledge Base Items",
+    description="Retrieves the list of documents and text items uploaded to the agent's knowledge base."
+)
+async def get_agent_kb_items(
+    id: str,
+    x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")
+):
+    validate_enterprise(x_enterprise_id)
+    agent = await find_agent_by_id_and_enterprise(id, x_enterprise_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail={"success": False, "message": "Agent not found"})
+    
+    agent_id = agent.get("agentId")
+    
+    db = mongo_db.client.get_default_database()
+    kb_cursor = db['agent_kb_documents'].find({"agentId": agent_id})
+    items = []
+    async for kb in kb_cursor:
+        if "_id" in kb:
+            kb["_id"] = str(kb["_id"])
+        items.append(kb)
+        
+    return {
+        "success": True,
+        "data": items
+    }
+
+@router.delete(
+    "/{id}/exotel-deletekb-items/{doc_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Delete Agent Knowledge Base Item",
+    description="Deletes a specific knowledge base item from the agent."
+)
+async def delete_agent_kb_item(
+    id: str,
+    doc_id: int,
+    x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")
+):
+    validate_enterprise(x_enterprise_id)
+    agent = await find_agent_by_id_and_enterprise(id, x_enterprise_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail={"success": False, "message": "Agent not found"})
+    
+    agent_id = agent.get("agentId")
+    db = mongo_db.client.get_default_database()
+    
+    doc = await db['agent_kb_documents'].find_one({"agentId": agent_id, "docId": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail={"success": False, "message": "Document not found"})
+        
+    await db['agent_kb_documents'].delete_one({"agentId": agent_id, "docId": doc_id})
+    
+    return {
+        "success": True,
+        "message": "Knowledge base item deleted successfully"
+    }
