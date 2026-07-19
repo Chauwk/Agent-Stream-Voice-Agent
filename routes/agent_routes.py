@@ -370,6 +370,43 @@ async def get_agent_stats(x_enterprise_id: Optional[str] = Header(None, alias="x
     }
 
 @router.get(
+    "/admin/all",
+    status_code=status.HTTP_200_OK,
+    summary="[Admin] List ALL Agents",
+    description="Lists every agent across all enterprises stored in MongoDB. Shows agentId, name, enterprise, language, phoneNumber, knowledgeBaseIds, and status."
+)
+async def list_all_agents_admin():
+    """Admin-only: returns all agents in the DB with a summary view."""
+    async def run_query():
+        db = mongo_db.client.get_default_database()
+        agents_collection = db['agents']
+        cursor = agents_collection.find({}, {
+            "_id": 1, "agentId": 1, "name": 1, "enterprise": 1,
+            "language": 1, "voiceId": 1, "phoneNumber": 1,
+            "knowledgeBaseIds": 1, "status": 1, "createdAt": 1
+        })
+        agents_list = []
+        async for doc in cursor:
+            doc["_id"] = str(doc["_id"])
+            agents_list.append(doc)
+        return agents_list
+
+    agents = []
+    if mongo_db.client is not None:
+        try:
+            res = await safe_mongo_op(run_query)
+            if res:
+                agents = res
+        except Exception as e:
+            logger.error(f"Failed to fetch all agents: {e}")
+
+    return {
+        "success": True,
+        "total": len(agents),
+        "agents": agents
+    }
+
+@router.get(
     "/{id}",
     status_code=status.HTTP_200_OK,
     summary="Get Agent Details",
