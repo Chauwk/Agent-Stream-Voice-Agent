@@ -1,9 +1,8 @@
 import asyncio
 import io
 import logging
-from typing import List
+from typing import Annotated, List
 import uuid
-
 from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Depends
 from sqlalchemy.orm import Session
 
@@ -177,11 +176,38 @@ async def _process_document_bg(job_id: str, company_id: str, doc_log_id: int, fi
         db.close()
 
 
-@router.post("/{company_id}/documents", summary="Upload documents for a company")
+@router.post(
+    "/{company_id}/documents",
+    summary="Upload documents for a company",
+    description="Upload one or more documents (PDF, DOCX, PPTX, TXT) to index into the agent's knowledge base. Returns document IDs that can be linked to an agent via `knowledgeBaseIds`.",
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "files": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "format": "binary"
+                                },
+                                "description": "Select one or more files to upload (PDF, DOCX, PPTX, TXT)"
+                            }
+                        },
+                        "required": ["files"]
+                    }
+                }
+            },
+            "required": True
+        }
+    }
+)
 async def upload_documents(
     company_id: str,
     background_tasks: BackgroundTasks,
-    files: List[UploadFile] = File(...),
+    files: Annotated[List[UploadFile], File(description="Select one or more files (PDF, DOCX, PPTX, TXT) to upload and index.")],
     db: Session = Depends(get_db)
 ):
     company = db.query(Company).filter(Company.company_id == company_id).first()
