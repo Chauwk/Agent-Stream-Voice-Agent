@@ -215,7 +215,7 @@ class RAGManager:
     # ---------------------------------------------------------------------
     # Vector Search
     # ---------------------------------------------------------------------
-    async def search(self, company_id: str, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+    async def search(self, company_id: str, query: str, top_k: int = 3, document_ids: List[Any] = None) -> List[Dict[str, Any]]:
         """Perform similarity search against the tenant's collection using Gemini embedded query"""
         if not self.chroma_client:
             logger.error("Chroma DB is offline. Cannot perform search.")
@@ -237,14 +237,32 @@ class RAGManager:
         # Generate query embedding
         query_emb = await self._embed_text(query)
 
+        # Build filter dict if document_ids are provided
+        where_filter = None
+        if document_ids:
+            normalized_ids = []
+            for d_id in document_ids:
+                try:
+                    normalized_ids.append(int(d_id))
+                except (ValueError, TypeError):
+                    normalized_ids.append(d_id)
+            if len(normalized_ids) == 1:
+                where_filter = {"document_id": normalized_ids[0]}
+            elif len(normalized_ids) > 1:
+                where_filter = {"document_id": {"$in": normalized_ids}}
+
         # Perform ANN search
         loop = asyncio.get_event_loop()
+        query_kwargs = {
+            "query_embeddings": [query_emb],
+            "n_results": top_k
+        }
+        if where_filter:
+            query_kwargs["where"] = where_filter
+
         results = await loop.run_in_executor(
             None,
-            lambda: collection.query(
-                query_embeddings=[query_emb],
-                n_results=top_k
-            )
+            lambda: collection.query(**query_kwargs)
         )
 
         # Convert results to standard dictionary format
@@ -259,3 +277,4 @@ class RAGManager:
                 })
                 
         return outputs
+

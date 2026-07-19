@@ -426,18 +426,19 @@ class OpenAIRealtimeSalesBot:
         query = args.get("query", "")
         top_k = args.get("top_k", 3)
         
-        # Get target phone number of call
+        # Get target phone number and agent config of call
         to_phone = "default"
-        if self.sip_server and stream_id in self.sip_server.sip_calls:
-            sip_call = self.sip_server.sip_calls[stream_id]
-            from controllers.bot_controller import extract_phone_number_from_uri
-            to_phone = extract_phone_number_from_uri(sip_call.to_uri)
+        agent_config = None
+        openai_config = self.openai_connections.get(stream_id)
+        if openai_config:
+            to_phone = openai_config.get("to_phone", "default")
+            agent_config = openai_config.get("agent_config")
             
         logger.info(f"🔎 OpenAI Realtime Bot RAG search query: '{query}' for phone: {to_phone}")
         
         try:
             from controllers.bot_controller import query_knowledge_base
-            results = await query_knowledge_base(to_phone, query, top_k)
+            results = await query_knowledge_base(to_phone, query, top_k, agent_config=agent_config)
             return {
                 "status": "success",
                 "results": results

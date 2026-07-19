@@ -97,14 +97,24 @@ async def get_company_id_by_phone(phone_number: str) -> str | None:
     finally:
         db.close()
 
-async def query_knowledge_base(phone_number: str, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
-    """Resolve company from phone and perform RAG search."""
-    company_id = await get_company_id_by_phone(phone_number)
+async def query_knowledge_base(phone_number: str, query: str, top_k: int = 3, agent_config: dict = None) -> List[Dict[str, Any]]:
+    """Resolve company from agent config or phone, and perform RAG search with optional knowledgeBaseIds filtering."""
+    company_id = None
+    document_ids = None
+    
+    if agent_config:
+        company_id = agent_config.get("enterprise")
+        document_ids = agent_config.get("knowledgeBaseIds")
+        
     if not company_id:
-        logger.warning(f"Company not found for phone: {phone_number}")
+        company_id = await get_company_id_by_phone(phone_number)
+        
+    if not company_id:
+        logger.warning(f"Company/Enterprise ID not found for phone: {phone_number}")
         return []
+        
     try:
-        results = await rag_manager.search(company_id, query, top_k)
+        results = await rag_manager.search(company_id, query, top_k, document_ids=document_ids)
         return [{"chunk": r["chunk_text"], "source": r["metadata"].get("source")} for r in results]
     except Exception as e:
         logger.error(f"Error querying knowledge base for company {company_id}: {e}")

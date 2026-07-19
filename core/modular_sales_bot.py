@@ -487,7 +487,7 @@ class ModularSalesBot:
                 
                 try:
                     from controllers.bot_controller import query_knowledge_base as db_query
-                    results = await db_query(phone, query, top_k=3)
+                    results = await db_query(phone, query, top_k=3, agent_config=agent_config)
                     if not results:
                         return "No matches found in the knowledge base."
                     

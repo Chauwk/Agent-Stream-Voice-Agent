@@ -46,6 +46,8 @@ class AgentCreateRequest(BaseModel):
     terms: Optional[TermsModel] = Field(default_factory=lambda: TermsModel(enabled=False, content=""))
     platformAgreement: Optional[Union[str, bool]] = Field(None, example=True)
     hinglish_mode: Optional[bool] = Field(False, example=False)
+    # New optional field for virtual number binding
+    phoneNumber: Optional[str] = Field(None, example="04040377112", description="Exotel virtual number to bind to this agent.")
 
 class AgentUpdateRequest(BaseModel):
     name: Optional[str] = Field(None, example="Updated Support Assistant")
@@ -57,6 +59,8 @@ class AgentUpdateRequest(BaseModel):
     knowledgeBaseIds: Optional[List[str]] = Field(None)
     terms: Optional[TermsModel] = Field(None)
     hinglish_mode: Optional[bool] = Field(None)
+    # New optional field for updating virtual number
+    phoneNumber: Optional[str] = Field(None, example="04040377112", description="Exotel virtual number to bind to this agent.")
 
 class SimulateRequest(BaseModel):
     message: str = Field(..., example="Hello, does this support refunds?")
