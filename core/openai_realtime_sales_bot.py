@@ -950,7 +950,7 @@ class OpenAIRealtimeSalesBot:
                             agent_id = agent_config.get("agentId")
                             try:
                                 from core.agent_resolver import get_company_name
-                                company_name = get_company_name(agent_config.get("enterprise"))
+                                company_name = await get_company_name(agent_config.get("enterprise"))
                             except Exception:
                                 pass
 

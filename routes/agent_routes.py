@@ -11,6 +11,7 @@ import datetime
 import time
 from typing import List, Dict, Any, Optional, Union, Annotated
 from fastapi import APIRouter, HTTPException, Header, status, UploadFile, File, BackgroundTasks
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from bson import ObjectId
 
@@ -19,6 +20,28 @@ from core.rag_manager import RAGManager
 
 logger = logging.getLogger(__name__)
 rag_manager = RAGManager()
+
+def bson_safe(obj):
+    """Recursively convert BSON/MongoDB types to JSON-serializable Python types."""
+    if isinstance(obj, dict):
+        return {k: bson_safe(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [bson_safe(i) for i in obj]
+    elif isinstance(obj, ObjectId):
+        return str(obj)
+    elif isinstance(obj, datetime.datetime):
+        return obj.isoformat()
+    elif isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
+    else:
+        try:
+            # Handles Decimal128 and any other BSON types with __str__
+            from bson import Decimal128
+            if isinstance(obj, Decimal128):
+                return float(str(obj))
+        except ImportError:
+            pass
+        return obj
 
 router = APIRouter(
     prefix="/api/exotel-sip/agents",
@@ -157,15 +180,23 @@ async def find_agent_by_id_and_enterprise(agent_id_or_mongo_id: str, enterprise_
     async def run_find():
         db = mongo_db.client.get_default_database()
         agents_collection = db['agents']
+        enterprise_filter = {
+            "$or": [
+                {"enterprise": enterprise_id},
+                {"company_id": enterprise_id}
+            ]
+        }
         # 1. Search by custom agentId string
-        agent = await agents_collection.find_one({"agentId": agent_id_or_mongo_id, "enterprise": enterprise_id})
+        agent = await agents_collection.find_one({"agentId": agent_id_or_mongo_id, **enterprise_filter["$or"][0]})
+        if not agent:
+            agent = await agents_collection.find_one({"agentId": agent_id_or_mongo_id, **enterprise_filter["$or"][1]})
         if agent:
             return agent
-        # 2. Search by MongoDB ObjectId if format is valid
-        if ObjectId.is_valid(agent_id_or_mongo_id):
-            agent = await agents_collection.find_one({"_id": agent_id_or_mongo_id, "enterprise": enterprise_id})
-            return agent
-        return None
+        # 2. Search by MongoDB ObjectId or string _id
+        agent = await agents_collection.find_one({"_id": agent_id_or_mongo_id, **enterprise_filter["$or"][0]})
+        if not agent:
+            agent = await agents_collection.find_one({"_id": agent_id_or_mongo_id, **enterprise_filter["$or"][1]})
+        return agent
 
     try:
         return await safe_mongo_op(run_find)
@@ -197,12 +228,38 @@ async def create_agent(
             resolved_lang = resolved_lang[0]
         else:
             resolved_lang = "en"
-            
-    # 3. Generate unique IDs for our own bot agent
+
+    # 3. Duplicate check: reject if an agent with the same name already exists for this enterprise
+    if mongo_db.client is not None:
+        async def check_duplicate():
+            db = mongo_db.client.get_default_database()
+            agents_collection = db['agents']
+            return await agents_collection.find_one(
+                {"enterprise": enterprise_id, "name": payload.name}
+            )
+        try:
+            existing = await safe_mongo_op(check_duplicate)
+            if existing:
+                existing["_id"] = str(existing["_id"])
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": f"An agent named '{payload.name}' already exists for this enterprise.",
+                        "existing_agent_id": existing.get("agentId"),
+                        "existing_mongo_id": existing.get("_id"),
+                        "hint": "Use the update-agent endpoint to modify it, or choose a different name."
+                    }
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"⚠️ Duplicate check failed (proceeding with creation): {e}")
+
+    # 4. Generate unique IDs for our own bot agent
     mongo_id = str(ObjectId())
     agent_uuid = f"agent_{uuid.uuid4().hex[:12]}"
     
-    # 4. Build agent document matching the schema
+    # 5. Build agent document matching the schema
     now_iso = datetime.datetime.utcnow().isoformat() + "Z"
     agent_data = {
         "_id": mongo_id,
@@ -227,7 +284,7 @@ async def create_agent(
         "__v": 0
     }
     
-    # 5. Save in MongoDB agents collection if connection is active
+    # 6. Save in MongoDB agents collection if connection is active
     async def run_insert():
         db = mongo_db.client.get_default_database()
         agents_collection = db['agents']
@@ -251,6 +308,7 @@ async def create_agent(
         "message": "Agent created successfully",
         "data": agent_data
     }
+
 
 @router.get(
     "/supported-languages",
@@ -282,10 +340,16 @@ async def list_agents(x_enterprise_id: Optional[str] = Header(None, alias="x-ent
     async def run_query():
         db = mongo_db.client.get_default_database()
         agents_collection = db['agents']
-        cursor = agents_collection.find({"enterprise": x_enterprise_id})
+        # Support both field names: 'enterprise' (new) and 'company_id' (legacy)
+        cursor = agents_collection.find({
+            "$or": [
+                {"enterprise": x_enterprise_id},
+                {"company_id": x_enterprise_id}
+            ]
+        })
         agents_list = []
         async for doc in cursor:
-            doc["_id"] = str(doc["_id"])
+            doc["_id"] = str(doc["_id"]) if doc.get("_id") else ""
             agents_list.append(doc)
         return agents_list
 
@@ -314,7 +378,13 @@ async def get_agent_stats(x_enterprise_id: Optional[str] = Header(None, alias="x
     async def run_query():
         db = mongo_db.client.get_default_database()
         agents_collection = db['agents']
-        cursor = agents_collection.find({"enterprise": x_enterprise_id})
+        # Support both field names: 'enterprise' (new) and 'company_id' (legacy)
+        cursor = agents_collection.find({
+            "$or": [
+                {"enterprise": x_enterprise_id},
+                {"company_id": x_enterprise_id}
+            ]
+        })
         total_agents = 0
         active_agents = 0
         languages = {}
@@ -342,6 +412,51 @@ async def get_agent_stats(x_enterprise_id: Optional[str] = Header(None, alias="x
             "languages": languages
         }
     }
+
+@router.get(
+    "/admin/all",
+    status_code=status.HTTP_200_OK,
+    summary="[Admin] List ALL Agents",
+    description="Lists every agent across all enterprises stored in MongoDB. Shows agentId, name, enterprise, language, phoneNumber, knowledgeBaseIds, and status."
+)
+async def list_all_agents_admin():
+    """Admin-only: returns all agents in the DB. Safe against BSON types."""
+    import json
+
+    if mongo_db.client is None:
+        return JSONResponse(status_code=503, content={
+            "success": False,
+            "error": "MongoDB is not connected. Check DB_URL environment variable."
+        })
+
+    async def run_query():
+        db = mongo_db.client.get_default_database()
+        agents_collection = db['agents']
+        cursor = agents_collection.find({})
+        agents_list = []
+        async for doc in cursor:
+            # bson_safe converts ObjectId, datetime, Decimal128, bytes → plain Python types
+            safe_doc = bson_safe(dict(doc))
+            # Normalize: expose company_id as enterprise if enterprise field is missing
+            if not safe_doc.get("enterprise") and safe_doc.get("company_id"):
+                safe_doc["enterprise"] = safe_doc["company_id"]
+            agents_list.append(safe_doc)
+        return agents_list
+
+    try:
+        agents = await safe_mongo_op(run_query) or []
+        payload = {
+            "success": True,
+            "total": len(agents),
+            "agents": agents
+        }
+        return JSONResponse(status_code=200, content=payload)
+    except Exception as e:
+        logger.error(f"❌ /admin/all failed: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={
+            "success": False,
+            "error": str(e)
+        })
 
 @router.get(
     "/{id}",

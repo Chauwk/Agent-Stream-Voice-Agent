@@ -18,8 +18,7 @@ _active_connections_counter = 0
 
 # Initialise a RAG manager for company lookups
 from core.rag_manager import RAGManager
-from models.database import SessionLocal
-from models.metadata import Company
+from core.mongo_manager import mongo_db
 
 rag_manager = RAGManager()
 
@@ -62,16 +61,22 @@ def extract_phone_number_from_uri(sip_uri: str) -> str:
     return user_part
 
 async def get_company_id_by_phone(phone_number: str) -> str | None:
-    """Lookup company in DB matching phone number.
+    """Lookup company in MongoDB matching phone number.
     
     Tries multiple phone number variants to handle country code differences:
     - As-is (e.g. 914040377112)
     - Without leading 91 India country code (e.g. 04040377112)
     - Without leading 0 after stripping country code (e.g. 4040377112)
     """
+    if not mongo_db.client:
+        logger.warning("⚠️ MongoDB client offline, cannot resolve company by phone.")
+        return None
+
     cleaned_phone = phone_number.replace("+", "").strip()
-    db = SessionLocal()
     try:
+        db = mongo_db.client.get_default_database()
+        companies_collection = db['companies']
+
         # Build list of variants to try
         variants = [cleaned_phone]
         # If starts with 91 (India country code), try local formats
@@ -83,19 +88,17 @@ async def get_company_id_by_phone(phone_number: str) -> str | None:
         elif len(cleaned_phone) <= 11 and not cleaned_phone.startswith("91"):
             variants.append("91" + cleaned_phone)
 
-        for variant in variants:
-            company = db.query(Company).filter(Company.phone_number == variant).first()
-            if company:
-                logger.info(f"✅ Company matched: {company.name} ({company.company_id}) via phone variant '{variant}'")
-                return company.company_id
+        company = await companies_collection.find_one({"phone_number": {"$in": variants}})
+        if company:
+            logger.info(f"✅ Company matched: {company.get('name')} ({company.get('company_id')})")
+            return company.get("company_id")
         
         logger.warning(f"Company not found for phone: {phone_number} (tried variants: {variants})")
         return None
     except Exception as e:
         logger.error(f"Failed to lookup company by phone: {e}")
         return None
-    finally:
-        db.close()
+
 
 async def query_knowledge_base(phone_number: str, query: str, top_k: int = 3, agent_config: dict = None) -> List[Dict[str, Any]]:
     """Resolve company from agent config or phone, and perform RAG search with optional knowledgeBaseIds filtering."""

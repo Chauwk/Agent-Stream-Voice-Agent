@@ -65,9 +65,7 @@ services:
     env_file: .env
     
     volumes:
-      - ./metadata.db:/app/metadata.db
       - /home/ubuntu/project-gcp-key.json:/app/project-gcp-key.json
-      - sqlite-data:/app/db
     
     ports:
       - "5060:5060/tcp"
@@ -133,4 +131,4 @@ networks:
 
 volumes:
   chroma-data:
-  sqlite-data:
+
