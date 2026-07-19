@@ -33,21 +33,26 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
             logger.info(f"🎯 Dynamic agent resolved by Phone Number: {agent.get('name')} ({agent.get('agentId')})")
             return agent
             
-        # 2. Search by MongoDB ObjectId if it's a valid ObjectId
-        if ObjectId.is_valid(destination_id):
-            agent = await agents_collection.find_one({"_id": ObjectId(destination_id), "status": "active"})
-            if agent:
-                logger.info(f"🎯 Dynamic agent resolved by MongoDB _id: {agent.get('name')} ({agent.get('agentId')})")
-                return agent
-                
+        # 2. Search by MongoDB string _id (agents store _id as string, not ObjectId)
+        agent = await agents_collection.find_one({"_id": destination_id, "status": "active"})
+        if agent:
+            logger.info(f"🎯 Dynamic agent resolved by MongoDB _id: {agent.get('name')} ({agent.get('agentId')})")
+            return agent
+            
         # 3. Search by phone number mapping (using Company SQL lookup)
         company_id = await get_company_id_by_phone(destination_id)
         if company_id:
             # Load the most recently updated active agent belonging to this company/enterprise
+            # Support both 'enterprise' (new field) and 'company_id' (legacy field)
             agent = await agents_collection.find_one(
                 {"enterprise": company_id, "status": "active"},
                 sort=[("updatedAt", -1)]
             )
+            if not agent:
+                agent = await agents_collection.find_one(
+                    {"company_id": company_id, "status": "active"},
+                    sort=[("updatedAt", -1)]
+                )
             if agent:
                 logger.info(f"🎯 Dynamic agent resolved for company {company_id} via phone {destination_id}: {agent.get('name')}")
                 return agent

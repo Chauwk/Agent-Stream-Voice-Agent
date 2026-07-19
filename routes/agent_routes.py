@@ -156,15 +156,23 @@ async def find_agent_by_id_and_enterprise(agent_id_or_mongo_id: str, enterprise_
     async def run_find():
         db = mongo_db.client.get_default_database()
         agents_collection = db['agents']
+        enterprise_filter = {
+            "$or": [
+                {"enterprise": enterprise_id},
+                {"company_id": enterprise_id}
+            ]
+        }
         # 1. Search by custom agentId string
-        agent = await agents_collection.find_one({"agentId": agent_id_or_mongo_id, "enterprise": enterprise_id})
+        agent = await agents_collection.find_one({"agentId": agent_id_or_mongo_id, **enterprise_filter["$or"][0]})
+        if not agent:
+            agent = await agents_collection.find_one({"agentId": agent_id_or_mongo_id, **enterprise_filter["$or"][1]})
         if agent:
             return agent
-        # 2. Search by MongoDB ObjectId if format is valid
-        if ObjectId.is_valid(agent_id_or_mongo_id):
-            agent = await agents_collection.find_one({"_id": agent_id_or_mongo_id, "enterprise": enterprise_id})
-            return agent
-        return None
+        # 2. Search by MongoDB ObjectId or string _id
+        agent = await agents_collection.find_one({"_id": agent_id_or_mongo_id, **enterprise_filter["$or"][0]})
+        if not agent:
+            agent = await agents_collection.find_one({"_id": agent_id_or_mongo_id, **enterprise_filter["$or"][1]})
+        return agent
 
     try:
         return await safe_mongo_op(run_find)
@@ -308,10 +316,16 @@ async def list_agents(x_enterprise_id: Optional[str] = Header(None, alias="x-ent
     async def run_query():
         db = mongo_db.client.get_default_database()
         agents_collection = db['agents']
-        cursor = agents_collection.find({"enterprise": x_enterprise_id})
+        # Support both field names: 'enterprise' (new) and 'company_id' (legacy)
+        cursor = agents_collection.find({
+            "$or": [
+                {"enterprise": x_enterprise_id},
+                {"company_id": x_enterprise_id}
+            ]
+        })
         agents_list = []
         async for doc in cursor:
-            doc["_id"] = str(doc["_id"])
+            doc["_id"] = str(doc["_id"]) if doc.get("_id") else ""
             agents_list.append(doc)
         return agents_list
 
@@ -340,7 +354,13 @@ async def get_agent_stats(x_enterprise_id: Optional[str] = Header(None, alias="x
     async def run_query():
         db = mongo_db.client.get_default_database()
         agents_collection = db['agents']
-        cursor = agents_collection.find({"enterprise": x_enterprise_id})
+        # Support both field names: 'enterprise' (new) and 'company_id' (legacy)
+        cursor = agents_collection.find({
+            "$or": [
+                {"enterprise": x_enterprise_id},
+                {"company_id": x_enterprise_id}
+            ]
+        })
         total_agents = 0
         active_agents = 0
         languages = {}
@@ -380,14 +400,17 @@ async def list_all_agents_admin():
     async def run_query():
         db = mongo_db.client.get_default_database()
         agents_collection = db['agents']
-        cursor = agents_collection.find({}, {
-            "_id": 1, "agentId": 1, "name": 1, "enterprise": 1,
-            "language": 1, "voiceId": 1, "phoneNumber": 1,
-            "knowledgeBaseIds": 1, "status": 1, "createdAt": 1
-        })
+        # No projection — fetch all fields, safe for string or ObjectId _id
+        cursor = agents_collection.find({})
         agents_list = []
         async for doc in cursor:
-            doc["_id"] = str(doc["_id"])
+            try:
+                doc["_id"] = str(doc["_id"])
+            except Exception:
+                doc["_id"] = ""
+            # Normalize: surface company_id as enterprise if enterprise is missing
+            if not doc.get("enterprise") and doc.get("company_id"):
+                doc["enterprise"] = doc["company_id"]
             agents_list.append(doc)
         return agents_list
 
@@ -399,6 +422,15 @@ async def list_all_agents_admin():
                 agents = res
         except Exception as e:
             logger.error(f"Failed to fetch all agents: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"MongoDB error: {str(e)}"
+            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="MongoDB is not connected. Check DB_URL environment variable."
+        )
 
     return {
         "success": True,
