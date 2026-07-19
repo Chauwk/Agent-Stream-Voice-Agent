@@ -10,6 +10,7 @@ import uuid
 import datetime
 import time
 from typing import List, Dict, Any, Optional, Union, Annotated
+import mimetypes
 from fastapi import APIRouter, HTTPException, Header, Query, status, UploadFile, File, BackgroundTasks
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
@@ -1152,6 +1153,7 @@ async def download_agent_kb_item(
     id: str,
     doc_id: int,
     enterprise_id: Optional[str] = Query(None, alias="enterprise_id"),
+    is_download: bool = Query(False, alias="download"),
     x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")
 ):
     ent_id = x_enterprise_id or enterprise_id
@@ -1171,9 +1173,16 @@ async def download_agent_kb_item(
         raise HTTPException(status_code=500, detail="S3 client not initialized")
         
     try:
+        content_type, _ = mimetypes.guess_type(doc['filename'])
+        disposition = f'attachment; filename="{doc["filename"]}"' if is_download else f'inline; filename="{doc["filename"]}"'
         url = rag_manager.s3_client.generate_presigned_url(
             'get_object',
-            Params={'Bucket': rag_manager.bucket_name, 'Key': s3_key},
+            Params={
+                'Bucket': rag_manager.bucket_name, 
+                'Key': s3_key,
+                'ResponseContentDisposition': disposition,
+                'ResponseContentType': content_type or 'application/octet-stream'
+            },
             ExpiresIn=3600
         )
         return RedirectResponse(url)
