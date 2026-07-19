@@ -8,8 +8,9 @@ Conforms to the NewAgentsApiSchema specification.
 import logging
 import uuid
 import datetime
-from typing import List, Dict, Any, Optional, Union
-from fastapi import APIRouter, HTTPException, Header, status
+import time
+from typing import List, Dict, Any, Optional, Union, Annotated
+from fastapi import APIRouter, HTTPException, Header, status, UploadFile, File, BackgroundTasks
 from pydantic import BaseModel, Field
 from bson import ObjectId
 
@@ -30,32 +31,32 @@ router = APIRouter(
 # === Pydantic Request Schemas ===
 
 class TermsModel(BaseModel):
-    enabled: bool = Field(False, example=True)
-    content: str = Field("", example="By speaking with this agent you agree...")
+    enabled: bool = Field(False, json_schema_extra={"example": True})
+    content: str = Field("", json_schema_extra={"example": "By speaking with this agent you agree..."})
 
 class AgentCreateRequest(BaseModel):
-    name: str = Field(..., example="Support Assistant", description="The name of the AI agent.")
-    instructions: str = Field(..., example="You are a helpful customer support agent...", description="Prompt or core instructions.")
-    firstMessage: str = Field(..., example="Hello! How can I help you today?", description="The first message said by the agent.")
-    voiceId: str = Field(..., example="pNInz6obbfDQGcgMyIGD", description="The ID of the voice to be used.")
-    language: Union[str, List[str]] = Field(..., example="en", description="Primary language of the agent (string or array).")
+    name: str = Field(..., json_schema_extra={"example": "Support Assistant"}, description="The name of the AI agent.")
+    instructions: str = Field(..., json_schema_extra={"example": "You are a helpful customer support agent..."}, description="Prompt or core instructions.")
+    firstMessage: str = Field(..., json_schema_extra={"example": "Hello! How can I help you today?"}, description="The first message said by the agent.")
+    voiceId: str = Field(..., json_schema_extra={"example": "pNInz6obbfDQGcgMyIGD"}, description="The ID of the voice to be used.")
+    language: Union[str, List[str]] = Field(..., json_schema_extra={"example": "en"}, description="Primary language of the agent (string or array).")
     
     # Optional Fields
-    description: Optional[str] = Field("", example="Handles general customer inquiries.")
-    knowledgeBaseIds: Optional[List[str]] = Field(default_factory=list, example=["64a2f8c8d8b9a7f3e1c2d3a4"])
+    description: Optional[str] = Field("", json_schema_extra={"example": "Handles general customer inquiries."})
+    knowledgeBaseIds: Optional[List[str]] = Field(default_factory=list, json_schema_extra={"example": ["64a2f8c8d8b9a7f3e1c2d3a4"]})
     terms: Optional[TermsModel] = Field(default_factory=lambda: TermsModel(enabled=False, content=""))
-    platformAgreement: Optional[Union[str, bool]] = Field(None, example=True)
-    hinglish_mode: Optional[bool] = Field(False, example=False)
+    platformAgreement: Optional[Union[str, bool]] = Field(None, json_schema_extra={"example": True})
+    hinglish_mode: Optional[bool] = Field(False, json_schema_extra={"example": False})
     # New optional field for virtual number binding
-    phoneNumber: Optional[str] = Field(None, example="04040377112", description="Exotel virtual number to bind to this agent.")
+    phoneNumber: Optional[str] = Field(None, json_schema_extra={"example": "04040377112"}, description="Exotel virtual number to bind to this agent.")
 
 class AgentUpdateRequest(BaseModel):
-    name: Optional[str] = Field(None, example="Updated Support Assistant")
-    instructions: Optional[str] = Field(None, example="You are a polite customer support agent...")
-    firstMessage: Optional[str] = Field(None, example="Hello, how can I help you today?")
-    voiceId: Optional[str] = Field(None, example="pNInz6obbfDQGcgMyIGD")
-    language: Optional[Union[str, List[str]]] = Field(None, example="en")
-    description: Optional[str] = Field(None, example="Handles general inquiries")
+    name: Optional[str] = Field(None, json_schema_extra={"example": "Updated Support Assistant"})
+    instructions: Optional[str] = Field(None, json_schema_extra={"example": "You are a polite customer support agent..."})
+    firstMessage: Optional[str] = Field(None, json_schema_extra={"example": "Hello, how can I help you today?"})
+    voiceId: Optional[str] = Field(None, json_schema_extra={"example": "pNInz6obbfDQGcgMyIGD"})
+    language: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": "en"})
+    description: Optional[str] = Field(None, json_schema_extra={"example": "Handles general inquiries"})
     knowledgeBaseIds: Optional[List[str]] = Field(None)
     terms: Optional[TermsModel] = Field(None)
     hinglish_mode: Optional[bool] = Field(None)
@@ -909,4 +910,60 @@ async def get_current_user_refresh_token(
     return {
         "success": True,
         "refresh_token": f"token_{uuid.uuid4().hex}"
+    }
+
+@router.post(
+    "/{id}/upload-documents",
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload Agent Documents",
+    description="Uploads files (PDF, DOCX, TXT) directly to the Exotel Voice Agent's Knowledge Base."
+)
+async def upload_agent_documents(
+    id: str,
+    background_tasks: BackgroundTasks,
+    files: Annotated[List[UploadFile], File(description="Select one or more files to upload")],
+    x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")
+):
+    # 1. Validate Enterprise & Agent in MongoDB
+    validate_enterprise(x_enterprise_id)
+    agent = await find_agent_by_id_and_enterprise(id, x_enterprise_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail={"success": False, "message": "Agent not found"})
+    
+    agent_id = agent.get("agentId")
+    
+    # 2. Process Files
+    for upload in files:
+        body = await upload.read()
+        
+        # Optional: You can reuse your extract_text_from_file logic here if needed
+        # text = extract_text_from_file(upload.filename, body) 
+        
+        doc_id = int(time.time())
+        
+        # 3. Trigger S3 Upload and Chroma indexing
+        background_tasks.add_task(
+            rag_manager.upload_documents,
+            company_id=agent_id, # Uses agentId as the namespace in Chroma/S3
+            filename=upload.filename,
+            file_body=body,
+            text_content="", # Or pass the extracted text
+            doc_id=doc_id
+        )
+        
+        # 4. Save metadata to MongoDB agent_kb_documents collection
+        kb_doc = {
+            "agentId": agent_id,
+            "docId": doc_id,
+            "filename": upload.filename,
+            "title": upload.filename,
+            "createdAt": datetime.datetime.utcnow().isoformat() + "Z"
+        }
+        
+        db = mongo_db.client.get_default_database()
+        await db['agent_kb_documents'].insert_one(kb_doc)
+        
+    return {
+        "success": True,
+        "message": "Documents uploaded and processing in background"
     }

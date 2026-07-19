@@ -196,7 +196,7 @@ class ModularSalesBot:
         if not Config.DISABLE_AI_ENGINES:
             try:
                 logger.info("⏳ Pre-generating and caching startup greeting audio...")
-                kwargs = {
+                kwargs: dict = {
                     "text": self.cached_greeting_text,
                     "target_language_code": Config.SARVAM_LANGUAGE_CODE,
                     "speaker": Config.SARVAM_SPEAKER,
@@ -211,6 +211,7 @@ class ModularSalesBot:
                 if pitch is not None and pitch != 0.0 and "bulbul:v3" not in Config.SARVAM_MODEL:
                     kwargs["pitch"] = pitch
                     
+                assert self.sync_sarvam_client is not None
                 response = self.sync_sarvam_client.text_to_speech.convert(**kwargs)
                 if response and response.audios:
                     base64_audio = response.audios[0]
@@ -272,6 +273,7 @@ class ModularSalesBot:
         """Warms up the Gemini client connection to eliminate first-call cold-start latency"""
         try:
             logger.info("🧠 Warming up Gemini Client connection...")
+            assert self.gemini_client is not None
             await self.gemini_client.aio.models.generate_content(
                 model=Config.GEMINI_MODEL,
                 contents="ping"
@@ -315,7 +317,7 @@ class ModularSalesBot:
             logger.error(f'❌ SIP Server Error: {e}')
             raise
         finally:
-            if self.sip_server:
+            if self.sip_server is not None:
                 await self.sip_server.stop()
 
     async def _check_and_update_greeting(self):
@@ -329,7 +331,7 @@ class ModularSalesBot:
             
             logger.info(f"🔄 Dynamic Voice Config changed! Regenerating greeting audio for speaker '{Config.SARVAM_SPEAKER}'...")
             try:
-                kwargs = {
+                kwargs: dict = {
                     "text": current_text,
                     "target_language_code": Config.SARVAM_LANGUAGE_CODE,
                     "speaker": Config.SARVAM_SPEAKER,
@@ -344,6 +346,7 @@ class ModularSalesBot:
                 if pitch is not None and pitch != 0.0 and "bulbul:v3" not in Config.SARVAM_MODEL:
                     kwargs["pitch"] = pitch
                     
+                assert self.sarvam_client is not None
                 response = await self.sarvam_client.text_to_speech.convert(**kwargs)
                 if response and response.audios:
                     base64_audio = response.audios[0]
@@ -359,7 +362,7 @@ class ModularSalesBot:
             except Exception as e:
                 logger.error(f"❌ Failed to regenerate greeting audio: {e}")
 
-    def _resolve_agent_voice_and_lang(self, session_state: dict, default_lang: str = None) -> tuple[str, str]:
+    def _resolve_agent_voice_and_lang(self, session_state: dict, default_lang: str | None = None) -> tuple[str, str]:
         """Resolves target speaker and language code from the agent config, falling back to global Config defaults"""
         agent_config = session_state.get("agent_config")
         if agent_config:
@@ -392,7 +395,7 @@ class ModularSalesBot:
         # Generate on-the-fly and cache
         try:
             logger.info(f"⏳ Generating custom greeting audio for agent {agent_id}...")
-            kwargs = {
+            kwargs: dict = {
                 "text": first_msg,
                 "target_language_code": lang if lang != "en" else "en-IN", # Sarvam expects en-IN
                 "speaker": voice_id,
@@ -407,6 +410,7 @@ class ModularSalesBot:
             if pitch is not None and pitch != 0.0 and "bulbul:v3" not in Config.SARVAM_MODEL:
                 kwargs["pitch"] = pitch
                 
+            assert self.sarvam_client is not None
             response = await self.sarvam_client.text_to_speech.convert(**kwargs)
             if response and response.audios:
                 base64_audio = response.audios[0]
@@ -487,7 +491,7 @@ class ModularSalesBot:
                 
                 try:
                     from controllers.bot_controller import query_knowledge_base as db_query
-                    results = await db_query(phone, query, top_k=3, agent_config=agent_config)
+                    results = await db_query(phone, query, top_k=3, agent_config=agent_config or {})
                     if not results:
                         return "No matches found in the knowledge base."
                     
@@ -502,7 +506,7 @@ class ModularSalesBot:
                     return "Error: Unable to search the knowledge base at this time. Fallback to general knowledge."
 
             # Define send_email tool
-            async def send_email(recipient_email: str, subject: str, body: str, cc_recipient: str = None) -> str:
+            async def send_email(recipient_email: str, subject: str, body: str, cc_recipient: str | None = None) -> str:
                 """Send an email to a customer or internally to Chauwk teams.
 
                 Args:
@@ -912,6 +916,7 @@ class ModularSalesBot:
                     while True:
                         try:
                             # Call generate_content_stream using the shared client
+                            assert self.gemini_client is not None
                             response = await self.gemini_client.aio.models.generate_content_stream(
                                 model=Config.GEMINI_MODEL,
                                 contents=history,
@@ -1105,13 +1110,14 @@ class ModularSalesBot:
                 
             try:
                 logger.info(f"🔊 Connecting to Sarvam AI TTS WebSocket (model bulbul:v3) for call {call_id}...")
+                assert self.sarvam_client is not None
                 async with self.sarvam_client.text_to_speech_streaming.connect(
                     model=Config.SARVAM_MODEL,
                     send_completion_event="true"
                 ) as socket_client:
                     logger.info(f"🔊 Configuring Sarvam AI TTS WebSocket for call {call_id}...")
                     speaker, target_lang = self._resolve_agent_voice_and_lang(session_state)
-                    kwargs = {
+                    kwargs: dict = {
                         "target_language_code": target_lang,
                         "speaker": speaker,
                         "speech_sample_rate": 16000,
@@ -1229,7 +1235,7 @@ class ModularSalesBot:
                     if last_lang != detected_lang:
                         logger.info(f"🔄 Reconfiguring Sarvam WebSocket language from '{last_lang}' to '{detected_lang}'")
                         speaker, _ = self._resolve_agent_voice_and_lang(session_state, detected_lang)
-                        kwargs = {
+                        kwargs: dict = {
                             "target_language_code": detected_lang,
                             "speaker": speaker,
                             "speech_sample_rate": 16000,
@@ -1254,7 +1260,7 @@ class ModularSalesBot:
                     logger.warning("⚠️ Sarvam WebSocket not available. Falling back to HTTP TTS.")
                     try:
                         speaker, _ = self._resolve_agent_voice_and_lang(session_state, detected_lang)
-                        kwargs = {
+                        kwargs: dict = {
                             "text": sentence_text,
                             "target_language_code": detected_lang,
                             "speaker": speaker,
@@ -1269,6 +1275,7 @@ class ModularSalesBot:
                         if pitch is not None and pitch != 0.0 and "bulbul:v3" not in Config.SARVAM_MODEL:
                             kwargs["pitch"] = pitch
                             
+                        assert self.sarvam_client is not None
                         tts_coro = self.sarvam_client.text_to_speech.convert(**kwargs)
                         tts_task = asyncio.create_task(tts_coro)
                         session_state["current_tts_task"] = tts_task
@@ -1582,15 +1589,14 @@ class ModularSalesBot:
                     )
                     # Trigger async email notifications
                     try:
-                        from core.modular_sales_bot import trigger_post_call_emails
                         asyncio.create_task(trigger_post_call_emails({
                             "call_id": call_id,
                             "duration_seconds": round(duration, 2),
                             "transcript": transcript,
                             "to_number": session_state.get("to_phone", "default")
                         }))
-                    except ImportError:
-                        pass
+                    except Exception as e:
+                        logger.error(f"Error triggering emails: {e}")
             except Exception as db_err:
                 logger.error(f"❌ Failed to save modular call log to MongoDB: {db_err}")
 

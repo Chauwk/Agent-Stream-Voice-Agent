@@ -48,23 +48,23 @@ class WebhookCallbackPayload(BaseModel):
 # === Pydantic Output Schemas for Swagger Documentation ===
 
 class CallActionResponse(BaseModel):
-    success: bool = Field(..., example=True)
-    call_sid: Optional[str] = Field(None, example="ex_call_8e90810557fc4dc4ab5c04")
-    status: Optional[str] = Field(None, example="initiated")
-    message: Optional[str] = Field(None, example="Outbound call request initiated successfully.")
-    error: Optional[str] = Field(None, example=None)
+    success: bool = Field(..., json_schema_extra={"example": True})
+    call_sid: Optional[str] = Field(None, json_schema_extra={"example": "ex_call_8e90810557fc4dc4ab5c04"})
+    status: Optional[str] = Field(None, json_schema_extra={"example": "initiated"})
+    message: Optional[str] = Field(None, json_schema_extra={"example": "Outbound call request initiated successfully."})
+    error: Optional[str] = Field(None, json_schema_extra={"example": None})
 
 class CallStatusDetailsResponse(BaseModel):
-    success: bool = Field(..., example=True)
-    call_sid: str = Field(..., example="ex_call_8e90810557fc4dc4ab5c04")
-    status: str = Field(..., example="completed")
-    duration: Optional[int] = Field(45, example=45)
-    direction: str = Field("outbound", example="outbound")
-    from_number: Optional[str] = Field(None, example="+918047190000")
-    to_number: Optional[str] = Field(None, example="+919876543210")
-    start_time: Optional[str] = Field(None, example="2026-05-22 10:17:41")
-    price: Optional[str] = Field(None, example="0.50")
-    error: Optional[str] = Field(None, example=None)
+    success: bool = Field(..., json_schema_extra={"example": True})
+    call_sid: str = Field(..., json_schema_extra={"example": "ex_call_8e90810557fc4dc4ab5c04"})
+    status: str = Field(..., json_schema_extra={"example": "completed"})
+    duration: Optional[int] = Field(45, json_schema_extra={"example": 45})
+    direction: str = Field("outbound", json_schema_extra={"example": "outbound"})
+    from_number: Optional[str] = Field(None, json_schema_extra={"example": "+918047190000"})
+    to_number: Optional[str] = Field(None, json_schema_extra={"example": "+919876543210"})
+    start_time: Optional[str] = Field(None, json_schema_extra={"example": "2026-05-22 10:17:41"})
+    price: Optional[str] = Field(None, json_schema_extra={"example": "0.50"})
+    error: Optional[str] = Field(None, json_schema_extra={"example": None})
 
 # === API Endpoint Route Mappings ===
 
