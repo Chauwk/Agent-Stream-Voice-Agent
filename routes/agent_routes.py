@@ -10,8 +10,8 @@ import uuid
 import datetime
 import time
 from typing import List, Dict, Any, Optional, Union, Annotated
-from fastapi import APIRouter, HTTPException, Header, status, UploadFile, File, BackgroundTasks
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Header, Query, status, UploadFile, File, BackgroundTasks
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from bson import ObjectId
 
@@ -1142,3 +1142,41 @@ async def delete_agent_kb_item(
         "success": True,
         "message": "Knowledge base item deleted successfully"
     }
+
+@router.get(
+    "/{id}/exotel-getkb-items/{doc_id}/download",
+    status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+    summary="Download Agent Knowledge Base Item"
+)
+async def download_agent_kb_item(
+    id: str,
+    doc_id: int,
+    enterprise_id: Optional[str] = Query(None, alias="enterprise_id"),
+    x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")
+):
+    ent_id = x_enterprise_id or enterprise_id
+    validate_enterprise(ent_id)
+    agent = await find_agent_by_id_and_enterprise(id, ent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    agent_id = agent.get("agentId")
+    db = mongo_db.client.get_default_database()
+    doc = await db['agent_kb_documents'].find_one({"agentId": agent_id, "docId": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    s3_key = f"documents/{agent_id}/{doc_id}_{doc['filename']}"
+    if not rag_manager.s3_client:
+        raise HTTPException(status_code=500, detail="S3 client not initialized")
+        
+    try:
+        url = rag_manager.s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': rag_manager.bucket_name, 'Key': s3_key},
+            ExpiresIn=3600
+        )
+        return RedirectResponse(url)
+    except Exception as e:
+        logger.error(f"Failed to generate presigned URL: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate download link")
