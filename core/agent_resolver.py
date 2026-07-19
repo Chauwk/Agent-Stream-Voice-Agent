@@ -62,15 +62,17 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
         
     return None
 
-def get_company_name(company_id: str) -> str | None:
-    """Helper to query SQLite metadata database for company name by ID"""
+async def get_company_name(company_id: str) -> str | None:
+    """Helper to query MongoDB database for company name by ID"""
+    if not mongo_db.client:
+        return None
     try:
-        from models.database import SessionLocal
-        from models.metadata import Company
-        db = SessionLocal()
-        company = db.query(Company).filter(Company.company_id == company_id).first()
+        db = mongo_db.client.get_default_database()
+        companies_collection = db['companies']
+        company = await companies_collection.find_one({"company_id": company_id})
         if company:
-            return company.name
+            return company.get("name")
     except Exception as e:
-        logger.error(f"Failed to lookup company name in SQLite for ID {company_id}: {e}")
+        logger.error(f"Failed to lookup company name in MongoDB for ID {company_id}: {e}")
     return None
+

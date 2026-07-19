@@ -108,7 +108,7 @@ class RAGManager:
         except Exception as e:
             logger.warning(f"Failed to delete collection {name} (may not exist): {e}")
 
-    def delete_document(self, company_id: str, doc_id: int, filename: str):
+    def delete_document(self, company_id: str, doc_id: str, filename: str):
         """Delete specific document vectors from Chroma and its raw file from S3 using doc_id"""
         if not self.chroma_client:
             logger.error("Chroma DB client is offline. Skipping document deletion.")
@@ -120,7 +120,7 @@ class RAGManager:
         try:
             collection = self.chroma_client.get_collection(name=col_name)
             # Delete chunks matching unique document_id metadata filter
-            collection.delete(where={"document_id": doc_id})
+            collection.delete(where={"document_id": str(doc_id)})
             logger.info(f"✅ Deleted vectors for document ID {doc_id} from Chroma.")
         except Exception as e:
             logger.error(f"❌ Failed to delete document vectors from Chroma: {e}")
@@ -158,7 +158,7 @@ class RAGManager:
         # Fallback simple split
         return [text[i : i + 500] for i in range(0, len(text), 500)]
 
-    async def upload_documents(self, company_id: str, filename: str, file_body: bytes, text_content: str, doc_id: int, on_progress=None):
+    async def upload_documents(self, company_id: str, filename: str, file_body: bytes, text_content: str, doc_id: str, on_progress=None):
         """Upload raw file to S3, chunk and generate embeddings using Gemini, and index in Chroma DB"""
         if not self.chroma_client:
             raise RuntimeError("Chroma DB is offline. Cannot upload documents.")
@@ -203,7 +203,7 @@ class RAGManager:
                     embeddings=[embedding],
                     documents=[chunk],
                     ids=[chunk_id],
-                    metadatas=[{"source": filename, "company_id": company_id, "document_id": doc_id}]
+                    metadatas=[{"source": filename, "company_id": company_id, "document_id": str(doc_id)}]
                 )
             )
             # Fire progress callback after each chunk
@@ -240,12 +240,8 @@ class RAGManager:
         # Build filter dict if document_ids are provided
         where_filter = None
         if document_ids:
-            normalized_ids = []
-            for d_id in document_ids:
-                try:
-                    normalized_ids.append(int(d_id))
-                except (ValueError, TypeError):
-                    normalized_ids.append(d_id)
+            # Convert all to strings cleanly
+            normalized_ids = [str(x) for x in document_ids]
             if len(normalized_ids) == 1:
                 where_filter = {"document_id": normalized_ids[0]}
             elif len(normalized_ids) > 1:

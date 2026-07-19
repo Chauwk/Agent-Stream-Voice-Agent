@@ -29,8 +29,6 @@ sarvamai
 # RAG & Database dependencies
 chromadb
 boto3
-sqlalchemy
-psycopg2-binary
 python-docx
 python-pptx
 beautifulsoup4

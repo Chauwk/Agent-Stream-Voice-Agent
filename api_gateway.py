@@ -48,15 +48,8 @@ else:
 async def lifespan(app: FastAPI):
     # Startup logic
     
-    # Initialize Database Tables
-    try:
-        from models.database import engine, Base
-        import models.metadata  # import models to register with Base
-        logger.info("🗄️ Initializing metadata database tables...")
-        Base.metadata.create_all(bind=engine)
-        logger.info("🗄️ Database tables initialized successfully.")
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize database tables: {e}")
+    # MongoDB metadata initialization is handled dynamically via motor connection.
+    logger.info("🗄️ Metadata storage fully migrated to MongoDB Atlas.")
 
     sip_task = None
     if Config.USE_SIP_TRUNK:
