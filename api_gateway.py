@@ -219,6 +219,111 @@ async def websocket_stream_endpoint(websocket: WebSocket):
 
 
 # ==============================================================================
+# Browser Embeddable Widget WebSocket Streaming Endpoint
+# ==============================================================================
+
+import uuid
+import base64
+import json
+
+@app.websocket("/api/v1/stream/browser")
+async def browser_stream_endpoint(websocket: WebSocket):
+    """
+    WebSocket Endpoint for embeddable Web Component voice agent widget (<agent-stream-voice>).
+    Streams 16kHz PCM audio bidirectionally between browser widget and Voice AI Bot engine.
+    """
+    await websocket.accept()
+    agent_id = websocket.query_params.get("agent_id", "default")
+    stream_id = f"browser_{uuid.uuid4().hex[:8]}"
+    logger.info(f"🌐 [Browser Widget] New connection established for agent_id='{agent_id}', stream_id='{stream_id}'")
+
+    # Fetch agent configuration
+    agent_config = None
+    try:
+        from core.agent_resolver import resolve_agent_config
+        agent_config = await resolve_agent_config(agent_id)
+    except Exception as e:
+        logger.warning(f"⚠️ [Browser Widget] Could not resolve agent config for '{agent_id}': {e}")
+
+    try:
+        # Check if running OpenAI Realtime Sales Bot
+        if hasattr(sales_bot_engine, "connect_to_openai_enhanced"):
+            # 1. Connect to OpenAI Realtime API
+            await sales_bot_engine.connect_to_openai_enhanced(stream_id)
+            
+            # Configure input/output format as pcm16 @ 16kHz
+            if stream_id in sales_bot_engine.openai_connections:
+                sales_bot_engine.openai_connections[stream_id]["input_format"] = "pcm16"
+                sales_bot_engine.openai_connections[stream_id]["output_format"] = "pcm16"
+                sales_bot_engine.connection_sample_rates[stream_id] = 16000
+
+            # 2. Configure Session & Send Initial Greeting
+            await sales_bot_engine.configure_openai_session_enhanced(stream_id, agent_config)
+            await sales_bot_engine.send_initial_greeting_enhanced(stream_id, agent_config)
+
+            # Task to forward OpenAI audio deltas to Browser Widget
+            async def forward_openai_to_browser():
+                try:
+                    openai_ws = sales_bot_engine.openai_connections[stream_id]["websocket"]
+                    async for message in openai_ws:
+                        try:
+                            data = json.loads(message)
+                            event_type = data.get("type", "")
+                            
+                            if event_type == "response.output_audio.delta":
+                                delta_b64 = data.get("delta", "")
+                                if delta_b64:
+                                    await websocket.send_json({
+                                        "event": "audio",
+                                        "audio": delta_b64
+                                    })
+                            elif event_type == "input_audio_buffer.speech_started":
+                                await websocket.send_json({
+                                    "event": "clear"
+                                })
+                            elif event_type == "response.done":
+                                await websocket.send_json({
+                                    "event": "status",
+                                    "status": "listening"
+                                })
+                        except Exception as inner_err:
+                            logger.error(f"❌ Error in browser forward task inner loop: {inner_err}")
+                except Exception as task_err:
+                    logger.debug(f"Browser forward task ended for {stream_id}: {task_err}")
+
+            forward_task = asyncio.create_task(forward_openai_to_browser())
+
+            # 3. Main Loop: Receive microphone audio from Browser Widget
+            while True:
+                data_str = await websocket.receive_text()
+                try:
+                    msg = json.loads(data_str)
+                    if msg.get("event") == "media":
+                        media_data = msg.get("media", {})
+                        payload_b64 = media_data.get("payload", "")
+                        if payload_b64:
+                            pcm_bytes = base64.b64decode(payload_b64)
+                            await sales_bot_engine.send_audio_to_openai(stream_id, pcm_bytes, sample_rate=16000)
+                except Exception as msg_err:
+                    logger.error(f"❌ Error handling browser audio payload: {msg_err}")
+
+        else:
+            # Fallback or Modular bot handling
+            logger.info(f"🌐 [Browser Widget] Connected to Modular Sales Bot engine for {stream_id}")
+            while True:
+                data_str = await websocket.receive_text()
+
+    except WebSocketDisconnect:
+        logger.info(f"🔌 [Browser Widget] Connection closed for stream_id='{stream_id}'")
+    except Exception as e:
+        logger.error(f"❌ [Browser Widget] Exception during WebSocket session '{stream_id}': {e}")
+    finally:
+        if hasattr(sales_bot_engine, "cleanup_connections"):
+            await sales_bot_engine.cleanup_connections(stream_id)
+
+
+
+# ==============================================================================
 # Beautiful Glassmorphic Interactive Home Dashboard
 # ==============================================================================
 
