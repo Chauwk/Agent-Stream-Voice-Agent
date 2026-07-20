@@ -79,12 +79,22 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="🤖 Enterprise Voice AI Agent API Server",
     description="""
-    ## Carrier-Grade Voice AI Backend integration Gateway.
+    ## Carrier-Grade Voice AI Backend Integration Gateway.
     
     This API suite provides orchestrating endpoints to manage the lifecycle of conversational voice interactions.
     It integrates **OpenAI Realtime API** low-latency speech synthesis with **Exotel SIP/WebSocket** interfaces.
     
-    ### Core Operations:
+    ### 🎙️ Real-Time WebSocket Streaming Endpoints:
+    * **Browser Embed Widget Stream**: `wss://ai-agent-stream.chauwk.com/api/v1/stream/browser?agent_id=default`
+      * **Protocol:** Bidirectional WebSocket (PCM16 @ 16kHz Mono)
+      * **Query Params:** `agent_id` (e.g. `default`, `agent_sales_01`)
+      * **Client -> Server Event:** `{"event": "media", "media": {"payload": "<base64_pcm16>"}}`
+      * **Server -> Client Events:**
+        * `{"event": "audio", "audio": "<base64_pcm16>"}` (AI speech output)
+        * `{"event": "clear"}` (Customer interruption signal)
+        * `{"event": "status", "status": "listening"}` (State change)
+
+    ### 📞 Core Operations:
     * **Call Management:** Initiate outbound leads calling campaigns, fetch active telephony status, and register callback webhooks.
     * **AI Personality Configuration:** Hot-reload prompting setups, voice character variants, and models dynamically.
     * **Low-Latency Streaming:** Bridging carrier RTP/PCM16 packets directly with OpenAI endpoints.
