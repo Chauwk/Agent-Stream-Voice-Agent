@@ -211,10 +211,33 @@
     </div>
 
     <!-- LIVE DEMO EMBED OF THE CUSTOM TAG -->
-    <agent-stream-voice agent-id="default" server-url="http://localhost:5000"></agent-stream-voice>
+    <agent-stream-voice agent-id="default" id="demo-agent-tag"></agent-stream-voice>
     <script src="/static/voice-agent-widget.js" async></script>
 
     <script>
+        // Dynamically update the code block to reflect the live server origin
+        document.addEventListener('DOMContentLoaded', () => {
+            const currentOrigin = window.location.origin;
+            const embedCodeEl = document.getElementById('embed-code');
+            const demoTag = document.getElementById('demo-agent-tag');
+            
+            if (demoTag) {
+                demoTag.setAttribute('server-url', currentOrigin);
+            }
+
+            if (embedCodeEl) {
+                embedCodeEl.innerHTML = `
+<span class="comment">&lt;!-- 1. Voice Agent Custom HTML Tag --&gt;</span>
+<span class="tag">&lt;agent-stream-voice</span> 
+    <span class="attr">agent-id</span>=<span class="val">"default"</span> 
+    <span class="attr">server-url</span>=<span class="val">"${currentOrigin}"</span><span class="tag">&gt;</span>
+<span class="tag">&lt;/agent-stream-voice&gt;</span>
+
+<span class="comment">&lt;!-- 2. Async Web Component Script --&gt;</span>
+<span class="tag">&lt;script</span> <span class="attr">src</span>=<span class="val">"${currentOrigin}/static/voice-agent-widget.js"</span> <span class="attr">async</span><span class="tag">&gt;&lt;/script&gt;</span>`;
+            }
+        });
+
         function copyCode() {
             const text = document.getElementById('embed-code').innerText;
             navigator.clipboard.writeText(text);

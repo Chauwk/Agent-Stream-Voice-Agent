@@ -34,7 +34,20 @@ class VoiceAgentWidget extends HTMLElement {
 
     connectedCallback() {
         this.agentId = this.getAttribute('agent-id') || 'default';
-        this.serverUrl = this.getAttribute('server-url') || window.location.origin;
+        
+        // Auto-detect server URL from script tag origin if server-url is not explicitly provided
+        let defaultOrigin = window.location.origin;
+        try {
+            const scripts = document.querySelectorAll('script');
+            for (let s of scripts) {
+                if (s.src && s.src.includes('voice-agent-widget.js')) {
+                    defaultOrigin = new URL(s.src).origin;
+                    break;
+                }
+            }
+        } catch (e) {}
+
+        this.serverUrl = this.getAttribute('server-url') || defaultOrigin;
         this.agentName = this.getAttribute('agent-name') || 'AI Voice Assistant';
 
         this.render();
