@@ -423,7 +423,30 @@ class ModularSalesBot:
             
         return self.cached_greeting_audio
 
-    async def connect_to_openai_enhanced(self, call_id: str):
+    async def _send_audio_to_client(self, call_id: str, pcm_audio: bytes):
+        """Sends audio data to the caller (either via browser WebSocket or SIP server)."""
+        session_state = self.connections.get(call_id)
+        if not session_state:
+            return
+            
+        # 1. If this is a browser widget connection, send via WebSocket
+        browser_ws = session_state.get("browser_websocket")
+        if browser_ws:
+            try:
+                base64_audio = base64.b64encode(pcm_audio).decode('utf-8')
+                await browser_ws.send_json({
+                    "event": "audio",
+                    "audio": base64_audio
+                })
+                return
+            except Exception as e:
+                logger.error(f"❌ Error sending audio to browser WebSocket: {e}")
+                
+        # 2. Fall back to direct SIP trunk
+        if self.sip_server:
+            await self.sip_server.send_audio_to_rtp(call_id, pcm_audio)
+
+    async def connect_to_openai_enhanced(self, call_id: str, agent_config: dict = None):
         """
         Setup modular connection endpoints (Deepgram, Gemini, Sarvam) for the call session.
         Method name matches the SIP server interface call for backward compatibility.
@@ -432,19 +455,19 @@ class ModularSalesBot:
         
         # Resolve called virtual DID number and load agent configuration dynamically
         session_to_phone = "default"
-        agent_config = None
-        if self.sip_server and call_id in self.sip_server.sip_calls:
-            sip_call = self.sip_server.sip_calls[call_id]
-            from controllers.bot_controller import extract_phone_number_from_uri
-            session_to_phone = extract_phone_number_from_uri(sip_call.to_uri)
-            logger.info(f"Resolved called DID number: {session_to_phone}")
-            
-            # Resolve agent config dynamically
-            try:
-                from core.agent_resolver import resolve_agent_config
-                agent_config = await resolve_agent_config(session_to_phone)
-            except Exception as e:
-                logger.error(f"⚠️ Failed to dynamically resolve agent for DID {session_to_phone}: {e}")
+        if agent_config is None:
+            if self.sip_server and call_id in self.sip_server.sip_calls:
+                sip_call = self.sip_server.sip_calls[call_id]
+                from controllers.bot_controller import extract_phone_number_from_uri
+                session_to_phone = extract_phone_number_from_uri(sip_call.to_uri)
+                logger.info(f"Resolved called DID number: {session_to_phone}")
+                
+                # Resolve agent config dynamically
+                try:
+                    from core.agent_resolver import resolve_agent_config
+                    agent_config = await resolve_agent_config(session_to_phone)
+                except Exception as e:
+                    logger.error(f"⚠️ Failed to dynamically resolve agent for DID {session_to_phone}: {e}")
             
         # Ensure Gemini warmup runs if it hasn't completed yet
         if not getattr(self, "gemini_warmed_up", False) and self.gemini_client:
@@ -643,8 +666,7 @@ class ModularSalesBot:
             
         if greeting_audio:
             logger.info(f"🗣️ Playing greeting for call: {call_id}")
-            if self.sip_server:
-                asyncio.create_task(self.sip_server.send_audio_to_rtp(call_id, greeting_audio))
+            asyncio.create_task(self._send_audio_to_client(call_id, greeting_audio))
 
         # 4. Connect to WebSockets
         try:
@@ -1291,8 +1313,7 @@ class ModularSalesBot:
                             raw_audio = base64.b64decode(base64_audio)
                             pcm_audio = apply_audio_gain(raw_audio, getattr(Config, "AUDIO_GAIN", 1.0))
                             logger.info(f"🗣️ ZARA SPEAKING (HTTP): {sentence_text}")
-                            if self.sip_server:
-                                await self.sip_server.send_audio_to_rtp(call_id, pcm_audio)
+                            await self._send_audio_to_client(call_id, pcm_audio)
                         else:
                             logger.error(f"❌ Empty response from HTTP TTS for: '{sentence_text}'")
                     except asyncio.CancelledError:
@@ -1324,8 +1345,7 @@ class ModularSalesBot:
                                 base64_audio = response.data.audio
                                 raw_audio = base64.b64decode(base64_audio)
                                 pcm_audio = apply_audio_gain(raw_audio, getattr(Config, "AUDIO_GAIN", 1.0))
-                                if self.sip_server:
-                                    await self.sip_server.send_audio_to_rtp(call_id, pcm_audio)
+                                await self._send_audio_to_client(call_id, pcm_audio)
                             elif response.type == 'event':
                                 if getattr(response.data, 'event_type', None) == 'final':
                                     break

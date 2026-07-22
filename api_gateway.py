@@ -256,8 +256,40 @@ async def browser_stream_endpoint(websocket: WebSocket):
         logger.warning(f"⚠️ [Browser Widget] Could not resolve agent config for '{agent_id}': {e}")
 
     try:
-        # Check if running OpenAI Realtime Sales Bot
-        if hasattr(sales_bot_engine, "connect_to_openai_enhanced"):
+        # Check if running Modular Sales Bot (Deepgram + Gemini + Sarvam/Cartesia)
+        if type(sales_bot_engine).__name__ == "ModularSalesBot":
+            logger.info(f"🌐 [Browser Widget] Connecting to Modular Sales Bot pipeline for {stream_id}")
+            
+            # 1. Initialize modular pipeline
+            await sales_bot_engine.connect_to_openai_enhanced(stream_id, agent_config)
+            
+            # 2. Attach WebSocket to connections state map
+            if stream_id in sales_bot_engine.connections:
+                sales_bot_engine.connections[stream_id]["browser_websocket"] = websocket
+            else:
+                logger.error(f"❌ [Browser Widget] Modular pipeline failed to initialize for stream '{stream_id}'. closing connection.")
+                await websocket.send_json({"error": "Failed to connect to Modular pipeline. Check server logs."})
+                await websocket.close(code=1011)
+                return
+
+            # 3. Main Loop: Receive microphone audio from Browser Widget and send to Deepgram
+            while True:
+                data_str = await websocket.receive_text()
+                try:
+                    msg = json.loads(data_str)
+                    if msg.get("event") == "media":
+                        media_data = msg.get("media", {})
+                        payload_b64 = media_data.get("payload", "")
+                        if payload_b64:
+                            pcm_bytes = base64.b64decode(payload_b64)
+                            await sales_bot_engine.send_audio_to_openai(stream_id, pcm_bytes, sample_rate=16000)
+                except Exception as msg_err:
+                    logger.error(f"❌ Error handling browser modular audio payload: {msg_err}")
+
+        # Fallback: Check if running OpenAI Realtime Sales Bot
+        elif hasattr(sales_bot_engine, "connect_to_openai_enhanced"):
+            logger.info(f"🌐 [Browser Widget] Connecting to OpenAI Realtime pipeline for {stream_id}")
+            
             # 1. Connect to OpenAI Realtime API with resolved agent config
             await sales_bot_engine.connect_to_openai_enhanced(stream_id, agent_config)
             
@@ -324,15 +356,14 @@ async def browser_stream_endpoint(websocket: WebSocket):
                     logger.error(f"❌ Error handling browser audio payload: {msg_err}")
 
         else:
-            # Fallback or Modular bot handling
-            logger.info(f"🌐 [Browser Widget] Connected to Modular Sales Bot engine for {stream_id}")
-            while True:
-                data_str = await websocket.receive_text()
+            logger.error("❌ [Browser Widget] No active telephony voice bot engine is loaded.")
+            await websocket.send_json({"error": "No voice agent engine active on server."})
+            await websocket.close(code=1011)
 
     except WebSocketDisconnect:
         logger.info(f"🔌 [Browser Widget] Connection closed for stream_id='{stream_id}'")
     except Exception as e:
-        logger.error(f"❌ [Browser Widget] Exception during WebSocket session '{stream_id}': {e}")
+        logger.error(f"❌ [Browser Widget] Exception during WebSocket session '{stream_id}': {e}", exc_info=True)
     finally:
         if hasattr(sales_bot_engine, "cleanup_connections"):
             await sales_bot_engine.cleanup_connections(stream_id)
