@@ -491,9 +491,11 @@ class VoiceAgentWidget extends HTMLElement {
         try {
             this.updateState('connecting', 'Connecting...');
 
-            // Initialize Web Audio Context at 24kHz to match OpenAI Realtime output natively
+            // Initialize Web Audio Context at native browser rate
+            // (We let the server handle any conversion to OpenAI's required 24kHz)
             const AudioCtx = window.AudioContext || window.webkitAudioContext;
-            this.audioCtx = new AudioCtx({ sampleRate: 24000 });
+            this.audioCtx = new AudioCtx();
+            this.capturedSampleRate = this.audioCtx.sampleRate; // Capture for metadata
             if (this.audioCtx.state === 'suspended') {
                 await this.audioCtx.resume();
             }
@@ -502,9 +504,9 @@ class VoiceAgentWidget extends HTMLElement {
             this.micStream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     channelCount: 1,
-                    sampleRate: 16000,  // mic capture stays at 16kHz for STT
                     echoCancellation: true,
-                    noiseSuppression: true
+                    noiseSuppression: true,
+                    autoGainControl: true
                 }
             });
 
@@ -569,11 +571,14 @@ class VoiceAgentWidget extends HTMLElement {
                 pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
             }
 
-            // Convert to Base64 and send payload
+            // Convert to Base64 and send payload — include sample_rate so server can convert correctly
             const base64Audio = this.arrayBufferToBase64(pcm16.buffer);
             this.ws.send(JSON.stringify({
                 event: 'media',
-                media: { payload: base64Audio }
+                media: {
+                    payload: base64Audio,
+                    sample_rate: this.capturedSampleRate || this.audioCtx.sampleRate
+                }
             }));
         };
 

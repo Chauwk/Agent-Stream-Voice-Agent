@@ -290,7 +290,9 @@ async def browser_stream_endpoint(websocket: WebSocket):
         elif hasattr(sales_bot_engine, "connect_to_openai_enhanced"):
             logger.info(f"🌐 [Browser Widget] Connecting to OpenAI Realtime pipeline for {stream_id}")
             
-            # 1. Connect to OpenAI Realtime API with resolved agent config
+            # 1. Connect to OpenAI Realtime API
+            #    Pre-set sample rate to 24kHz (OpenAI Realtime PCM16 native rate)
+            sales_bot_engine.connection_sample_rates[stream_id] = 24000
             await sales_bot_engine.connect_to_openai_enhanced(stream_id, agent_config)
             
             # Verify connection succeeded
@@ -300,24 +302,26 @@ async def browser_stream_endpoint(websocket: WebSocket):
                 await websocket.close(code=1011)
                 return
 
-            # Save browser WebSocket in connections state map
-            sales_bot_engine.openai_connections[stream_id]["browser_websocket"] = websocket
+            # 2. Switch to PCM16 format for browser (override defaults which were set for SIP/telephony)
+            conn = sales_bot_engine.openai_connections[stream_id]
+            conn["browser_websocket"] = websocket
+            conn["input_format"] = "pcm16"
+            conn["output_format"] = "pcm16"
+            conn["sample_rate"] = 24000
+            # Override the session_config so configure_openai_session_enhanced sends pcm16 to OpenAI
+            conn["session_config"]["input_audio_format"] = "pcm16"
+            conn["session_config"]["output_audio_format"] = "pcm16"
+            
+            # 3. Re-send session.update with PCM16 format (first one was sent inside connect_to_openai_enhanced)
+            clean_config = {k: v for k, v in conn["session_config"].items() if not k.startswith('_')}
+            openai_ws = conn["websocket"]
+            await openai_ws.send(json.dumps({"type": "session.update", "session": clean_config}))
+            logger.info(f"✅ [Browser Widget] PCM16 session.update sent for {stream_id}")
 
-            # Configure input/output format as pcm16 @ 16kHz
-            sales_bot_engine.openai_connections[stream_id]["input_format"] = "pcm16"
-            sales_bot_engine.openai_connections[stream_id]["output_format"] = "pcm16"
-            sales_bot_engine.connection_sample_rates[stream_id] = 16000
-
-            # Override the session config so OpenAI knows it is receiving PCM16
-            session_config = sales_bot_engine.openai_connections[stream_id]["session_config"]
-            session_config['audio']['input']['format']['type'] = 'pcm16'
-            session_config['audio']['output']['format']['type'] = 'pcm16'
-
-            # 2. Configure Session & Send Initial Greeting
-            await sales_bot_engine.configure_openai_session_enhanced(stream_id, agent_config)
+            # 4. Trigger initial greeting
             await sales_bot_engine.send_initial_greeting_enhanced(stream_id, agent_config)
 
-            # 3. Main Loop: Receive microphone audio from Browser Widget
+            # 5. Main Loop: Receive microphone audio from Browser Widget
             while True:
                 data_str = await websocket.receive_text()
                 try:
@@ -325,9 +329,11 @@ async def browser_stream_endpoint(websocket: WebSocket):
                     if msg.get("event") == "media":
                         media_data = msg.get("media", {})
                         payload_b64 = media_data.get("payload", "")
+                        # Use sample_rate sent by widget (defaults to 44100 or 48000 on most browsers)
+                        mic_sample_rate = int(media_data.get("sample_rate", 44100))
                         if payload_b64:
                             pcm_bytes = base64.b64decode(payload_b64)
-                            await sales_bot_engine.send_audio_to_openai(stream_id, pcm_bytes, sample_rate=16000)
+                            await sales_bot_engine.send_audio_to_openai(stream_id, pcm_bytes, sample_rate=mic_sample_rate)
                 except Exception as msg_err:
                     logger.error(f"❌ Error handling browser audio payload: {msg_err}")
 

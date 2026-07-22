@@ -231,7 +231,7 @@ class Config:
     
     @classmethod
     def get_enhanced_session_config(cls, sample_rate: int, voice: str) -> Dict[str, Any]:
-        """Get enhanced session configuration"""
+        """Get enhanced session configuration — uses valid OpenAI Realtime API session.update schema"""
         instructions = (
             f"You are a professional sales representative named {cls.SALES_BOT_NAME} for {cls.COMPANY_NAME}. "
             "You must speak and respond EXCLUSIVELY in English. "
@@ -240,33 +240,20 @@ class Config:
             "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
         )
         return {
-            'type': 'realtime',
-            'model': cls.OPENAI_MODEL,
-            'output_modalities': ['audio'],
+            'modalities': ['audio', 'text'],
             'instructions': instructions,
-            'audio': {
-                'input': {
-                    'format': {
-                        'type': 'audio/pcmu'
-                    },
-                    'transcription': {
-                        'model': 'whisper-1'
-                    },
-                    'turn_detection': {
-                        'type': 'server_vad',
-                        'threshold': 0.5,
-                        'prefix_padding_ms': 300,
-                        'silence_duration_ms': 200,
-                        'create_response': True,
-                        'interrupt_response': False
-                    }
-                },
-                'output': {
-                    'format': {
-                        'type': 'audio/pcmu'
-                    },
-                    'voice': voice
-                }
+            'voice': voice,
+            'input_audio_format': 'g711_ulaw',
+            'output_audio_format': 'g711_ulaw',
+            'input_audio_transcription': {
+                'model': 'whisper-1'
+            },
+            'turn_detection': {
+                'type': 'server_vad',
+                'threshold': 0.5,
+                'prefix_padding_ms': 300,
+                'silence_duration_ms': 500,
+                'create_response': True,
             },
             'tools': [
                 {
@@ -276,66 +263,30 @@ class Config:
                 },
                 {
                     'type': 'function',
-                    'name': 'schedule_demo',
-                    'description': 'Schedule a product demonstration for a customer.',
-                    'parameters': {
-                        'type': 'object',
-                        'properties': {
-                            'customer_name': {'type': 'string', 'description': 'The name of the customer.'},
-                            'product_interest': {'type': 'string', 'description': 'The product they are interested in.'},
-                            'company': {'type': 'string', 'description': 'The company name.'},
-                            'contact_email': {'type': 'string', 'description': "The customer's email address."},
-                            'contact_phone': {'type': 'string', 'description': "The customer's phone number."},
-                            'preferred_date': {'type': 'string', 'description': 'Preferred date for the demo.'},
-                            'preferred_time': {'type': 'string', 'description': 'Preferred time for the demo.'},
-                            'additional_notes': {'type': 'string', 'description': 'Any additional notes.'}
-                        },
-                        'required': ['customer_name', 'product_interest']
-                    }
-                },
-                {
-                    'type': 'function',
-                    'name': 'send_pricing_info',
-                    'description': 'Send detailed pricing information to the customer.',
-                    'parameters': {
-                        'type': 'object',
-                        'properties': {
-                            'product': {'type': 'string', 'description': 'The product name.'},
-                            'company_size': {'type': 'string', 'description': 'The size/scale of the company.'},
-                            'contact_email': {'type': 'string', 'description': 'Email to send pricing to.'},
-                            'custom_requirements': {'type': 'string', 'description': 'Any custom requirements.'}
-                        },
-                        'required': ['product', 'contact_email']
-                    }
-                },
-                {
-                    'type': 'function',
-                    'name': 'transfer_to_human',
-                    'description': 'Transfer the call to a human sales agent.',
-                    'parameters': {
-                        'type': 'object',
-                        'properties': {
-                            'reason': {'type': 'string', 'description': 'Reason for the transfer.'},
-                            'customer_context': {'type': 'string', 'description': 'Context of the conversation so far.'},
-                            'urgency': {'type': 'string', 'description': 'Urgency level (low, medium, high).'}
-                        },
-                        'required': ['reason']
-                    }
-                },
-                {
-                    'type': 'function',
                     'name': 'query_knowledge_base',
                     'description': 'Search the company knowledge base for answers about services, products, pricing, custom offers, and company policies.',
                     'parameters': {
                         'type': 'object',
                         'properties': {
                             'query': {'type': 'string', 'description': 'The query to search in the knowledge base.'},
-                            'top_k': {'type': 'integer', 'description': 'Number of results to retrieve.', 'default': 3}
                         },
                         'required': ['query']
                     }
                 }
             ],
             'tool_choice': 'auto',
-            'max_output_tokens': 4096
-        } 
+            'temperature': cls.OPENAI_TEMPERATURE,
+            # Internal metadata — NOT sent to OpenAI, used by gateway to track format
+            '_input_sample_rate': 8000,
+            '_output_sample_rate': 8000,
+        }
+
+    @classmethod
+    def get_browser_session_config(cls, voice: str) -> Dict[str, Any]:
+        """Browser-specific session config using pcm16 at 24kHz — the native OpenAI Realtime format"""
+        base = cls.get_enhanced_session_config(24000, voice)
+        base['input_audio_format'] = 'pcm16'
+        base['output_audio_format'] = 'pcm16'
+        base['_input_sample_rate'] = 24000
+        base['_output_sample_rate'] = 24000
+        return base

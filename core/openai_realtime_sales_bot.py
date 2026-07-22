@@ -159,8 +159,8 @@ class OpenAIRealtimeSalesBot:
             if instructions:
                 session_config['instructions'] = instructions
             
-            input_format = session_config['audio']['input']['format']['type']
-            output_format = session_config['audio']['output']['format']['type']
+            input_format = session_config.get('input_audio_format', 'g711_ulaw')
+            output_format = session_config.get('output_audio_format', 'g711_ulaw')
             
             self.openai_connections[stream_id] = {
                 "websocket": openai_ws,
@@ -202,17 +202,19 @@ class OpenAIRealtimeSalesBot:
             session_config = openai_connection["session_config"]
             sample_rate = openai_connection["sample_rate"]
             
-            # Send enhanced session configuration
+            # Strip internal metadata keys (prefixed with _) before sending to OpenAI
+            clean_config = {k: v for k, v in session_config.items() if not k.startswith('_')}
+
             session_update = {
                 "type": "session.update",
-                "session": session_config
+                "session": clean_config
             }
             
             await openai_ws.send(json.dumps(session_update))
             
-            input_format = session_config['audio']['input']['format']['type']
-            output_format = session_config['audio']['output']['format']['type']
-            voice = session_config['audio']['output']['voice']
+            input_format = session_config.get('input_audio_format', 'g711_ulaw')
+            output_format = session_config.get('output_audio_format', 'g711_ulaw')
+            voice = session_config.get('voice', 'coral')
             
             logger.info(f"🔧 ENHANCED OPENAI SESSION CONFIGURED for {stream_id}")
             logger.info(f"   🎵 Sample Rate: {sample_rate}Hz")
