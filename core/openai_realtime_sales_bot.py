@@ -80,7 +80,7 @@ class OpenAIRealtimeSalesBot:
         logger.info(f"👤 Sales Rep: {Config.SALES_REP_NAME}")
         logger.info("📡 MODE: Direct SIP Trunking (cost-effective, no applet needed)")
 
-    async def connect_to_openai_enhanced(self, stream_id: str):
+    async def connect_to_openai_enhanced(self, stream_id: str, agent_config: dict = None):
         """Establish enhanced connection to OpenAI Realtime API with dynamic configuration"""
         try:
             sample_rate = self.connection_sample_rates.get(stream_id, self.default_sample_rate)
@@ -88,19 +88,19 @@ class OpenAIRealtimeSalesBot:
             
             # Resolve called virtual DID number and agent config first
             to_phone = "default"
-            agent_config = None
-            if self.sip_server and stream_id in self.sip_server.sip_calls:
-                sip_call = self.sip_server.sip_calls[stream_id]
-                from controllers.bot_controller import extract_phone_number_from_uri
-                to_phone = extract_phone_number_from_uri(sip_call.to_uri)
-                logger.info(f"Resolved called DID number: {to_phone}")
-                
-                # Resolve agent config dynamically
-                try:
-                    from core.agent_resolver import resolve_agent_config
-                    agent_config = await resolve_agent_config(to_phone)
-                except Exception as e:
-                    logger.error(f"⚠️ Failed to dynamically resolve agent for DID {to_phone}: {e}")
+            if agent_config is None:
+                if self.sip_server and stream_id in self.sip_server.sip_calls:
+                    sip_call = self.sip_server.sip_calls[stream_id]
+                    from controllers.bot_controller import extract_phone_number_from_uri
+                    to_phone = extract_phone_number_from_uri(sip_call.to_uri)
+                    logger.info(f"Resolved called DID number: {to_phone}")
+                    
+                    # Resolve agent config dynamically
+                    try:
+                        from core.agent_resolver import resolve_agent_config
+                        agent_config = await resolve_agent_config(to_phone)
+                    except Exception as e:
+                        logger.error(f"⚠️ Failed to dynamically resolve agent for DID {to_phone}: {e}")
 
             # Determine voice and instructions dynamically
             voice = self.openai_voice

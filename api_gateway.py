@@ -258,14 +258,20 @@ async def browser_stream_endpoint(websocket: WebSocket):
     try:
         # Check if running OpenAI Realtime Sales Bot
         if hasattr(sales_bot_engine, "connect_to_openai_enhanced"):
-            # 1. Connect to OpenAI Realtime API
-            await sales_bot_engine.connect_to_openai_enhanced(stream_id)
+            # 1. Connect to OpenAI Realtime API with resolved agent config
+            await sales_bot_engine.connect_to_openai_enhanced(stream_id, agent_config)
             
+            # Verify connection succeeded
+            if stream_id not in sales_bot_engine.openai_connections:
+                logger.error(f"❌ [Browser Widget] OpenAI Realtime connection failed for stream '{stream_id}'. closing connection.")
+                await websocket.send_json({"error": "Failed to connect to OpenAI Realtime API. Check server logs."})
+                await websocket.close(code=1011)
+                return
+
             # Configure input/output format as pcm16 @ 16kHz
-            if stream_id in sales_bot_engine.openai_connections:
-                sales_bot_engine.openai_connections[stream_id]["input_format"] = "pcm16"
-                sales_bot_engine.openai_connections[stream_id]["output_format"] = "pcm16"
-                sales_bot_engine.connection_sample_rates[stream_id] = 16000
+            sales_bot_engine.openai_connections[stream_id]["input_format"] = "pcm16"
+            sales_bot_engine.openai_connections[stream_id]["output_format"] = "pcm16"
+            sales_bot_engine.connection_sample_rates[stream_id] = 16000
 
             # 2. Configure Session & Send Initial Greeting
             await sales_bot_engine.configure_openai_session_enhanced(stream_id, agent_config)
