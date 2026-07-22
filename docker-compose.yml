@@ -24,7 +24,7 @@ services:
       
       # OpenAI Realtime Fallback
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=gpt-4o-realtime-preview-2024-12-17
+      - OPENAI_MODEL=${OPENAI_MODEL}
       - OPENAI_VOICE=coral
       
       # Gemini Configuration
