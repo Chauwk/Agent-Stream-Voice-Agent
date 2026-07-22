@@ -61,7 +61,13 @@ class VoiceAgentWidget extends HTMLElement {
 
     async fetchAgentDetails() {
         try {
-            const res = await fetch(`${this.serverUrl}/api/exotel-sip/agents/${this.agentId}/public`);
+            // Primary: modular public endpoint (used for SIP agents)
+            let res = await fetch(`${this.serverUrl}/api/exotel-sip/agents/${this.agentId}/public`);
+            if (!res.ok) {
+                // Fallback: OpenAI Realtime public endpoint
+                console.warn('VoiceAgentWidget: modular endpoint not found, trying OpenAI endpoint');
+                res = await fetch(`${this.serverUrl}/api/v1/agents/${this.agentId}`);
+            }
             if (res.ok) {
                 const data = await res.json();
                 if (data.name) this.agentName = data.name;
