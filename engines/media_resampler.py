@@ -31,6 +31,16 @@ class MediaResampler:
     def __init__(self):
         self.resampler_backend = getattr(config.Config, 'RESAMPLER_BACKEND', 'pydub')
         self.quality = getattr(config.Config, 'RESAMPLER_QUALITY', 'medium')
+        
+        # In Python 3.13+, audioop is removed, rendering pydub resampling useless without ffmpeg.
+        # Fall back to numpy-based resampling automatically.
+        try:
+            import audioop
+        except ImportError:
+            if self.resampler_backend == 'pydub':
+                logger.info("⚠️ audioop not available in this Python version. Switching MediaResampler backend to 'numpy'.")
+                self.resampler_backend = 'numpy'
+                
         logger.debug(f"MediaResampler initialized with {self.resampler_backend} backend")
     
     def resample_audio(
@@ -58,15 +68,77 @@ class MediaResampler:
             return audio_data
         
         try:
+            resampled = None
             if self.resampler_backend == 'scipy':
-                return self._resample_scipy(audio_data, from_rate, to_rate, channels, sample_width)
+                resampled = self._resample_scipy(audio_data, from_rate, to_rate, channels, sample_width)
             elif self.resampler_backend == 'librosa':
-                return self._resample_librosa(audio_data, from_rate, to_rate, channels, sample_width)
+                resampled = self._resample_librosa(audio_data, from_rate, to_rate, channels, sample_width)
+            elif self.resampler_backend == 'numpy':
+                resampled = self._resample_numpy(audio_data, from_rate, to_rate, channels, sample_width)
             else:
-                return self._resample_pydub(audio_data, from_rate, to_rate, channels, sample_width)
+                resampled = self._resample_pydub(audio_data, from_rate, to_rate, channels, sample_width)
+                
+            if resampled is not None:
+                return resampled
+                
+            # Fallback to robust numpy resampler if the chosen backend failed
+            logger.warning(f"⚠️ Primary resampler '{self.resampler_backend}' failed or returned None. Falling back to numpy.")
+            return self._resample_numpy(audio_data, from_rate, to_rate, channels, sample_width)
                 
         except Exception as e:
             logger.error(f"Resampling failed: {e}")
+            try:
+                return self._resample_numpy(audio_data, from_rate, to_rate, channels, sample_width)
+            except Exception as final_err:
+                logger.error(f"Fallback numpy resampling also failed: {final_err}")
+                return None
+
+    def _resample_numpy(
+        self, 
+        audio_data: bytes, 
+        from_rate: int, 
+        to_rate: int,
+        channels: int,
+        sample_width: int
+    ) -> Optional[bytes]:
+        """Resample using numpy linear interpolation (highly robust, zero system dependencies)"""
+        try:
+            if sample_width == 2:
+                dtype = np.int16
+            elif sample_width == 4:
+                dtype = np.int32
+            else:
+                dtype = np.int16 # Default signed 16-bit
+                
+            audio_array = np.frombuffer(audio_data, dtype=dtype)
+            
+            if channels > 1:
+                # Reshape to multi-channel format
+                audio_array = audio_array.reshape(-1, channels)
+                num_frames = len(audio_array)
+                new_num_frames = int(num_frames * to_rate / from_rate)
+                
+                old_indices = np.arange(num_frames)
+                new_indices = np.linspace(0, num_frames - 1, new_num_frames)
+                
+                resampled_channels = []
+                for ch in range(channels):
+                    ch_data = audio_array[:, ch]
+                    resampled_ch = np.interp(new_indices, old_indices, ch_data).astype(dtype)
+                    resampled_channels.append(resampled_ch)
+                    
+                resampled_audio = np.column_stack(resampled_channels)
+            else:
+                num_samples = len(audio_array)
+                new_num_samples = int(num_samples * to_rate / from_rate)
+                
+                old_indices = np.arange(num_samples)
+                new_indices = np.linspace(0, num_samples - 1, new_num_samples)
+                resampled_audio = np.interp(new_indices, old_indices, audio_array).astype(dtype)
+                
+            return resampled_audio.tobytes()
+        except Exception as e:
+            logger.error(f"Numpy resampling execution failed: {e}")
             return None
     
     def _resample_scipy(
