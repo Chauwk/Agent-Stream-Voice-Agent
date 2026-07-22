@@ -941,16 +941,29 @@ class OpenAIRealtimeSalesBot:
                 # Fallback: assume already 16kHz PCM
                 playback_audio = openai_audio
                 
-            # Check if this is a browser widget connection
+            # Check if this is a browser widget connection — send raw audio without resampling
             browser_ws = openai_config.get("browser_websocket")
             if browser_ws:
                 try:
-                    playback_audio_b64 = base64.b64encode(playback_audio).decode('utf-8')
+                    # For browser: send PCM16 at its native rate (24kHz for OpenAI Realtime)
+                    # The widget will create the AudioBuffer at the correct sample rate
+                    if output_format in ["g711_ulaw", "audio/pcmu"]:
+                        # ulaw -> pcm16 at 8kHz, then upsample to 24kHz for browser
+                        pcm_8k = self.convert_ulaw_to_pcm(openai_audio)
+                        browser_audio = self._resample_audio(pcm_8k, 8000, 24000)
+                        browser_sample_rate = 24000
+                    else:
+                        # Already PCM16 at 24kHz — send as-is
+                        browser_audio = openai_audio
+                        browser_sample_rate = 24000
+
+                    browser_audio_b64 = base64.b64encode(browser_audio).decode('utf-8')
                     await browser_ws.send_json({
                         "event": "audio",
-                        "audio": playback_audio_b64
+                        "audio": browser_audio_b64,
+                        "sample_rate": browser_sample_rate
                     })
-                    logger.debug(f"🔊 OPENAI AUDIO DELTA ROUTED TO BROWSER: {len(playback_audio)} bytes PCM16 @ 16kHz")
+                    logger.debug(f"🔊 OPENAI AUDIO → BROWSER: {len(browser_audio)} bytes PCM16 @ {browser_sample_rate}Hz")
                     return
                 except Exception as ws_err:
                     logger.error(f"❌ Error sending audio delta to browser WebSocket: {ws_err}")

@@ -61,13 +61,7 @@ class VoiceAgentWidget extends HTMLElement {
 
     async fetchAgentDetails() {
         try {
-            // Primary: modular public endpoint (used for SIP agents)
-            let res = await fetch(`${this.serverUrl}/api/exotel-sip/agents/${this.agentId}/public`);
-            if (!res.ok) {
-                // Fallback: OpenAI Realtime public endpoint
-                console.warn('VoiceAgentWidget: modular endpoint not found, trying OpenAI endpoint');
-                res = await fetch(`${this.serverUrl}/api/v1/agents/${this.agentId}`);
-            }
+            const res = await fetch(`${this.serverUrl}/api/exotel-sip/agents/${this.agentId}/public`);
             if (res.ok) {
                 const data = await res.json();
                 if (data.name) this.agentName = data.name;
@@ -497,9 +491,9 @@ class VoiceAgentWidget extends HTMLElement {
         try {
             this.updateState('connecting', 'Connecting...');
 
-            // Initialize Web Audio Context
+            // Initialize Web Audio Context at 24kHz to match OpenAI Realtime output natively
             const AudioCtx = window.AudioContext || window.webkitAudioContext;
-            this.audioCtx = new AudioCtx({ sampleRate: 16000 });
+            this.audioCtx = new AudioCtx({ sampleRate: 24000 });
             if (this.audioCtx.state === 'suspended') {
                 await this.audioCtx.resume();
             }
@@ -508,7 +502,7 @@ class VoiceAgentWidget extends HTMLElement {
             this.micStream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     channelCount: 1,
-                    sampleRate: 16000,
+                    sampleRate: 16000,  // mic capture stays at 16kHz for STT
                     echoCancellation: true,
                     noiseSuppression: true
                 }
@@ -594,7 +588,8 @@ class VoiceAgentWidget extends HTMLElement {
             if (data.event === 'audio' && data.audio) {
                 // Incoming audio response from AI agent
                 this.updateState('speaking', 'Speaking...');
-                this.playAudioChunk(data.audio);
+                const sampleRate = data.sample_rate || 24000; // default to 24kHz (OpenAI Realtime native)
+                this.playAudioChunk(data.audio, sampleRate);
             } else if (data.event === 'status') {
                 if (data.status === 'listening') {
                     this.updateState('listening', 'Listening...');
@@ -611,20 +606,21 @@ class VoiceAgentWidget extends HTMLElement {
         }
     }
 
-    async playAudioChunk(base64Audio) {
+    async playAudioChunk(base64Audio, sampleRate = 24000) {
         if (!this.audioCtx) return;
 
         try {
             const arrayBuffer = this.base64ToArrayBuffer(base64Audio);
             
-            // Decode PCM16 / WAV or WebAudio buffer
+            // Decode raw PCM16 little-endian bytes to Float32
             const int16Array = new Int16Array(arrayBuffer);
             const float32Array = new Float32Array(int16Array.length);
             for (let i = 0; i < int16Array.length; i++) {
                 float32Array[i] = int16Array[i] / (int16Array[i] < 0 ? 0x8000 : 0x7FFF);
             }
 
-            const audioBuffer = this.audioCtx.createBuffer(1, float32Array.length, 16000);
+            // Use server-reported sample rate so audio plays at correct pitch/speed
+            const audioBuffer = this.audioCtx.createBuffer(1, float32Array.length, sampleRate);
             audioBuffer.getChannelData(0).set(float32Array);
 
             const sourceNode = this.audioCtx.createBufferSource();
