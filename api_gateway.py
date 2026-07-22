@@ -300,46 +300,22 @@ async def browser_stream_endpoint(websocket: WebSocket):
                 await websocket.close(code=1011)
                 return
 
+            # Save browser WebSocket in connections state map
+            sales_bot_engine.openai_connections[stream_id]["browser_websocket"] = websocket
+
             # Configure input/output format as pcm16 @ 16kHz
             sales_bot_engine.openai_connections[stream_id]["input_format"] = "pcm16"
             sales_bot_engine.openai_connections[stream_id]["output_format"] = "pcm16"
             sales_bot_engine.connection_sample_rates[stream_id] = 16000
 
+            # Override the session config so OpenAI knows it is receiving PCM16
+            session_config = sales_bot_engine.openai_connections[stream_id]["session_config"]
+            session_config['audio']['input']['format']['type'] = 'pcm16'
+            session_config['audio']['output']['format']['type'] = 'pcm16'
+
             # 2. Configure Session & Send Initial Greeting
             await sales_bot_engine.configure_openai_session_enhanced(stream_id, agent_config)
             await sales_bot_engine.send_initial_greeting_enhanced(stream_id, agent_config)
-
-            # Task to forward OpenAI audio deltas to Browser Widget
-            async def forward_openai_to_browser():
-                try:
-                    openai_ws = sales_bot_engine.openai_connections[stream_id]["websocket"]
-                    async for message in openai_ws:
-                        try:
-                            data = json.loads(message)
-                            event_type = data.get("type", "")
-                            
-                            if event_type == "response.output_audio.delta":
-                                delta_b64 = data.get("delta", "")
-                                if delta_b64:
-                                    await websocket.send_json({
-                                        "event": "audio",
-                                        "audio": delta_b64
-                                    })
-                            elif event_type == "input_audio_buffer.speech_started":
-                                await websocket.send_json({
-                                    "event": "clear"
-                                })
-                            elif event_type == "response.done":
-                                await websocket.send_json({
-                                    "event": "status",
-                                    "status": "listening"
-                                })
-                        except Exception as inner_err:
-                            logger.error(f"❌ Error in browser forward task inner loop: {inner_err}")
-                except Exception as task_err:
-                    logger.debug(f"Browser forward task ended for {stream_id}: {task_err}")
-
-            forward_task = asyncio.create_task(forward_openai_to_browser())
 
             # 3. Main Loop: Receive microphone audio from Browser Widget
             while True:

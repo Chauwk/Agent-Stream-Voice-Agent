@@ -911,25 +911,24 @@ class OpenAIRealtimeSalesBot:
             logger.error(f"❌ Error sending audio to OpenAI: {e}")
 
     async def handle_openai_audio_delta_enhanced(self, stream_id: str, data: dict):
-        """Handle audio response from OpenAI and send to SIP server for playback"""
+        """Handle audio response from OpenAI and send to SIP server or browser WebSocket for playback"""
         try:
-            if not self.sip_server:
-                logger.warning(f"⚠️ SIP Server not initialized, cannot play OpenAI audio delta")
-                return
-                
             # Get audio from OpenAI (base64 encoded)
             audio_delta = data.get("delta", "")
             if not audio_delta:
                 return
             
             # Get connection settings
-            openai_config = self.openai_connections[stream_id]
+            openai_config = self.openai_connections.get(stream_id)
+            if not openai_config:
+                return
+                
             output_format = openai_config.get("output_format", "g711_ulaw")
             
             # Decode audio
             openai_audio = base64.b64decode(audio_delta)
             
-            # Convert to 16kHz PCM16 Mono expected by PJSUA2
+            # Convert to 16kHz PCM16 Mono expected by browser/PJSUA2
             if output_format in ["g711_ulaw", "audio/pcmu"]:
                 # Convert 8kHz u-law to 8kHz PCM16
                 pcm_8k = self.convert_ulaw_to_pcm(openai_audio)
@@ -942,6 +941,25 @@ class OpenAIRealtimeSalesBot:
                 # Fallback: assume already 16kHz PCM
                 playback_audio = openai_audio
                 
+            # Check if this is a browser widget connection
+            browser_ws = openai_config.get("browser_websocket")
+            if browser_ws:
+                try:
+                    playback_audio_b64 = base64.b64encode(playback_audio).decode('utf-8')
+                    await browser_ws.send_json({
+                        "event": "audio",
+                        "audio": playback_audio_b64
+                    })
+                    logger.debug(f"🔊 OPENAI AUDIO DELTA ROUTED TO BROWSER: {len(playback_audio)} bytes PCM16 @ 16kHz")
+                    return
+                except Exception as ws_err:
+                    logger.error(f"❌ Error sending audio delta to browser WebSocket: {ws_err}")
+                    return
+
+            if not self.sip_server:
+                logger.warning(f"⚠️ SIP Server not initialized, cannot play OpenAI audio delta")
+                return
+
             # Queue to PJSUA2 playback buffer
             await self.sip_server.send_audio_to_rtp(stream_id, playback_audio)
             logger.debug(f"🔊 OPENAI AUDIO DELTA ROUTED TO RTP: {len(openai_audio)} bytes {output_format} -> {len(playback_audio)} bytes PCM16 @ 16kHz")
