@@ -82,6 +82,9 @@ class OpenAIRealtimeSalesBot:
 
     async def connect_to_openai_enhanced(self, stream_id: str, agent_config: dict = None):
         """Establish enhanced connection to OpenAI Realtime API with dynamic configuration"""
+        if getattr(Config, 'DISABLE_AI_ENGINES', False):
+            logger.warning(f"🚫 Skipping OpenAI connection for {stream_id} because DISABLE_AI_ENGINES is True")
+            return
         try:
             sample_rate = self.connection_sample_rates.get(stream_id, self.default_sample_rate)
             logger.info(f"🔗 CONNECTING TO OPENAI (ENHANCED) for {stream_id} @ {sample_rate}Hz")
@@ -267,6 +270,10 @@ class OpenAIRealtimeSalesBot:
         """Handle enhanced responses from OpenAI Realtime API"""
         try:
             async for message in openai_ws:
+                if getattr(Config, 'DISABLE_AI_ENGINES', False):
+                    logger.warning(f"🚫 AI Engines disabled at runtime. Closing OpenAI connection for {stream_id}")
+                    await openai_ws.close()
+                    break
                 try:
                     data = json.loads(message)
                     event_type = data.get("type", "")
@@ -820,6 +827,8 @@ class OpenAIRealtimeSalesBot:
             audio_chunk: PCM16 audio data
             sample_rate: Audio sample rate (8000, 16000, 24000)
         """
+        if getattr(Config, 'DISABLE_AI_ENGINES', False):
+            return
         try:
             # Map call_id to stream_id for compatibility with existing methods
             stream_id = call_id
