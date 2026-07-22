@@ -759,12 +759,20 @@ class ModularSalesBot:
                 session_state["local_user_speaking"] = True
                 session_state["user_speaking"] = True
                 
-                if self.is_bot_actively_speaking(call_id):
+                # Prevent self-interruption loop due to echo
+                bot_is_playing_audio = False
+                if self.sip_server:
+                    call_state = self.sip_server.sip_calls.get(call_id)
+                    if call_state and (call_state.is_playing or len(call_state.playback_buffer) > 0):
+                        bot_is_playing_audio = True
+
+                if bot_is_playing_audio:
                     logger.info(f"🎤 LOCAL VAD: CUSTOMER STARTED SPEAKING (Interruption - IGNORED local VAD to prevent self-interruption/echo) for call {call_id} (RMS={rms:.1f})")
-                    # Do NOT call self._handle_customer_interruption(call_id) here.
-                    # Rely on Deepgram word transcription for precise barge-in.
+                    # Rely on Deepgram word transcription for precise barge-in while playing audio
                 else:
-                    logger.info(f"🎤 LOCAL VAD: CUSTOMER STARTED SPEAKING (Bot is silent) for call {call_id} (RMS={rms:.1f})")
+                    logger.info(f"🎤 LOCAL VAD: CUSTOMER STARTED SPEAKING (Interruption - TRIGGERED) for call {call_id} (RMS={rms:.1f})")
+                    # If we are not playing audio (bot is silent, thinking, or synthesizing), we can immediately interrupt
+                    await self._handle_customer_interruption(call_id)
         else:
             session_state["consecutive_silence_frames"] += 1
             session_state["consecutive_speech_frames"] = 0
