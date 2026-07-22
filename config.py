@@ -258,7 +258,7 @@ class Config:
                         'prefix_padding_ms': 300,
                         'silence_duration_ms': 200,
                         'create_response': True,
-                        'interrupt_response': True
+                        'interrupt_response': False
                     }
                 },
                 'output': {

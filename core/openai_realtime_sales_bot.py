@@ -307,8 +307,19 @@ class OpenAIRealtimeSalesBot:
                         openai_config = self.openai_connections.get(stream_id)
                         if openai_config:
                             openai_config["user_speaking"] = True
-                        # Enhanced interruption handling
-                        await self._handle_customer_interruption(stream_id, openai_ws)
+                        
+                        # Prevent self-interruption loop due to echo
+                        bot_is_speaking = False
+                        if self.sip_server and stream_id in self.sip_server.sip_calls:
+                            call_state = self.sip_server.sip_calls[stream_id]
+                            if call_state.is_playing or len(call_state.playback_buffer) > 0:
+                                bot_is_speaking = True
+                                
+                        if bot_is_speaking:
+                            logger.info(f"🎤 CUSTOMER STARTED SPEAKING (Interruption - IGNORED to prevent self-interruption/echo) for {stream_id}")
+                        else:
+                            # Enhanced interruption handling
+                            await self._handle_customer_interruption(stream_id, openai_ws)
                     elif event_type == "input_audio_buffer.speech_stopped":
                         logger.info(f"🎤 CUSTOMER STOPPED SPEAKING (enhanced) for {stream_id}")
                         openai_config = self.openai_connections.get(stream_id)
