@@ -482,6 +482,40 @@ async def get_agent_details(
         "data": agent
     }
 
+@router.get(
+    "/{id}/public",
+    status_code=status.HTTP_200_OK,
+    summary="Get Public Agent Details",
+    description="Retrieves public styling and metadata (name, description, avatar) for widget rendering."
+)
+async def get_public_agent_details(id: str):
+    async def run_find():
+        db = mongo_db.client.get_default_database()
+        agents_collection = db['agents']
+        agent = await agents_collection.find_one({"agentId": id})
+        if not agent:
+            agent = await agents_collection.find_one({"_id": id})
+        return agent
+
+    try:
+        agent = await safe_mongo_op(run_find)
+    except Exception as e:
+        logger.error(f"Error querying agent in MongoDB: {e}")
+        agent = None
+
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"success": False, "message": "Agent not found"}
+        )
+    
+    return {
+        "success": True,
+        "name": agent.get("name", "AI Assistant"),
+        "description": agent.get("description", ""),
+        "avatar_url": agent.get("avatar_url", "")
+    }
+
 @router.put(
     "/{id}",
     status_code=status.HTTP_200_OK,

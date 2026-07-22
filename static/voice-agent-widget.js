@@ -61,7 +61,7 @@ class VoiceAgentWidget extends HTMLElement {
 
     async fetchAgentDetails() {
         try {
-            const res = await fetch(`${this.serverUrl}/api/v1/agents/${this.agentId}`);
+            const res = await fetch(`${this.serverUrl}/api/exotel-sip/agents/${this.agentId}/public`);
             if (res.ok) {
                 const data = await res.json();
                 if (data.name) this.agentName = data.name;
