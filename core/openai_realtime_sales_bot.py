@@ -566,22 +566,35 @@ class OpenAIRealtimeSalesBot:
         if self.sip_server:
             await self.sip_server.cleanup_call(stream_id)
 
-    def _resample_audio(self, audio_data: bytes, from_rate: int, to_rate: int) -> bytes:
-        """Resample audio between different sample rates"""
+    def _resample_audio(self, audio_data: bytes, from_rate: int, to_rate: int, stream_id: str = None, state_key: str = None) -> bytes:
+        """Resample audio between different sample rates using audioop.ratecv (sample-exact & stateful)"""
         if from_rate == to_rate:
             return audio_data
             
         try:
+            # Look up existing resampler state if session is active
+            state = None
+            connection = None
+            if stream_id and state_key and hasattr(self, 'openai_connections'):
+                connection = self.openai_connections.get(stream_id)
+                if connection:
+                    state = connection.get(f"{state_key}_resample_state")
+
             # Primary: audioop.ratecv — stdlib, sample-exact, no rounding drift
             import audioop
-            resampled, _ = audioop.ratecv(
+            resampled, new_state = audioop.ratecv(
                 audio_data,
                 2,          # sample width: 2 bytes = 16-bit
                 1,          # mono
                 from_rate,
                 to_rate,
-                None        # no state (stateless per-chunk resampling)
+                state       # pass state to keep phase continuity
             )
+            
+            # Save new state for the next chunk
+            if connection and state_key:
+                connection[f"{state_key}_resample_state"] = new_state
+                
             logger.debug(f"🔄 RESAMPLED AUDIO (audioop): {from_rate}Hz → {to_rate}Hz, {len(audio_data)} → {len(resampled)} bytes")
             return resampled
                 
@@ -883,14 +896,14 @@ class OpenAIRealtimeSalesBot:
                 # Exotel/OpenAI expects 8kHz u-law.
                 # If incoming is 16kHz PCM16, resample to 8kHz PCM16 first.
                 if sample_rate != 8000:
-                    processed_audio = self._resample_audio(processed_audio, sample_rate, 8000)
+                    processed_audio = self._resample_audio(processed_audio, sample_rate, 8000, stream_id=stream_id, state_key="input")
                 # Convert 8kHz PCM16 to 8kHz u-law
                 openai_audio = self.convert_pcm_to_ulaw(processed_audio)
             elif input_format == "pcm16":
                 # OpenAI expects 24kHz PCM16.
                 # If incoming is 16kHz, resample 16kHz PCM16 -> 24kHz PCM16.
                 if sample_rate != 24000:
-                    openai_audio = self._resample_audio(processed_audio, sample_rate, 24000)
+                    openai_audio = self._resample_audio(processed_audio, sample_rate, 24000, stream_id=stream_id, state_key="input")
                 else:
                     openai_audio = processed_audio
             else:
@@ -936,10 +949,10 @@ class OpenAIRealtimeSalesBot:
                 # Convert 8kHz u-law to 8kHz PCM16
                 pcm_8k = self.convert_ulaw_to_pcm(openai_audio)
                 # Resample 8kHz PCM16 -> 16kHz PCM16
-                playback_audio = self._resample_audio(pcm_8k, 8000, 16000)
+                playback_audio = self._resample_audio(pcm_8k, 8000, 16000, stream_id=stream_id, state_key="output")
             elif output_format == "pcm16":
                 # Resample 24kHz PCM16 -> 16kHz PCM16
-                playback_audio = self._resample_audio(openai_audio, 24000, 16000)
+                playback_audio = self._resample_audio(openai_audio, 24000, 16000, stream_id=stream_id, state_key="output")
             else:
                 # Fallback: assume already 16kHz PCM
                 playback_audio = openai_audio
@@ -953,7 +966,7 @@ class OpenAIRealtimeSalesBot:
                     if output_format in ["g711_ulaw", "audio/pcmu"]:
                         # ulaw -> pcm16 at 8kHz, then upsample to 24kHz for browser
                         pcm_8k = self.convert_ulaw_to_pcm(openai_audio)
-                        browser_audio = self._resample_audio(pcm_8k, 8000, 24000)
+                        browser_audio = self._resample_audio(pcm_8k, 8000, 24000, stream_id=stream_id, state_key="browser_output")
                         browser_sample_rate = 24000
                     else:
                         # Already PCM16 at 24kHz — send as-is
