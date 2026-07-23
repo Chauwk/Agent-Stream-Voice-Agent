@@ -456,12 +456,13 @@ class SIPServer:
             call_state = self.sip_calls[call_id]
             logger.info(f"🌉 BRIDGING SIP CALL {call_id} to OpenAI")
             
-            # CRITICAL: Pin the sample rate to 16kHz for SIP calls.
+            # CRITICAL: Pin the sample rate to 16kHz for SIP calls if using OpenAI Realtime.
             # The PJSIP media port is configured at 16kHz (fmt.clockRate = 16000).
             # This prevents any leftover browser session rate (e.g. 24kHz) from
             # leaking into this SIP connection via the shared connection_sample_rates dict,
             # which would cause the wrong resample ratio and produce static/noise.
-            self.openai_bot.connection_sample_rates[call_id] = 16000
+            if hasattr(self.openai_bot, 'connection_sample_rates'):
+                self.openai_bot.connection_sample_rates[call_id] = 16000
             
             # Connect to OpenAI Realtime API
             await self.openai_bot.connect_to_openai_enhanced(call_id)
