@@ -572,29 +572,30 @@ class OpenAIRealtimeSalesBot:
             return audio_data
             
         try:
-            # Use the media resampler for high-quality resampling
-            if not hasattr(self, 'resampler') or self.resampler is None:
-                from engines.media_resampler import MediaResampler
-                self.resampler = MediaResampler()
-            
-            resampled = self.resampler.resample_audio(
-                audio_data=audio_data,
-                from_rate=from_rate,
-                to_rate=to_rate,
-                channels=1,
-                sample_width=2
+            # Primary: audioop.ratecv — stdlib, sample-exact, no rounding drift
+            import audioop
+            resampled, _ = audioop.ratecv(
+                audio_data,
+                2,          # sample width: 2 bytes = 16-bit
+                1,          # mono
+                from_rate,
+                to_rate,
+                None        # no state (stateless per-chunk resampling)
             )
-            
-            if resampled:
-                logger.debug(f"🔄 RESAMPLED AUDIO: {from_rate}Hz → {to_rate}Hz")
-                return resampled
-            else:
-                logger.warning(f"⚠️ RESAMPLING FAILED, using original audio")
-                return audio_data
+            logger.debug(f"🔄 RESAMPLED AUDIO (audioop): {from_rate}Hz → {to_rate}Hz, {len(audio_data)} → {len(resampled)} bytes")
+            return resampled
                 
         except Exception as e:
-            logger.error(f"❌ Error resampling audio: {e}")
-            return audio_data
+            logger.warning(f"⚠️ audioop.ratecv failed ({e}), falling back to pydub")
+            try:
+                from pydub import AudioSegment
+                seg = AudioSegment(data=audio_data, sample_width=2, frame_rate=from_rate, channels=1)
+                resampled_bytes = seg.set_frame_rate(to_rate).raw_data
+                logger.debug(f"🔄 RESAMPLED AUDIO (pydub fallback): {from_rate}Hz → {to_rate}Hz")
+                return resampled_bytes
+            except Exception as e2:
+                logger.error(f"❌ All resampling failed: {e2}. Returning original audio (may cause distortion).")
+                return audio_data
 
     def apply_noise_suppression(self, audio_data: bytes, sample_rate: int) -> bytes:
         """Enhanced noise suppression with sample rate awareness"""
