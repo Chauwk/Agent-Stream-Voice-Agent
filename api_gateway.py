@@ -280,9 +280,11 @@ async def browser_stream_endpoint(websocket: WebSocket):
                     if msg.get("event") == "media":
                         media_data = msg.get("media", {})
                         payload_b64 = media_data.get("payload", "")
+                        # Read actual mic sample rate sent by widget (44100 or 48000 typical)
+                        mic_sample_rate = int(media_data.get("sample_rate", 44100))
                         if payload_b64:
                             pcm_bytes = base64.b64decode(payload_b64)
-                            await sales_bot_engine.send_audio_to_openai(stream_id, pcm_bytes, sample_rate=16000)
+                            await sales_bot_engine.send_audio_to_openai(stream_id, pcm_bytes, sample_rate=mic_sample_rate)
                 except Exception as msg_err:
                     logger.error(f"❌ Error handling browser modular audio payload: {msg_err}")
 

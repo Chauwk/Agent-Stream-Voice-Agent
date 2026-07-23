@@ -436,7 +436,8 @@ class ModularSalesBot:
                 base64_audio = base64.b64encode(pcm_audio).decode('utf-8')
                 await browser_ws.send_json({
                     "event": "audio",
-                    "audio": base64_audio
+                    "audio": base64_audio,
+                    "sample_rate": 16000  # Sarvam TTS outputs PCM16 at 16kHz
                 })
                 return
             except Exception as e:
@@ -800,8 +801,31 @@ class ModularSalesBot:
         dg_ws = session_state.get("deepgram_ws")
         if dg_ws and dg_ws.state == State.OPEN:
             try:
+                # Resample to 16kHz if needed (Deepgram is always connected at 16kHz)
+                # Browser mic audio typically arrives at 44100 or 48000 Hz native rate
+                send_chunk = audio_chunk
+                if sample_rate != 16000:
+                    try:
+                        import audioop
+                        send_chunk, _ = audioop.ratecv(audio_chunk, 2, 1, sample_rate, 16000, None)
+                    except ImportError:
+                        try:
+                            import numpy as np
+                            samples = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32)
+                            new_length = int(len(samples) * 16000 / sample_rate)
+                            resampled = np.interp(
+                                np.linspace(0, len(samples) - 1, new_length),
+                                np.arange(len(samples)),
+                                samples
+                            ).astype(np.int16)
+                            send_chunk = resampled.tobytes()
+                        except Exception as np_err:
+                            logger.warning(f"⚠️ Numpy resampling failed: {np_err}. Sending raw audio.")
+                    except Exception as re_err:
+                        logger.warning(f"⚠️ audioop resampling failed: {re_err}. Sending raw.")
+
                 # Direct binary send of PCM16 data to Deepgram
-                await dg_ws.send(audio_chunk)
+                await dg_ws.send(send_chunk)
             except Exception as e:
                 logger.error(f"❌ Error sending audio chunk to Deepgram for call {call_id}: {e}")
 
