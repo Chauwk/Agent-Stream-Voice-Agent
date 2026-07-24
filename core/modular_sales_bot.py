@@ -508,6 +508,23 @@ class ModularSalesBot:
                         outbound_record = record
                         logger.info(f"📞 Matches! Detected OUTBOUND call to customer: {record.get('customer_name')}")
                         break
+
+            # Fallback: if no exact match by phone number, check for any recently initiated call in the last 120 seconds
+            if not outbound_record:
+                import time
+                now = time.time()
+                newest_record = None
+                newest_time = 0
+                for call_sid, record in _call_records_cache.items():
+                    if record.get("status") in ["initiated", "ringing"]:
+                        record_time = record.get("timestamp", 0)
+                        if now - record_time < 120:
+                            if record_time > newest_time:
+                                newest_time = record_time
+                                newest_record = record
+                if newest_record:
+                    outbound_record = newest_record
+                    logger.info(f"📞 Fallback MATCH: Matched recent outbound call to customer {outbound_record.get('customer_name')} (initiated {int(now - newest_time)}s ago)")
                         
         if agent_config is None and session_to_phone != "default":
             # Resolve agent config dynamically

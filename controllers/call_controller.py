@@ -56,12 +56,14 @@ async def initiate_outbound_call(phone_number: str, customer_name: str, context:
         logger.info(f"✅ [CallController] Call successfully initiated. SID: {call_sid}")
         
         # Save details inside local memory cache record for telemetry tracking
+        import time
         record = {
             "call_sid": call_sid,
             "phone_number": phone_number,
             "customer_name": customer_name,
             "status": "initiated",
             "context": context or {},
+            "timestamp": time.time(),
             "error": None
         }
         _call_records_cache[call_sid] = record
