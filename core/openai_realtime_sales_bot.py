@@ -167,16 +167,17 @@ class OpenAIRealtimeSalesBot:
                     "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
                 )
                 first_message = f"Hello {customer_name}! I'm {agent_name} calling back from the sales team at {Config.COMPANY_NAME}. How can I help you today?"
-            elif agent_config:
+            else:
+                # Fallback: Default to Outbound instructions for all other calls
                 instructions = (
-                    f"You are a professional sales representative named {agent_name}. Here are your custom instructions:\n"
-                    f"{agent_instructions}\n\n"
+                    f"You are a professional sales representative named {agent_name} for {Config.COMPANY_NAME}. "
+                    "You are making an OUTBOUND call to a customer. "
                     "You must speak and respond EXCLUSIVELY in English. "
-                    "Even if the user speaks in another language, or if there is noise, keep your responses in English. "
                     "Keep responses very concise, short, and natural (1-2 sentences). "
+                    f"Greet them, state that you are calling them back from the sales team at {Config.COMPANY_NAME}, and ask how you can help them today. "
                     "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
                 )
-                first_message = agent_config.get("firstMessage")
+                first_message = (agent_config.get("firstMessage") if agent_config else None) or f"Hello! I'm {agent_name} calling back from the sales team at {Config.COMPANY_NAME}. How can I help you today?"
 
             # Enhanced URL for latest OpenAI Realtime API
             url = f"wss://api.openai.com/v1/realtime?model={self.openai_model}"
