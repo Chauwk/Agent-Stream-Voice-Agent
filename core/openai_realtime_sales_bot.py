@@ -91,23 +91,40 @@ class OpenAIRealtimeSalesBot:
             
             # Resolve called virtual DID number and agent config first
             to_phone = "default"
-            if agent_config is None:
-                if self.sip_server and stream_id in self.sip_server.sip_calls:
-                    sip_call = self.sip_server.sip_calls[stream_id]
-                    from controllers.bot_controller import extract_phone_number_from_uri
-                    to_phone = extract_phone_number_from_uri(sip_call.to_uri)
-                    logger.info(f"Resolved called DID number: {to_phone}")
-                    
-                    # Resolve agent config dynamically
-                    try:
-                        from core.agent_resolver import resolve_agent_config
-                        agent_config = await resolve_agent_config(to_phone)
-                    except Exception as e:
-                        logger.error(f"⚠️ Failed to dynamically resolve agent for DID {to_phone}: {e}")
+            outbound_record = None
+            if self.sip_server and stream_id in self.sip_server.sip_calls:
+                sip_call = self.sip_server.sip_calls[stream_id]
+                from controllers.bot_controller import extract_phone_number_from_uri
+                to_phone = extract_phone_number_from_uri(sip_call.to_uri)
+                logger.info(f"Resolved called DID number: {to_phone}")
+                
+                # Check if this is an outbound call to a customer
+                from controllers.call_controller import _call_records_cache
+                caller_phone = extract_phone_number_from_uri(sip_call.from_uri)
+                clean_caller = "".join(filter(str.isdigit, caller_phone))[-10:]
+                if clean_caller:
+                    for call_sid, record in _call_records_cache.items():
+                        record_phone = record.get("phone_number", "")
+                        clean_record = "".join(filter(str.isdigit, record_phone))[-10:]
+                        if clean_record == clean_caller:
+                            outbound_record = record
+                            logger.info(f"📞 Detected OUTBOUND call to customer: {record.get('customer_name')}")
+                            break
+                            
+            if agent_config is None and to_phone != "default":
+                # Resolve agent config dynamically
+                try:
+                    from core.agent_resolver import resolve_agent_config
+                    agent_config = await resolve_agent_config(to_phone)
+                except Exception as e:
+                    logger.error(f"⚠️ Failed to dynamically resolve agent for DID {to_phone}: {e}")
 
             # Determine voice and instructions dynamically
             voice = self.openai_voice
             instructions = None
+            agent_name = Config.SALES_BOT_NAME
+            first_message = None
+            
             if agent_config:
                 agent_name = agent_config.get("name", Config.SALES_BOT_NAME)
                 agent_instructions = agent_config.get("instructions", "")
@@ -116,7 +133,21 @@ class OpenAIRealtimeSalesBot:
                 candidate_voice = agent_config.get("voiceId", "").lower()
                 if candidate_voice in ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]:
                     voice = candidate_voice
-                    
+            else:
+                agent_instructions = ""
+
+            if outbound_record:
+                customer_name = outbound_record.get("customer_name", "Customer")
+                instructions = (
+                    f"You are a professional sales representative named {agent_name} for {Config.COMPANY_NAME}. "
+                    f"You are making an OUTBOUND call to the customer named {customer_name}. "
+                    "You must speak and respond EXCLUSIVELY in English. "
+                    "Keep responses very concise, short, and natural (1-2 sentences). "
+                    f"Greet them by name, state that you are calling them back from the sales team at {Config.COMPANY_NAME}, and ask how you can help them today. "
+                    "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
+                )
+                first_message = f"Hello {customer_name}! I'm {agent_name} calling back from the sales team at {Config.COMPANY_NAME}. How can I help you today?"
+            elif agent_config:
                 instructions = (
                     f"You are a professional sales representative named {agent_name}. Here are your custom instructions:\n"
                     f"{agent_instructions}\n\n"
@@ -125,6 +156,7 @@ class OpenAIRealtimeSalesBot:
                     "Keep responses very concise, short, and natural (1-2 sentences). "
                     "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
                 )
+                first_message = agent_config.get("firstMessage")
 
             # Enhanced URL for latest OpenAI Realtime API
             url = f"wss://api.openai.com/v1/realtime?model={self.openai_model}"
@@ -172,7 +204,8 @@ class OpenAIRealtimeSalesBot:
                 "user_speaking": False,
                 "transcript": [],
                 "to_phone": to_phone,
-                "agent_config": agent_config
+                "agent_config": agent_config,
+                "first_message": first_message
             }
             
             logger.info(f"✅ ENHANCED OPENAI CONNECTED for {stream_id} @ {sample_rate}Hz")
@@ -234,6 +267,18 @@ class OpenAIRealtimeSalesBot:
             openai_ws = self.openai_connections[stream_id]["websocket"]
             sample_rate = self.connection_sample_rates.get(stream_id, self.default_sample_rate)
             
+            # Retrieve the connection details to check for outbound first_message
+            first_message = None
+            openai_config = self.openai_connections.get(stream_id)
+            if openai_config:
+                first_message = openai_config.get("first_message")
+
+            # Determine initial user instruction/prompt
+            if first_message:
+                prompt_text = f"We just called the customer. The connection is running at {sample_rate}Hz. Say the first message: '{first_message}'"
+            else:
+                prompt_text = f"A customer just called our sales line. The connection is running at {sample_rate}Hz audio quality. Please greet them warmly and ask how you can help them today."
+
             # Create enhanced conversation item with greeting
             greeting_msg = {
                 "type": "conversation.item.create",
@@ -242,7 +287,7 @@ class OpenAIRealtimeSalesBot:
                     "role": "user",
                     "content": [{
                         "type": "input_text", 
-                        "text": f"A customer just called our sales line. The connection is running at {sample_rate}Hz audio quality. Please greet them warmly and ask how you can help them today."
+                        "text": prompt_text
                     }]
                 }
             }
@@ -250,7 +295,9 @@ class OpenAIRealtimeSalesBot:
             await openai_ws.send(json.dumps(greeting_msg))
             
             greeting_instruction = "Give a warm, professional greeting. Keep it concise and natural."
-            if agent_config and agent_config.get("firstMessage"):
+            if first_message:
+                greeting_instruction = f"Greet the customer with this exact opening message: '{first_message}'"
+            elif agent_config and agent_config.get("firstMessage"):
                 greeting_instruction = f"Greet the customer with this exact opening message: '{agent_config['firstMessage']}'"
 
             # Create enhanced response with audio focus
