@@ -497,13 +497,16 @@ class ModularSalesBot:
             from controllers.call_controller import _call_records_cache
             caller_phone = extract_phone_number_from_uri(sip_call.from_uri)
             clean_caller = "".join(filter(str.isdigit, caller_phone))[-10:]
+            logger.info(f"🔎 Outbound match check: raw_from={sip_call.from_uri}, caller_phone={caller_phone}, clean_caller={clean_caller}")
+            logger.info(f"📋 Active _call_records_cache keys: {list(_call_records_cache.keys())}")
             if clean_caller:
                 for call_sid, record in _call_records_cache.items():
                     record_phone = record.get("phone_number", "")
                     clean_record = "".join(filter(str.isdigit, record_phone))[-10:]
+                    logger.info(f"   Comparing caller {clean_caller} with cache record phone: {record_phone} (clean: {clean_record})")
                     if clean_record == clean_caller:
                         outbound_record = record
-                        logger.info(f"📞 Detected OUTBOUND call to customer: {record.get('customer_name')}")
+                        logger.info(f"📞 Matches! Detected OUTBOUND call to customer: {record.get('customer_name')}")
                         break
                         
         if agent_config is None and session_to_phone != "default":
