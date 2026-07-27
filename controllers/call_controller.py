@@ -68,6 +68,16 @@ async def initiate_outbound_call(phone_number: str, customer_name: str, context:
         }
         _call_records_cache[call_sid] = record
         
+        # Save to MongoDB outbound_calls collection
+        try:
+            from core.mongo_manager import mongo_db
+            if mongo_db.client is not None:
+                db = mongo_db.client.get_default_database()
+                await db['outbound_calls'].insert_one(record.copy())
+                logger.info(f"💾 Persisted outbound call record to MongoDB for phone: {phone_number}")
+        except Exception as db_err:
+            logger.error(f"⚠️ Failed to persist outbound call record to MongoDB: {db_err}")
+        
         return {
             "success": True,
             "call_sid": call_sid,
@@ -171,6 +181,22 @@ async def process_telephony_webhook(webhook_payload: Dict[str, Any]) -> Dict[str
         _call_records_cache[call_sid]["status"] = event_type or "completed"
         if "duration" in webhook_payload:
             _call_records_cache[call_sid]["duration"] = webhook_payload.get("duration")
+            
+    # Update status in MongoDB outbound_calls collection
+    try:
+        from core.mongo_manager import mongo_db
+        if mongo_db.client is not None:
+            db = mongo_db.client.get_default_database()
+            await db['outbound_calls'].update_one(
+                {"call_sid": call_sid},
+                {"$set": {
+                    "status": event_type or "completed",
+                    "duration": webhook_payload.get("duration")
+                }}
+            )
+            logger.info(f"💾 Updated outbound call status in MongoDB for SID: {call_sid}")
+    except Exception as db_err:
+        logger.error(f"⚠️ Failed to update outbound call status in MongoDB: {db_err}")
             
     return {
         "success": True,
