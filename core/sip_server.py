@@ -225,6 +225,10 @@ def is_valid_exotel_ip_or_domain(uri: str) -> bool:
         return False
     domain = match.group(1).lower().split(':')[0]  # remove optional port
     
+    # Check if domain matches configured server public IP, exotel domain, or localhost
+    if Config.SIP_PUBLIC_IP and domain == Config.SIP_PUBLIC_IP.strip():
+        return True
+
     # Check if domain ends with exotel.in or exotel.com
     if domain.endswith('.exotel.in') or domain.endswith('.exotel.com') or domain == 'exotel.in' or domain == 'exotel.com':
         return True

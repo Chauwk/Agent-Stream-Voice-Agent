@@ -224,7 +224,9 @@ class OpenAIRealtimeSalesBot:
                 "transcript": [],
                 "to_phone": to_phone,
                 "agent_config": agent_config,
-                "first_message": first_message
+                "first_message": first_message,
+                "last_activity_time": time.time(),
+                "silence_prompts_count": 0
             }
             
             logger.info(f"✅ ENHANCED OPENAI CONNECTED for {stream_id} @ {sample_rate}Hz")
@@ -233,8 +235,9 @@ class OpenAIRealtimeSalesBot:
             # Configure enhanced OpenAI session
             await self.configure_openai_session_enhanced(stream_id, agent_config)
             
-            # Start listening to OpenAI responses
+            # Start listening to OpenAI responses and silence monitor
             asyncio.create_task(self.handle_openai_responses_enhanced(stream_id, openai_ws))
+            asyncio.create_task(self._silence_monitor_loop(stream_id))
             
         except Exception as e:
             logger.error(f"❌ Failed to connect to OpenAI (enhanced): {e}")
@@ -333,6 +336,85 @@ class OpenAIRealtimeSalesBot:
             
         except Exception as e:
             logger.error(f"❌ Error sending enhanced initial greeting: {e}")
+
+    async def _silence_monitor_loop(self, stream_id: str):
+        """Monitors caller silence for OpenAI Realtime sessions and injects follow-up prompts or hangs up if idle."""
+        logger.info(f"⏱️ Starting OpenAI silence monitor loop for stream {stream_id}")
+        
+        try:
+            while True:
+                await asyncio.sleep(1.0)
+                
+                openai_config = self.openai_connections.get(stream_id)
+                if not openai_config:
+                    break
+                    
+                # Update last activity if user is speaking or bot is playing audio
+                user_is_speaking = openai_config.get("user_speaking", False)
+                bot_is_speaking = False
+                if self.sip_server and stream_id in self.sip_server.sip_calls:
+                    call_state = self.sip_server.sip_calls[stream_id]
+                    if call_state.is_playing or len(call_state.playback_buffer) > 0:
+                        bot_is_speaking = True
+                        
+                if user_is_speaking or bot_is_speaking:
+                    openai_config["last_activity_time"] = time.time()
+                    continue
+                    
+                # Check idle duration
+                idle_time = time.time() - openai_config.get("last_activity_time", time.time())
+                if idle_time >= 8.0:
+                    # Reset timer to prevent rapid repeated follow-ups
+                    openai_config["last_activity_time"] = time.time()
+                    
+                    silence_count = openai_config.get("silence_prompts_count", 0)
+                    ws = openai_config.get("websocket")
+                    
+                    if silence_count >= 2:
+                        logger.info(f"⏱️ Maximum silence limit (2) reached for stream {stream_id}. Hanging up.")
+                        if ws:
+                            goodbye_msg = {
+                                "type": "conversation.item.create",
+                                "item": {
+                                    "type": "message",
+                                    "role": "user",
+                                    "content": [{
+                                        "type": "input_text",
+                                        "text": "The customer has remained silent. Say: 'Since I haven't heard from you, I'll go ahead and disconnect. Goodbye!' and then end the call."
+                                    }]
+                                }
+                            }
+                            await ws.send(json.dumps(goodbye_msg))
+                            await ws.send(json.dumps({"type": "response.create", "response": {"output_modalities": ["audio"]}}))
+                            
+                            # Delayed hangup to allow goodbye audio to play
+                            await asyncio.sleep(4.0)
+                            if self.sip_server:
+                                await self.sip_server.hangup_call(stream_id)
+                        break
+                        
+                    openai_config["silence_prompts_count"] = silence_count + 1
+                    logger.info(f"⏱️ Silence detected for 8 seconds on stream {stream_id} (count: {silence_count + 1}/2). Injecting follow-up prompt.")
+                    
+                    if ws:
+                        prompt_msg = {
+                            "type": "conversation.item.create",
+                            "item": {
+                                "type": "message",
+                                "role": "user",
+                                "content": [{
+                                    "type": "input_text",
+                                    "text": "The customer has been silent for 8 seconds. Please check if they are still there or need help."
+                                }]
+                            }
+                        }
+                        await ws.send(json.dumps(prompt_msg))
+                        await ws.send(json.dumps({"type": "response.create", "response": {"output_modalities": ["audio"]}}))
+                        
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"❌ Error in OpenAI silence monitor loop for stream {stream_id}: {e}")
 
     async def handle_openai_responses_enhanced(self, stream_id: str, openai_ws):
         """Handle enhanced responses from OpenAI Realtime API"""
