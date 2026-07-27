@@ -751,6 +751,7 @@ class ModularSalesBot:
             "send_email_tool": send_email,
             "to_phone": session_to_phone,
             "agent_config": agent_config, # Store agent configuration reference
+            "direction": "outbound" if outbound_record else "inbound",
             "deepgram_ws": None,
             "sarvam_ws": None,
             "reconnect_event": asyncio.Event(),
@@ -1748,7 +1749,7 @@ class ModularSalesBot:
                             duration=duration,
                             transcript=transcript,
                             to_phone=session_state.get("to_phone", "default"),
-                            direction="inbound",
+                            direction=session_state.get("direction", "inbound"),
                             agent_name=agent_name,
                             company_name=company_name,
                             agent_id=agent_id

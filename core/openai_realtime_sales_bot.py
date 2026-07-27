@@ -264,7 +264,8 @@ class OpenAIRealtimeSalesBot:
                 "agent_config": agent_config,
                 "first_message": first_message,
                 "last_activity_time": time.time(),
-                "silence_prompts_count": 0
+                "silence_prompts_count": 0,
+                "direction": "outbound" if outbound_record else "inbound"
             }
             
             logger.info(f"✅ ENHANCED OPENAI CONNECTED for {stream_id} @ {sample_rate}Hz")
@@ -1226,7 +1227,7 @@ class OpenAIRealtimeSalesBot:
                                 duration=duration,
                                 transcript=transcript,
                                 to_phone=openai_config.get("to_phone", "default"),
-                                direction="outbound",
+                                direction=openai_config.get("direction", "inbound"),
                                 agent_name=agent_name,
                                 company_name=company_name,
                                 agent_id=agent_id
