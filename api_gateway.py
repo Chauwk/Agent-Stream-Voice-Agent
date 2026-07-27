@@ -1198,19 +1198,33 @@ async def admin_portal():
                     
                     <div id="outbound-alert" class="alert"></div>
 
-                    <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--border); padding: 1.5rem; border-radius: 12px; margin-bottom: 2rem;">
-                        <h3>Trigger Outbound Call</h3>
-                        <form id="outbound-call-form" onsubmit="handleTriggerOutboundCall(event)" style="margin-top: 1rem; display: grid; grid-template-columns: 1fr 1fr auto; gap: 1rem; align-items: end;">
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label for="outbound-name">Customer Name</label>
-                                <input type="text" id="outbound-name" required placeholder="e.g. John Doe">
-                            </div>
-                            <div class="form-group" style="margin-bottom: 0;">
-                                <label for="outbound-phone">Customer Phone Number</label>
-                                <input type="text" id="outbound-phone" required placeholder="e.g. +91XXXXXXXXXX">
-                            </div>
-                            <button type="submit" id="outbound-submit-btn" class="btn btn-primary">📞 Start Call</button>
-                        </form>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+                        <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--border); padding: 1.5rem; border-radius: 12px;">
+                            <h3>Trigger Outbound Call</h3>
+                            <form id="outbound-call-form" onsubmit="handleTriggerOutboundCall(event)" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 1rem;">
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="outbound-name">Customer Name</label>
+                                    <input type="text" id="outbound-name" required placeholder="e.g. John Doe">
+                                </div>
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="outbound-phone">Customer Phone Number</label>
+                                    <input type="text" id="outbound-phone" required placeholder="e.g. +91XXXXXXXXXX">
+                                </div>
+                                <button type="submit" id="outbound-submit-btn" class="btn btn-primary" style="margin-top: 0.5rem; align-self: flex-start;">📞 Start Call</button>
+                            </form>
+                        </div>
+
+                        <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--border); padding: 1.5rem; border-radius: 12px; display: flex; flex-direction: column;">
+                            <h3>Bulk Batch Calling (CSV Upload)</h3>
+                            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem; margin-bottom: 1.5rem;">Upload a CSV file containing columns like <code>phone_number</code> and <code>customer_name</code> to start batch calls.</p>
+                            <form id="bulk-upload-form" onsubmit="handleBulkUpload(event)" style="display: flex; flex-direction: column; gap: 1.5rem; flex: 1; justify-content: space-between;">
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="bulk-csv-file">Choose CSV File</label>
+                                    <input type="file" id="bulk-csv-file" accept=".csv" required style="padding: 0.6rem; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-family: inherit; width: 100%;">
+                                </div>
+                                <button type="submit" id="bulk-submit-btn" class="btn btn-secondary" style="align-self: flex-start;">📤 Upload & Start Batch</button>
+                            </form>
+                        </div>
                     </div>
 
                     <h3>Active & Recent Outbound Calls</h3>
@@ -1318,6 +1332,9 @@ async def admin_portal():
                 }}
                 if (panelId === 'calls-panel') {{
                     loadCallLogs();
+                }}
+                if (panelId === 'outbound-panel') {{
+                    loadOutboundCalls();
                 }}
             }}
 
@@ -1835,6 +1852,61 @@ async def admin_portal():
                 }}, 3000);
             }}
 
+            async function loadOutboundCalls() {{
+                try {{
+                    const response = await fetch('/api/v1/calls/outbound');
+                    if (!response.ok) return;
+                    const data = await response.json();
+                    if (data.success && data.calls) {{
+                        activeOutboundCalls = data.calls;
+                        renderOutboundCalls();
+                        // Resume polling for active calls
+                        activeOutboundCalls.forEach(c => {{
+                            if (['initiated', 'ringing'].includes(c.status)) {{
+                                pollOutboundCallStatus(c.call_sid);
+                            }}
+                        }});
+                    }}
+                }} catch (err) {{
+                    console.error("Error loading outbound calls:", err);
+                }}
+            }}
+
+            async function handleBulkUpload(e) {{
+                e.preventDefault();
+                const fileInput = document.getElementById('bulk-csv-file');
+                const file = fileInput.files[0];
+                if (!file) return;
+
+                const submitBtn = document.getElementById('bulk-submit-btn');
+                submitBtn.disabled = true;
+                submitBtn.innerText = "⏳ Uploading...";
+
+                const formData = new FormData();
+                formData.append('file', file);
+
+                try {{
+                    const response = await fetch('/api/v1/calls/outbound/bulk', {{
+                        method: 'POST',
+                        body: formData
+                    }});
+                    const result = await response.json();
+                    if (!response.ok) {{
+                        throw new Error(result.detail || 'Bulk upload failed');
+                    }}
+
+                    showAlert('outbound-alert', "✅ Bulk calls triggered! " + result.message);
+                    fileInput.value = '';
+                    await loadOutboundCalls();
+
+                }} catch (err) {{
+                    showAlert('outbound-alert', err.message, true);
+                }} finally {{
+                    submitBtn.disabled = false;
+                    submitBtn.innerText = "📤 Upload & Start Batch";
+                }}
+            }}
+
             // Update dynamic AI voice config
             async function handleUpdateVoiceConfig(e) {{
                 e.preventDefault();
@@ -1867,6 +1939,7 @@ async def admin_portal():
 
             // Run loops
             loadTelemetry();
+            loadOutboundCalls();
             setInterval(loadTelemetry, 5000);
         </script>
         <script src="/static/call_analytics.js"></script>
