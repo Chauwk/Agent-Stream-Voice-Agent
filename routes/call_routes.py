@@ -125,3 +125,86 @@ async def call_webhook(payload: WebhookCallbackPayload):
         )
         
     return result
+
+# === New Endpoints for Dashboard Outbound Call Status & Batch Calling ===
+
+import logging
+import csv
+import io
+from fastapi import UploadFile, File
+
+logger = logging.getLogger(__name__)
+
+@router.get(
+    "/outbound",
+    summary="Get Outbound Call List",
+    description="Retrieves a list of all outbound calls from MongoDB to display their status (initiated, ringing, completed, failed) in the admin panel."
+)
+async def get_outbound_calls():
+    try:
+        from core.mongo_manager import mongo_db
+        if mongo_db.client is None:
+            return {"success": True, "calls": []}
+        db = mongo_db.client.get_default_database()
+        cursor = db['outbound_calls'].find().sort("timestamp", -1)
+        calls = []
+        async for doc in cursor:
+            doc["_id"] = str(doc["_id"])
+            calls.append(doc)
+        return {"success": True, "calls": calls}
+    except Exception as e:
+        logger.error(f"Error fetching outbound calls: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal Server Error: {str(e)}"
+        )
+
+@router.post(
+    "/outbound/bulk",
+    summary="Bulk Outbound Calls via CSV",
+    description="Upload a CSV file containing phone_number and customer_name to initiate a batch of outbound calls."
+)
+async def trigger_bulk_calls(file: UploadFile = File(...)):
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="Only CSV files are supported.")
+    
+    try:
+        contents = await file.read()
+        decoded = contents.decode('utf-8')
+        csv_reader = csv.DictReader(io.StringIO(decoded))
+        
+        initiated_calls = []
+        for row in csv_reader:
+            phone = row.get("phone_number") or row.get("phone") or row.get("Phone Number") or row.get("phonenumber")
+            name = row.get("customer_name") or row.get("name") or row.get("Customer Name") or row.get("customername") or "Customer"
+            
+            if not phone:
+                continue
+                
+            phone = phone.strip()
+            name = name.strip()
+            
+            # Call initiate_outbound_call controller function
+            result = await call_controller.initiate_outbound_call(
+                phone_number=phone,
+                customer_name=name
+            )
+            initiated_calls.append({
+                "phone_number": phone,
+                "customer_name": name,
+                "success": result.get("success", False),
+                "call_sid": result.get("call_sid"),
+                "error": result.get("error")
+            })
+            
+        return {
+            "success": True,
+            "message": f"Successfully processed CSV file. Initiated {len(initiated_calls)} calls.",
+            "details": initiated_calls
+        }
+    except Exception as e:
+        logger.error(f"Error triggering bulk calls: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal Server Error: {str(e)}"
+        )
