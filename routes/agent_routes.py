@@ -66,6 +66,7 @@ class AgentCreateRequest(BaseModel):
     language: Union[str, List[str]] = Field(..., json_schema_extra={"example": "en"}, description="Primary language of the agent (string or array).")
     
     # Optional Fields
+    firstMessageOutbound: Optional[str] = Field(None, json_schema_extra={"example": "Hello! I'm Zara calling back from Chauwk. How can I help you today?"}, description="The first message said by the agent during outbound calls.")
     description: Optional[str] = Field("", json_schema_extra={"example": "Handles general customer inquiries."})
     knowledgeBaseIds: Optional[List[str]] = Field(default_factory=list, json_schema_extra={"example": ["64a2f8c8d8b9a7f3e1c2d3a4"]})
     terms: Optional[TermsModel] = Field(default_factory=lambda: TermsModel(enabled=False, content=""))
@@ -78,6 +79,7 @@ class AgentUpdateRequest(BaseModel):
     name: Optional[str] = Field(None, json_schema_extra={"example": "Updated Support Assistant"})
     instructions: Optional[str] = Field(None, json_schema_extra={"example": "You are a polite customer support agent..."})
     firstMessage: Optional[str] = Field(None, json_schema_extra={"example": "Hello, how can I help you today?"})
+    firstMessageOutbound: Optional[str] = Field(None, json_schema_extra={"example": "Hello! I'm Zara calling back from Chauwk. How can I help you today?"})
     voiceId: Optional[str] = Field(None, json_schema_extra={"example": "pNInz6obbfDQGcgMyIGD"})
     language: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": "en"})
     description: Optional[str] = Field(None, json_schema_extra={"example": "Handles general inquiries"})
@@ -110,6 +112,7 @@ class AgentDataResponse(BaseModel):
     name: str = Field(..., example="Support Assistant")
     instructions: str = Field(..., example="You are a helpful customer support agent...")
     firstMessage: str = Field(..., example="Hello! How can I help you today?")
+    firstMessageOutbound: Optional[str] = Field(default="", example="Hello! I'm Zara calling back from Chauwk. How can I help you today?")
     voiceId: str = Field(..., example="pNInz6obbfDQGcgMyIGD")
     language: str = Field(..., example="en")
     hinglish_mode: bool = Field(False)
@@ -268,6 +271,7 @@ async def create_agent(
         "name": payload.name,
         "instructions": payload.instructions,
         "firstMessage": payload.firstMessage,
+        "firstMessageOutbound": payload.firstMessageOutbound or "",
         "voiceId": payload.voiceId,
         "language": resolved_lang,
         "hinglish_mode": payload.hinglish_mode if payload.hinglish_mode is not None else False,
@@ -542,6 +546,8 @@ async def update_agent(
         update_data["instructions"] = payload.instructions
     if payload.firstMessage is not None:
         update_data["firstMessage"] = payload.firstMessage
+    if payload.firstMessageOutbound is not None:
+        update_data["firstMessageOutbound"] = payload.firstMessageOutbound
     if payload.voiceId is not None:
         update_data["voiceId"] = payload.voiceId
     if payload.description is not None:

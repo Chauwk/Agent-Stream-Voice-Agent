@@ -156,28 +156,26 @@ class OpenAIRealtimeSalesBot:
             else:
                 agent_instructions = ""
 
+            # Unify system instructions to be identical for both inbound and outbound calls
+            instructions = (
+                f"You are a professional representative named {agent_name}. Here are your custom instructions:\n"
+                f"{agent_instructions}\n\n"
+                "You must speak and respond EXCLUSIVELY in English. "
+                "Even if the user speaks in another language, or if there is noise, keep your responses in English. "
+                "Keep responses very concise, short, and natural (1-2 sentences). "
+                "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
+            )
+
+            # Resolve greeting based on call type (inbound vs outbound)
             if outbound_record:
-                customer_name = outbound_record.get("customer_name", "Customer")
-                instructions = (
-                    f"You are a professional sales representative named {agent_name} for {Config.COMPANY_NAME}. "
-                    f"You are making an OUTBOUND call to the customer named {customer_name}. "
-                    "You must speak and respond EXCLUSIVELY in English. "
-                    "Keep responses very concise, short, and natural (1-2 sentences). "
-                    f"Greet them by name, state that you are calling them back from the sales team at {Config.COMPANY_NAME}, and ask how you can help them today. "
-                    "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
-                )
-                first_message = f"Hello {customer_name}! I'm {agent_name} calling back from the sales team at {Config.COMPANY_NAME}. How can I help you today?"
+                # Outbound greeting: Use firstMessageOutbound, fall back to firstMessage
+                first_message = (agent_config.get("firstMessageOutbound") if agent_config else None) or (agent_config.get("firstMessage") if agent_config else None) or f"Hello! I'm {agent_name} calling back from the sales team at {Config.COMPANY_NAME}. How can I help you today?"
+                customer_name = outbound_record.get("customer_name", "")
+                if customer_name:
+                    first_message = first_message.replace("{customer_name}", customer_name).replace("{name}", customer_name)
             else:
-                # Fallback: Default to Outbound instructions for all other calls
-                instructions = (
-                    f"You are a professional sales representative named {agent_name} for {Config.COMPANY_NAME}. "
-                    "You are making an OUTBOUND call to a customer. "
-                    "You must speak and respond EXCLUSIVELY in English. "
-                    "Keep responses very concise, short, and natural (1-2 sentences). "
-                    f"Greet them, state that you are calling them back from the sales team at {Config.COMPANY_NAME}, and ask how you can help them today. "
-                    "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
-                )
-                first_message = (agent_config.get("firstMessage") if agent_config else None) or f"Hello! I'm {agent_name} calling back from the sales team at {Config.COMPANY_NAME}. How can I help you today?"
+                # Inbound greeting: Use firstMessage
+                first_message = (agent_config.get("firstMessage") if agent_config else None) or f"Hello! Thank you for calling {Config.COMPANY_NAME}. How can I help you today?"
 
             # Enhanced URL for latest OpenAI Realtime API
             url = f"wss://api.openai.com/v1/realtime?model={self.openai_model}"
