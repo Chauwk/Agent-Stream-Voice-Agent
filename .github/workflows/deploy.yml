@@ -55,6 +55,9 @@ jobs:
     needs: build
 
     steps:
+      - name: Fix workspace permissions
+        run: sudo chown -R $(whoami) . || true
+
       - name: Checkout code
         uses: actions/checkout@v3
 
