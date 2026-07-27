@@ -24,7 +24,7 @@ class Config:
     DEEPGRAM_API_KEY = os.getenv('DEEPGRAM_API_KEY', '')
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
     SARVAM_API_KEY = os.getenv('SARVAM_API_KEY', '')
-    VOICE_BOT_MODE = os.getenv('VOICE_BOT_MODE', 'realtime').lower()
+    VOICE_BOT_MODE = os.getenv('VOICE_BOT_MODE', 'modular').lower()
     
     # ===== RAG & DATABASE SETTINGS =====
     CHROMA_HOST = os.getenv('CHROMA_HOST', 'localhost')
