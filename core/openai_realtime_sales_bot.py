@@ -106,13 +106,15 @@ class OpenAIRealtimeSalesBot:
                 logger.info(f"📋 Active _call_records_cache keys: {list(_call_records_cache.keys())}")
                 if clean_caller:
                     for call_sid, record in _call_records_cache.items():
-                        record_phone = record.get("phone_number", "")
-                        clean_record = "".join(filter(str.isdigit, record_phone))[-10:]
-                        logger.info(f"   Comparing caller {clean_caller} with cache record phone: {record_phone} (clean: {clean_record})")
-                        if clean_record == clean_caller:
-                            outbound_record = record
-                            logger.info(f"📞 Matches! Detected OUTBOUND call to customer: {record.get('customer_name')}")
-                            break
+                        # Only match active/non-completed records to avoid matching old outbound calls when customer calls back
+                        if record.get("status") not in ["completed", "failed", "no-answer", "busy"]:
+                            record_phone = record.get("phone_number", "")
+                            clean_record = "".join(filter(str.isdigit, record_phone))[-10:]
+                            logger.info(f"   Comparing caller {clean_caller} with cache record phone: {record_phone} (clean: {clean_record})")
+                            if clean_record == clean_caller:
+                                outbound_record = record
+                                logger.info(f"📞 Matches! Detected OUTBOUND call to customer: {record.get('customer_name')}")
+                                break
 
                 # Fallback: if no exact match by phone number, check for any recently initiated call in the last 120 seconds
                 if not outbound_record:
@@ -390,7 +392,7 @@ class OpenAIRealtimeSalesBot:
                             # Delayed hangup to allow goodbye audio to play
                             await asyncio.sleep(4.0)
                             if self.sip_server:
-                                await self.sip_server.hangup_call(stream_id)
+                                await self.sip_server.cleanup_call(stream_id)
                         break
                         
                     openai_config["silence_prompts_count"] = silence_count + 1
@@ -427,6 +429,18 @@ class OpenAIRealtimeSalesBot:
                 try:
                     data = json.loads(message)
                     event_type = data.get("type", "")
+                    
+                    # Update activity timer for any valid event showing session movement
+                    openai_config = self.openai_connections.get(stream_id)
+                    if openai_config:
+                        if event_type in [
+                            "input_audio_buffer.speech_started",
+                            "input_audio_buffer.speech_stopped",
+                            "conversation.item.input_audio_transcription.completed",
+                            "response.output_audio.delta"
+                        ]:
+                            openai_config["last_activity_time"] = time.time()
+                            openai_config["silence_prompts_count"] = 0
                     
                     logger.debug(f"🤖 ENHANCED OPENAI EVENT: {event_type} for {stream_id}")
                     
