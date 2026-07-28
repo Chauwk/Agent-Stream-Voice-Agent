@@ -136,6 +136,22 @@ async def fetch_call_status(call_sid: str) -> Dict[str, Any]:
         
         _call_records_cache[call_sid]["status"] = status_info.get("Status", "unknown")
         
+        # Update status in MongoDB outbound_calls collection
+        try:
+            from core.mongo_manager import mongo_db
+            if mongo_db.client is not None:
+                db = mongo_db.client.get_default_database()
+                await db['outbound_calls'].update_one(
+                    {"call_sid": call_sid},
+                    {"$set": {
+                        "status": status_info.get("Status", "unknown"),
+                        "duration": status_info.get("Duration")
+                    }}
+                )
+                logger.info(f"💾 Updated outbound call status in MongoDB via fetch query for SID: {call_sid}")
+        except Exception as db_err:
+            logger.error(f"⚠️ Failed to update outbound call status in MongoDB via fetch: {db_err}")
+        
         return {
             "success": True,
             "call_sid": call_sid,

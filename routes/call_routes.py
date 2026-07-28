@@ -109,14 +109,29 @@ async def get_status(call_sid: str):
         
     return result
 
+from fastapi import Request
+
 @router.post(
     "/webhook",
     summary="Telephony Callback Handler",
     description="Receive callbacks from Exotel gateways to audit call lifecycle (ringing, answers, timeouts, disconnects)."
 )
-async def call_webhook(payload: WebhookCallbackPayload):
+async def call_webhook(request: Request):
     """Register incoming webhooks from carrier callback nodes."""
-    result = await call_controller.process_telephony_webhook(payload.dict())
+    content_type = request.headers.get("content-type", "")
+    payload = {}
+    if "application/x-www-form-urlencoded" in content_type:
+        form_data = await request.form()
+        payload = dict(form_data)
+    else:
+        try:
+            payload = await request.json()
+        except Exception:
+            form_data = await request.form()
+            payload = dict(form_data)
+            
+    logger.info(f"📥 Received Exotel webhook payload: {payload}")
+    result = await call_controller.process_telephony_webhook(payload)
     
     if not result.get("success"):
         raise HTTPException(

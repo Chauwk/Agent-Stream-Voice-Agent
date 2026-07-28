@@ -508,9 +508,11 @@ class ModularSalesBot:
                     outbound_calls_coll = db['outbound_calls']
                     
                     if clean_caller:
-                        # Search for active/non-completed records for this phone number suffix
+                        # Search for active/non-completed records for this phone number suffix created in the last 1 hour
+                        import time
                         cursor = outbound_calls_coll.find({
-                            "status": {"$not": {"$in": ["completed", "failed", "no-answer", "busy"]}}
+                            "status": {"$not": {"$in": ["completed", "failed", "no-answer", "busy"]}},
+                            "timestamp": {"$gt": time.time() - 3600}
                         })
                         async for record in cursor:
                             record_phone = record.get("phone_number", "")
