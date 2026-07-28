@@ -1215,16 +1215,20 @@ async def admin_portal():
                         </div>
 
                         <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--border); padding: 1.5rem; border-radius: 12px; display: flex; flex-direction: column;">
-                            <h3>Bulk Batch Calling (CSV Upload)</h3>
-                            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem; margin-bottom: 1.5rem;">Upload a CSV file containing columns like <code>phone_number</code> and <code>customer_name</code> to start batch calls.</p>
+                            <h3>Bulk Batch Calling (Excel or CSV Upload)</h3>
+                            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem; margin-bottom: 1.5rem;">Upload an Excel (.xlsx) or CSV file containing columns like <code>phone_number</code> and <code>customer_name</code> to start batch calls.</p>
                             <form id="bulk-upload-form" onsubmit="handleBulkUpload(event)" style="display: flex; flex-direction: column; gap: 1.5rem; flex: 1; justify-content: space-between;">
                                 <div class="form-group" style="margin-bottom: 0;">
-                                    <label for="bulk-csv-file">Choose CSV File</label>
-                                    <input type="file" id="bulk-csv-file" accept=".csv" required style="padding: 0.6rem; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-family: inherit; width: 100%;">
+                                    <label for="bulk-csv-file">Choose Excel or CSV File</label>
+                                    <input type="file" id="bulk-csv-file" accept=".csv, .xlsx" required style="padding: 0.6rem; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-family: inherit; width: 100%;">
                                 </div>
                                 <div style="display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap;">
                                     <button type="submit" id="bulk-submit-btn" class="btn btn-secondary">📤 Upload & Start Batch</button>
-                                    <a href="/static/sample_contacts.csv" download style="color: var(--accent); text-decoration: none; font-size: 0.85rem; font-weight: 500; display: inline-flex; align-items: center; gap: 0.25rem;">📥 Download Template</a>
+                                    <div style="display: flex; gap: 0.75rem;">
+                                        <a href="/static/sample_contacts.xlsx" download style="color: var(--accent); text-decoration: none; font-size: 0.85rem; font-weight: 500; display: inline-flex; align-items: center; gap: 0.25rem;">📥 Excel Template</a>
+                                        <span style="color: var(--text-muted); font-size: 0.85rem;">|</span>
+                                        <a href="/static/sample_contacts.csv" download style="color: var(--accent); text-decoration: none; font-size: 0.85rem; font-weight: 500; display: inline-flex; align-items: center; gap: 0.25rem;">📥 CSV Template</a>
+                                    </div>
                                 </div>
                             </form>
                         </div>

@@ -176,28 +176,69 @@ async def get_outbound_calls():
 
 @router.post(
     "/outbound/bulk",
-    summary="Bulk Outbound Calls via CSV",
-    description="Upload a CSV file containing phone_number and customer_name to initiate a batch of outbound calls."
+    summary="Bulk Outbound Calls via CSV or Excel",
+    description="Upload a CSV or Excel (.xlsx) file containing phone_number and customer_name to initiate a batch of outbound calls."
 )
 async def trigger_bulk_calls(file: UploadFile = File(...)):
-    if not file.filename.endswith('.csv'):
-        raise HTTPException(status_code=400, detail="Only CSV files are supported.")
+    filename = file.filename.lower()
+    if not (filename.endswith('.csv') or filename.endswith('.xlsx')):
+        raise HTTPException(status_code=400, detail="Only CSV and Excel (.xlsx) files are supported.")
     
     try:
         contents = await file.read()
-        decoded = contents.decode('utf-8')
-        csv_reader = csv.DictReader(io.StringIO(decoded))
-        
-        initiated_calls = []
-        for row in csv_reader:
-            phone = row.get("phone_number") or row.get("phone") or row.get("Phone Number") or row.get("phonenumber")
-            name = row.get("customer_name") or row.get("name") or row.get("Customer Name") or row.get("customername") or "Customer"
+        contacts = []
+
+        if filename.endswith('.csv'):
+            decoded = contents.decode('utf-8')
+            csv_reader = csv.DictReader(io.StringIO(decoded))
+            for row in csv_reader:
+                phone = row.get("phone_number") or row.get("phone") or row.get("Phone Number") or row.get("phonenumber")
+                name = row.get("customer_name") or row.get("name") or row.get("Customer Name") or row.get("customername") or "Customer"
+                if phone:
+                    contacts.append({"phone": str(phone).strip(), "name": str(name).strip()})
+        else:
+            # Excel parser using openpyxl
+            from openpyxl import load_workbook
+            wb = load_workbook(io.BytesIO(contents), read_only=True)
+            sheet = wb.active
             
-            if not phone:
-                continue
+            # Read header row
+            first_row = next(sheet.iter_rows(max_row=1))
+            headers = [cell.value for cell in first_row]
+            
+            phone_idx = None
+            name_idx = None
+            for idx, header in enumerate(headers):
+                if header:
+                    h = str(header).lower().strip()
+                    if h in ["phone_number", "phone", "phone number", "phonenumber"]:
+                        phone_idx = idx
+                    elif h in ["customer_name", "name", "customer name", "customername"]:
+                        name_idx = idx
+                        
+            # Fallbacks if headers are missing
+            if phone_idx is None:
+                phone_idx = 0
+            if name_idx is None:
+                name_idx = 1 if len(headers) > 1 else 0
                 
-            phone = phone.strip()
-            name = name.strip()
+            # Iterate data rows
+            for row in sheet.iter_rows(min_row=2, values_only=True):
+                if not row or len(row) <= phone_idx:
+                    continue
+                phone = row[phone_idx]
+                name = row[name_idx] if len(row) > name_idx else "Customer"
+                
+                if phone:
+                    contacts.append({
+                        "phone": str(phone).strip(),
+                        "name": str(name).strip() if name else "Customer"
+                    })
+
+        initiated_calls = []
+        for contact in contacts:
+            phone = contact["phone"]
+            name = contact["name"]
             
             # Call initiate_outbound_call controller function
             result = await call_controller.initiate_outbound_call(
@@ -214,7 +255,7 @@ async def trigger_bulk_calls(file: UploadFile = File(...)):
             
         return {
             "success": True,
-            "message": f"Successfully processed CSV file. Initiated {len(initiated_calls)} calls.",
+            "message": f"Successfully processed file. Initiated {len(initiated_calls)} calls.",
             "details": initiated_calls
         }
     except Exception as e:

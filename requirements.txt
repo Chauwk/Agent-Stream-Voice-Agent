@@ -36,3 +36,4 @@ PyPDF2
 python-multipart
 playwright
 motor
+openpyxl
