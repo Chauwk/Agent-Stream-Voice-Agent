@@ -1222,7 +1222,10 @@ async def admin_portal():
                                     <label for="bulk-csv-file">Choose CSV File</label>
                                     <input type="file" id="bulk-csv-file" accept=".csv" required style="padding: 0.6rem; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-family: inherit; width: 100%;">
                                 </div>
-                                <button type="submit" id="bulk-submit-btn" class="btn btn-secondary" style="align-self: flex-start;">📤 Upload & Start Batch</button>
+                                <div style="display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+                                    <button type="submit" id="bulk-submit-btn" class="btn btn-secondary">📤 Upload & Start Batch</button>
+                                    <a href="/static/sample_contacts.csv" download style="color: var(--accent); text-decoration: none; font-size: 0.85rem; font-weight: 500; display: inline-flex; align-items: center; gap: 0.25rem;">📥 Download Template</a>
+                                </div>
                             </form>
                         </div>
                     </div>
