@@ -1247,7 +1247,30 @@ async def get_current_user_refresh_token(
     "/{id}/upload-documents",
     status_code=status.HTTP_201_CREATED,
     summary="Upload Agent Documents",
-    description="Uploads files (PDF, DOCX, TXT) directly to the Exotel Voice Agent's Knowledge Base."
+    description="Uploads files (PDF, DOCX, TXT) directly to the Exotel Voice Agent's Knowledge Base.",
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "files": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "format": "binary"
+                                },
+                                "description": "Select one or more files to upload (PDF, DOCX, PPTX, TXT)"
+                            }
+                        },
+                        "required": ["files"]
+                    }
+                }
+            },
+            "required": True
+        }
+    }
 )
 async def upload_agent_documents(
     id: str,
