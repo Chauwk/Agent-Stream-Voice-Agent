@@ -704,7 +704,18 @@ async def simulate_conversation(
         
     response_text = ""
     try:
-        prompt = f"System Instructions:\n{instructions}\n\n{history_prompt}User Message: {payload.message}\nAgent Response:"
+        # Check Knowledge Base
+        knowledgeBaseIds = agent.get("knowledgeBaseIds", [])
+        rag_context = ""
+        if knowledgeBaseIds:
+            try:
+                results = await rag_manager.search(x_enterprise_id, payload.message, top_k=3, document_ids=knowledgeBaseIds)
+                if results:
+                    rag_context = "Relevant Knowledge Base Information:\n" + "\n".join([r["chunk_text"] for r in results]) + "\n\n"
+            except Exception as e:
+                logger.error(f"Failed to fetch RAG context for simulation: {e}")
+
+        prompt = f"System Instructions:\n{instructions}\n\n{rag_context}{history_prompt}User Message: {payload.message}\nAgent Response:"
         resp = rag_manager.gemini_client.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt
@@ -776,7 +787,18 @@ async def simulate_voice_conversation(
         
     response_text = ""
     try:
-        prompt = f"System Instructions:\n{instructions}\n\n{history_prompt}User Message: {payload.message}\nAgent Response:"
+        # Check Knowledge Base
+        knowledgeBaseIds = agent.get("knowledgeBaseIds", [])
+        rag_context = ""
+        if knowledgeBaseIds:
+            try:
+                results = await rag_manager.search(x_enterprise_id, payload.message, top_k=3, document_ids=knowledgeBaseIds)
+                if results:
+                    rag_context = "Relevant Knowledge Base Information:\n" + "\n".join([r["chunk_text"] for r in results]) + "\n\n"
+            except Exception as e:
+                logger.error(f"Failed to fetch RAG context for voice simulation: {e}")
+
+        prompt = f"System Instructions:\n{instructions}\n\n{rag_context}{history_prompt}User Message: {payload.message}\nAgent Response:"
         resp = rag_manager.gemini_client.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt
