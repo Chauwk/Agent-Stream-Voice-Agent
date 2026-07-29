@@ -22,6 +22,30 @@ from core.rag_manager import RAGManager
 logger = logging.getLogger(__name__)
 rag_manager = RAGManager()
 
+import io
+
+def extract_text_from_file(filename: str, body: bytes) -> str:
+    """Extracts raw text from uploaded files to index into Chroma."""
+    text = ""
+    try:
+        lower_name = filename.lower()
+        if lower_name.endswith('.txt'):
+            text = body.decode('utf-8', errors='ignore')
+        elif lower_name.endswith('.pdf'):
+            import PyPDF2
+            reader = PyPDF2.PdfReader(io.BytesIO(body))
+            text = "\n".join([page.extract_text() or "" for page in reader.pages])
+        elif lower_name.endswith('.docx'):
+            import docx
+            doc = docx.Document(io.BytesIO(body))
+            text = "\n".join([p.text for p in doc.paragraphs])
+        else:
+            logger.warning(f"Unsupported file type for {filename}")
+            text = body.decode('utf-8', errors='ignore')
+    except Exception as e:
+        logger.error(f"Error extracting text from {filename}: {e}")
+    return text
+
 def bson_safe(obj):
     """Recursively convert BSON/MongoDB types to JSON-serializable Python types."""
     if isinstance(obj, dict):
@@ -1243,9 +1267,7 @@ async def upload_agent_documents(
     for upload in files:
         body = await upload.read()
         
-        # Optional: You can reuse your extract_text_from_file logic here if needed
-        # text = extract_text_from_file(upload.filename, body) 
-        
+        extracted_text = extract_text_from_file(upload.filename, body)
         doc_id = int(time.time())
         
         # 3. Trigger S3 Upload and Chroma indexing
@@ -1254,7 +1276,7 @@ async def upload_agent_documents(
             company_id=agent_id, # Uses agentId as the namespace in Chroma/S3
             filename=upload.filename,
             file_body=body,
-            text_content="", # Or pass the extracted text
+            text_content=extracted_text,
             doc_id=doc_id
         )
         
