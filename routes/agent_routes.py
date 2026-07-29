@@ -688,14 +688,46 @@ async def simulate_conversation(
     session_id = payload.session_id or f"sim_{uuid.uuid4().hex[:8]}"
     instructions = agent.get("instructions", "You are a customer assistant.")
     
+    history_prompt = ""
+    async def fetch_history():
+        db = mongo_db.client.get_default_database()
+        return await db['simulated_conversations'].find_one({"session_id": session_id})
+        
+    try:
+        existing_session = await safe_mongo_op(fetch_history)
+        if existing_session and "messages" in existing_session:
+            for msg in existing_session["messages"]:
+                role = "User Message" if msg.get("role") == "user" else "Agent Response"
+                history_prompt += f"{role}: {msg.get('content')}\n"
+    except Exception as e:
+        logger.error(f"Error fetching simulation history: {e}")
+        
     response_text = ""
     try:
-        prompt = f"System Instructions:\n{instructions}\n\nUser Message: {payload.message}\nAgent Response:"
+        prompt = f"System Instructions:\n{instructions}\n\n{history_prompt}User Message: {payload.message}\nAgent Response:"
         resp = rag_manager.gemini_client.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt
         )
         response_text = resp.text.strip()
+        
+        async def save_history():
+            db = mongo_db.client.get_default_database()
+            new_messages = [
+                {"role": "user", "content": payload.message, "timestamp": datetime.datetime.utcnow().isoformat() + "Z"},
+                {"role": "agent", "content": response_text, "timestamp": datetime.datetime.utcnow().isoformat() + "Z"}
+            ]
+            await db['simulated_conversations'].update_one(
+                {"session_id": session_id},
+                {"$push": {"messages": {"$each": new_messages}}},
+                upsert=True
+            )
+            
+        try:
+            await safe_mongo_op(save_history)
+        except Exception as e:
+            logger.error(f"Error saving simulation history: {e}")
+            
     except Exception as e:
         logger.warning(f"Failed to call Gemini for simulation, using fallback: {e}")
         response_text = f"Simulated Agent Response: I received your message: '{payload.message}'."
@@ -728,14 +760,46 @@ async def simulate_voice_conversation(
     session_id = payload.session_id or f"sim_{uuid.uuid4().hex[:8]}"
     instructions = agent.get("instructions", "You are a customer assistant.")
     
+    history_prompt = ""
+    async def fetch_history():
+        db = mongo_db.client.get_default_database()
+        return await db['simulated_conversations'].find_one({"session_id": session_id})
+        
+    try:
+        existing_session = await safe_mongo_op(fetch_history)
+        if existing_session and "messages" in existing_session:
+            for msg in existing_session["messages"]:
+                role = "User Message" if msg.get("role") == "user" else "Agent Response"
+                history_prompt += f"{role}: {msg.get('content')}\n"
+    except Exception as e:
+        logger.error(f"Error fetching simulation history: {e}")
+        
     response_text = ""
     try:
-        prompt = f"System Instructions:\n{instructions}\n\nUser Message: {payload.message}\nAgent Response:"
+        prompt = f"System Instructions:\n{instructions}\n\n{history_prompt}User Message: {payload.message}\nAgent Response:"
         resp = rag_manager.gemini_client.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt
         )
         response_text = resp.text.strip()
+        
+        async def save_history():
+            db = mongo_db.client.get_default_database()
+            new_messages = [
+                {"role": "user", "content": payload.message, "timestamp": datetime.datetime.utcnow().isoformat() + "Z"},
+                {"role": "agent", "content": response_text, "timestamp": datetime.datetime.utcnow().isoformat() + "Z"}
+            ]
+            await db['simulated_conversations'].update_one(
+                {"session_id": session_id},
+                {"$push": {"messages": {"$each": new_messages}}},
+                upsert=True
+            )
+            
+        try:
+            await safe_mongo_op(save_history)
+        except Exception as e:
+            logger.error(f"Error saving simulation history: {e}")
+            
     except Exception as e:
         logger.warning(f"Failed to call Gemini for simulation: {e}")
         response_text = f"Simulated Voice Response: Received '{payload.message}'."
@@ -750,6 +814,45 @@ async def simulate_voice_conversation(
         "voiceId": voice_id,
         "session_id": session_id
     }
+
+@router.get(
+    "/{id}/simulate/history",
+    status_code=status.HTTP_200_OK,
+    summary="Get Simulation Conversation History",
+    description="Retrieves the full chat history for a specific simulation session."
+)
+async def get_simulation_history(
+    id: str,
+    session_id: str = Query(..., description="The unique session ID for the simulation"),
+    x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")
+):
+    validate_enterprise(x_enterprise_id)
+    agent = await find_agent_by_id_and_enterprise(id, x_enterprise_id)
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"success": False, "message": "Agent not found"}
+        )
+
+    async def fetch_history():
+        db = mongo_db.client.get_default_database()
+        return await db['simulated_conversations'].find_one({"session_id": session_id})
+
+    try:
+        session_data = await safe_mongo_op(fetch_history)
+        messages = session_data.get("messages", []) if session_data else []
+        return {
+            "success": True,
+            "session_id": session_id,
+            "messages": messages
+        }
+    except Exception as e:
+        logger.error(f"Error fetching simulation history: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"success": False, "message": "Error fetching conversation history"}
+        )
+
 
 @router.get(
     "/{id}/conversation-history-duration",
