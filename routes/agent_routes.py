@@ -705,11 +705,24 @@ async def simulate_conversation(
     response_text = ""
     try:
         # Check Knowledge Base
-        knowledgeBaseIds = agent.get("knowledgeBaseIds", [])
+        kb_ids = []
+        async def fetch_kb_ids():
+            db = mongo_db.client.get_default_database()
+            cursor = db['agent_kb_documents'].find({"agentId": agent.get("agentId")})
+            ids = []
+            async for doc in cursor:
+                ids.append(str(doc.get("docId")))
+            return ids
+            
+        try:
+            kb_ids = await safe_mongo_op(fetch_kb_ids) or []
+        except Exception as e:
+            logger.error(f"Failed to fetch KB docs for simulation: {e}")
+
         rag_context = ""
-        if knowledgeBaseIds:
+        if kb_ids:
             try:
-                results = await rag_manager.search(x_enterprise_id, payload.message, top_k=3, document_ids=knowledgeBaseIds)
+                results = await rag_manager.search(company_id=agent.get("agentId"), query=payload.message, top_k=3, document_ids=kb_ids)
                 if results:
                     rag_context = "Relevant Knowledge Base Information:\n" + "\n".join([r["chunk_text"] for r in results]) + "\n\n"
             except Exception as e:
@@ -788,11 +801,24 @@ async def simulate_voice_conversation(
     response_text = ""
     try:
         # Check Knowledge Base
-        knowledgeBaseIds = agent.get("knowledgeBaseIds", [])
+        kb_ids = []
+        async def fetch_kb_ids():
+            db = mongo_db.client.get_default_database()
+            cursor = db['agent_kb_documents'].find({"agentId": agent.get("agentId")})
+            ids = []
+            async for doc in cursor:
+                ids.append(str(doc.get("docId")))
+            return ids
+            
+        try:
+            kb_ids = await safe_mongo_op(fetch_kb_ids) or []
+        except Exception as e:
+            logger.error(f"Failed to fetch KB docs for voice simulation: {e}")
+
         rag_context = ""
-        if knowledgeBaseIds:
+        if kb_ids:
             try:
-                results = await rag_manager.search(x_enterprise_id, payload.message, top_k=3, document_ids=knowledgeBaseIds)
+                results = await rag_manager.search(company_id=agent.get("agentId"), query=payload.message, top_k=3, document_ids=kb_ids)
                 if results:
                     rag_context = "Relevant Knowledge Base Information:\n" + "\n".join([r["chunk_text"] for r in results]) + "\n\n"
             except Exception as e:
