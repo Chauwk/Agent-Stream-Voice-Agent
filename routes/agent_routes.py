@@ -11,7 +11,7 @@ import datetime
 import time
 from typing import List, Dict, Any, Optional, Union, Annotated
 import mimetypes
-from fastapi import APIRouter, HTTPException, Header, Query, status, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Header, Query, Path, status, UploadFile, File, BackgroundTasks
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from bson import ObjectId
@@ -822,9 +822,9 @@ async def simulate_voice_conversation(
     description="Retrieves the full chat history for a specific simulation session."
 )
 async def get_simulation_history(
-    id: str,
-    session_id: str = Query(..., description="The unique session ID for the simulation"),
-    x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")
+    id: str = Path(..., description="The unique MongoDB Object ID of the Agent"),
+    session_id: str = Query(..., description="The unique session ID used during the simulation chat"),
+    x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id", description="The Enterprise ID of the user who owns this agent")
 ):
     validate_enterprise(x_enterprise_id)
     agent = await find_agent_by_id_and_enterprise(id, x_enterprise_id)
