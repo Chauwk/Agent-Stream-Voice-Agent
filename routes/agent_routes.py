@@ -1268,6 +1268,9 @@ async def upload_agent_documents(
         body = await upload.read()
         
         extracted_text = extract_text_from_file(upload.filename, body)
+        if not extracted_text or not extracted_text.strip():
+            raise HTTPException(status_code=400, detail={"success": False, "message": f"Could not extract any text from {upload.filename}. Please ensure it is a valid text, pdf, or docx file."})
+            
         doc_id = int(time.time())
         
         # 3. Trigger S3 Upload and Chroma indexing
@@ -1296,6 +1299,52 @@ async def upload_agent_documents(
         "success": True,
         "message": "Documents uploaded and processing in background"
     }
+
+@router.get(
+    "/{id}/debug-rag",
+    status_code=status.HTTP_200_OK,
+    summary="Debug RAG Search",
+    description="Directly queries the vector database bypassing the LLM to inspect retrieved chunks."
+)
+async def debug_rag(
+    id: str,
+    query: str,
+    x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")
+):
+    validate_enterprise(x_enterprise_id)
+    agent = await find_agent_by_id_and_enterprise(id, x_enterprise_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail={"success": False, "message": "Agent not found"})
+        
+    # Check Knowledge Base by querying agent_kb_documents
+    kb_ids = []
+    async def fetch_kb_ids():
+        db = mongo_db.client.get_default_database()
+        cursor = db['agent_kb_documents'].find({"agentId": agent.get("agentId")})
+        ids = []
+        async for doc in cursor:
+            ids.append(str(doc.get("docId")))
+        return ids
+        
+    try:
+        kb_ids = await safe_mongo_op(fetch_kb_ids) or []
+    except Exception as e:
+        return {"success": False, "error": f"Failed to fetch KB docs: {e}"}
+
+    if not kb_ids:
+        return {"success": True, "message": "No documents found in MongoDB for this agent."}
+        
+    try:
+        results = await rag_manager.search(company_id=agent.get("agentId"), query=query, top_k=5, document_ids=kb_ids)
+        return {
+            "success": True, 
+            "message": f"Searched for '{query}'. Found {len(results)} chunks.",
+            "chunks": results,
+            "document_ids_used": kb_ids
+        }
+    except Exception as e:
+        return {"success": False, "error": f"Search failed: {e}"}
+
 
 @router.get(
     "/{id}/exotel-getkb-items",
