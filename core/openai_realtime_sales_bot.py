@@ -203,27 +203,37 @@ class OpenAIRealtimeSalesBot:
             else:
                 agent_instructions = ""
 
+            agent_lang = (agent_config.get("language") if agent_config else None) or Config.SARVAM_LANGUAGE_CODE
+            is_hindi = agent_lang and agent_lang.startswith("hi")
+            
+            lang_prompt = "You must speak and respond EXCLUSIVELY in Hindi (हिंदी). Do not respond in English unless the customer explicitly demands English." if is_hindi else "You must speak and respond EXCLUSIVELY in English."
+
             # Unify system instructions to be identical for both inbound and outbound calls
             instructions = (
                 f"You are a professional representative named {agent_name}. Here are your custom instructions:\n"
                 f"{agent_instructions}\n\n"
                 "Base your responses strictly and exclusively on your custom instructions and the knowledge base. "
                 "If asked about products, services, pricing, or policies not in your instructions, call the query_knowledge_base tool to search. Do not invent products or guess information. "
-                "You must speak and respond EXCLUSIVELY in English. "
+                f"{lang_prompt} "
                 "Keep responses very concise, short, and natural (1-2 sentences). "
                 "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
             )
 
-            # Resolve greeting based on call type (inbound vs outbound)
+            # Resolve greeting based on call type (inbound vs outbound) and language
+            if is_hindi:
+                outbound_fallback = f"नमस्ते! मैं {Config.COMPANY_NAME} से {agent_name} बोल रही हूँ। क्या मेरी बात {{customer_name}} से हो रही है?"
+                inbound_fallback = f"नमस्ते! {Config.COMPANY_NAME} में कॉल करने के लिए धन्यवाद। मैं आज आपकी क्या सहायता कर सकती हूँ?"
+            else:
+                outbound_fallback = f"Hello! I'm {agent_name} calling back from the sales team at {Config.COMPANY_NAME}. How can I help you today?"
+                inbound_fallback = f"Hello! Thank you for calling {Config.COMPANY_NAME}. How can I help you today?"
+
             if outbound_record:
-                # Outbound greeting: Use firstMessageOutbound, fall back to firstMessage
-                first_message = (agent_config.get("firstMessageOutbound") if agent_config else None) or (agent_config.get("firstMessage") if agent_config else None) or f"Hello! I'm {agent_name} calling back from the sales team at {Config.COMPANY_NAME}. How can I help you today?"
+                first_message = (agent_config.get("firstMessageOutbound") if agent_config else None) or (agent_config.get("firstMessage") if agent_config else None) or outbound_fallback
                 customer_name = outbound_record.get("customer_name", "")
                 if customer_name:
                     first_message = first_message.replace("{customer_name}", customer_name).replace("{name}", customer_name)
             else:
-                # Inbound greeting: Use firstMessage
-                first_message = (agent_config.get("firstMessage") if agent_config else None) or f"Hello! Thank you for calling {Config.COMPANY_NAME}. How can I help you today?"
+                first_message = (agent_config.get("firstMessage") if agent_config else None) or inbound_fallback
 
             # Enhanced URL for latest OpenAI Realtime API
             url = f"wss://api.openai.com/v1/realtime?model={self.openai_model}"
