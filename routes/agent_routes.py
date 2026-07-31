@@ -307,6 +307,7 @@ async def create_agent(
         "languages": resolved_languages,
         "hinglish_mode": payload.hinglish_mode if payload.hinglish_mode is not None else False,
         "description": payload.description or "",
+        "phoneNumber": payload.phoneNumber or "",
         "agentId": agent_uuid,
         "knowledgeBaseIds": payload.knowledgeBaseIds or [],
         "terms": {
