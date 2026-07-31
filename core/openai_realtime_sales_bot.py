@@ -91,15 +91,17 @@ class OpenAIRealtimeSalesBot:
             
             # Resolve called virtual DID number and agent config first
             to_phone = "default"
+            from_phone = "default"
             outbound_record = None
             if self.sip_server and stream_id in self.sip_server.sip_calls:
                 sip_call = self.sip_server.sip_calls[stream_id]
                 from controllers.bot_controller import extract_phone_number_from_uri
                 to_phone = extract_phone_number_from_uri(sip_call.to_uri)
-                logger.info(f"Resolved called DID number: {to_phone}")
+                from_phone = extract_phone_number_from_uri(sip_call.from_uri)
+                logger.info(f"Resolved called DID number: {to_phone}, caller number: {from_phone}")
                 
                 # Check if this is an outbound call to a customer
-                caller_phone = extract_phone_number_from_uri(sip_call.from_uri)
+                caller_phone = from_phone
                 clean_caller = "".join(filter(str.isdigit, caller_phone))[-10:]
                 logger.info(f"🔎 Outbound match check: raw_from={sip_call.from_uri}, caller_phone={caller_phone}, clean_caller={clean_caller}")
                 
