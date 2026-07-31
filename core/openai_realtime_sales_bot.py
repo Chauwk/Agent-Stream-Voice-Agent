@@ -223,7 +223,9 @@ class OpenAIRealtimeSalesBot:
                 outbound_fallback = f"Hello! I'm {agent_name} calling back from the sales team at {Config.COMPANY_NAME}. How can I help you today?"
                 inbound_fallback = f"Hello! Thank you for calling {Config.COMPANY_NAME}. How can I help you today?"
 
-            if outbound_record:
+            is_active_outbound_leg = bool(outbound_record and outbound_record.get("status") in ["initiated", "ringing", "in_progress"])
+            
+            if is_active_outbound_leg:
                 custom_outbound = (agent_config.get("firstMessageOutbound") or agent_config.get("firstMessage") or "").strip() if agent_config else ""
                 first_message = custom_outbound or outbound_fallback
                 customer_name = outbound_record.get("customer_name", "")
@@ -232,6 +234,9 @@ class OpenAIRealtimeSalesBot:
             else:
                 custom_inbound = (agent_config.get("firstMessage") or "").strip() if agent_config else ""
                 first_message = custom_inbound or inbound_fallback
+                if outbound_record and outbound_record.get("customer_name"):
+                    customer_name = outbound_record.get("customer_name", "")
+                    first_message = first_message.replace("{customer_name}", customer_name).replace("{name}", customer_name)
 
             # Enhanced URL for latest OpenAI Realtime API
             url = f"wss://api.openai.com/v1/realtime?model={self.openai_model}"
