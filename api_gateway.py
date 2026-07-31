@@ -1207,8 +1207,22 @@ async def admin_portal():
                                     <input type="text" id="outbound-name" required placeholder="e.g. John Doe">
                                 </div>
                                 <div class="form-group" style="margin-bottom: 0;">
-                                    <label for="outbound-phone">Customer Phone Number</label>
-                                    <input type="text" id="outbound-phone" required placeholder="e.g. +91XXXXXXXXXX">
+                                    <label for="outbound-phone">Customer Phone Number(s)</label>
+                                    <input type="text" id="outbound-phone" required placeholder="e.g. +919876543210, +919876543211 (comma separated)">
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                                    <div class="form-group" style="margin-bottom: 0;">
+                                        <label for="outbound-enterprise-id">Enterprise ID</label>
+                                        <input type="text" id="outbound-enterprise-id" placeholder="e.g. ent_admin_101 (Default: ent_default)">
+                                    </div>
+                                    <div class="form-group" style="margin-bottom: 0;">
+                                        <label for="outbound-agent-id">Agent ID</label>
+                                        <input type="text" id="outbound-agent-id" placeholder="e.g. agent_sales_01 (Default: default)">
+                                    </div>
+                                </div>
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="outbound-campaign-id">Campaign ID <span style="color: var(--text-muted); font-weight: normal; font-size: 0.8rem;">(Auto-generated if left blank)</span></label>
+                                    <input type="text" id="outbound-campaign-id" placeholder="Leave blank to auto-generate campaign ID">
                                 </div>
                                 <button type="submit" id="outbound-submit-btn" class="btn btn-primary" style="margin-top: 0.5rem; align-self: flex-start;">📞 Start Call</button>
                             </form>
@@ -1216,7 +1230,7 @@ async def admin_portal():
 
                         <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--border); padding: 1.5rem; border-radius: 12px; display: flex; flex-direction: column;">
                             <h3>Bulk Batch Calling (Excel or CSV Upload)</h3>
-                            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem; margin-bottom: 1.5rem;">Upload an Excel (.xlsx) or CSV file containing columns like <code>phone_number</code> and <code>customer_name</code> to start batch calls.</p>
+                            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem; margin-bottom: 1.5rem;">Upload an Excel (.xlsx) or CSV file containing columns like <code>phone_number</code>, <code>customer_name</code>, <code>enterprise_id</code>, <code>agent_id</code>, and <code>campaign_id</code> to start batch calls.</p>
                             <form id="bulk-upload-form" onsubmit="handleBulkUpload(event)" style="display: flex; flex-direction: column; gap: 1.5rem; flex: 1; justify-content: space-between;">
                                 <div class="form-group" style="margin-bottom: 0;">
                                     <label for="bulk-csv-file">Choose Excel or CSV File</label>
@@ -1241,12 +1255,15 @@ async def admin_portal():
                                 <th>Call ID (SID)</th>
                                 <th>Customer Name</th>
                                 <th>Phone Number</th>
+                                <th>Enterprise ID</th>
+                                <th>Agent ID</th>
+                                <th>Campaign ID</th>
                                 <th>Call Status</th>
                             </tr>
                         </thead>
                         <tbody id="outbound-calls-list">
                             <tr>
-                                <td colspan="4" style="text-align: center; color: var(--text-muted);">No outbound calls triggered yet. Start one above!</td>
+                                <td colspan="7" style="text-align: center; color: var(--text-muted);">No outbound calls triggered yet. Start one above!</td>
                             </tr>
                         </tbody>
                     </table>
@@ -1777,16 +1794,27 @@ async def admin_portal():
                 e.preventDefault();
                 const name = document.getElementById('outbound-name').value;
                 const phone = document.getElementById('outbound-phone').value;
+                const enterpriseId = document.getElementById('outbound-enterprise-id').value;
+                const agentId = document.getElementById('outbound-agent-id').value;
+                const campaignId = document.getElementById('outbound-campaign-id').value;
                 const submitBtn = document.getElementById('outbound-submit-btn');
                 
                 submitBtn.disabled = true;
                 submitBtn.innerText = "🔌 Initiating...";
                 
                 try {{
+                    const payload = {{
+                        customer_name: name,
+                        phone_number: phone
+                    }};
+                    if (enterpriseId) payload.enterprise_id = enterpriseId;
+                    if (agentId) payload.agent_id = agentId;
+                    if (campaignId) payload.campaign_id = campaignId;
+
                     const response = await fetch('/api/v1/calls/outbound', {{
                         method: 'POST',
                         headers: {{ 'Content-Type': 'application/json' }},
-                        body: JSON.stringify({{ phone_number: phone, customer_name: name }})
+                        body: JSON.stringify(payload)
                     }});
                     
                     const result = await response.json();
@@ -1794,21 +1822,25 @@ async def admin_portal():
                         throw new Error(result.detail || 'Call trigger failed');
                     }}
                     
-                    showAlert('outbound-alert', "✅ Call initiated successfully. SID: " + result.call_sid);
+                    showAlert('outbound-alert', `✅ Call initiated. Campaign: ${result.campaign_id}. Primary SID: ${result.call_sid}`);
                     document.getElementById('outbound-call-form').reset();
                     
-                    // Add call to tracking list
-                    const newCall = {{
-                        call_sid: result.call_sid,
-                        customer_name: name,
-                        phone_number: phone,
-                        status: result.status || 'initiated'
-                    }};
-                    activeOutboundCalls.unshift(newCall);
-                    renderOutboundCalls();
+                    const sids = result.call_sids || [result.call_sid];
+                    sids.forEach(sid => {{
+                        const newCall = {{
+                            call_sid: sid,
+                            customer_name: name,
+                            phone_number: phone,
+                            enterprise_id: result.enterprise_id || 'ent_default',
+                            agent_id: result.agent_id || 'default',
+                            campaign_id: result.campaign_id || '-',
+                            status: result.status || 'initiated'
+                        }};
+                        activeOutboundCalls.unshift(newCall);
+                        pollOutboundCallStatus(sid);
+                    }});
                     
-                    // Start polling status for this call
-                    pollOutboundCallStatus(result.call_sid);
+                    renderOutboundCalls();
                     
                 }} catch (err) {{
                     showAlert('outbound-alert', err.message, true);
@@ -1821,7 +1853,7 @@ async def admin_portal():
             function renderOutboundCalls() {{
                 const listEl = document.getElementById('outbound-calls-list');
                 if (activeOutboundCalls.length === 0) {{
-                    listEl.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">No outbound calls triggered yet. Start one above!</td></tr>`;
+                    listEl.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">No outbound calls triggered yet. Start one above!</td></tr>`;
                     return;
                 }}
                 
@@ -1830,6 +1862,9 @@ async def admin_portal():
                         <td><code>${{c.call_sid}}</code></td>
                         <td><strong>${{c.customer_name}}</strong></td>
                         <td><code>${{c.phone_number}}</code></td>
+                        <td><span style="font-size:0.85rem; color:var(--text-muted);">${{c.enterprise_id || 'ent_default'}}</span></td>
+                        <td><span style="font-size:0.85rem; color:var(--text-muted);">${{c.agent_id || 'default'}}</span></td>
+                        <td><code style="color:var(--accent); font-size:0.82rem;">${{c.campaign_id || '-'}}</code></td>
                         <td><span class="status-badge status-${{c.status === 'completed' || c.status === 'in-progress' ? 'processed' : (c.status === 'failed' ? 'failed' : 'processing')}}">${{c.status}}</span></td>
                     </tr>
                 `).join('');

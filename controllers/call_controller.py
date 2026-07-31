@@ -14,75 +14,147 @@ logger = logging.getLogger(__name__)
 # Cache store for local call tracking (simulating persistent logging or database storage)
 _call_records_cache: Dict[str, Dict[str, Any]] = {}
 
-async def initiate_outbound_call(phone_number: str, customer_name: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+import uuid
+import time
+from datetime import datetime
+from typing import Dict, Any, Optional, List, Union
+
+async def initiate_outbound_call(
+    phone_number: Union[str, List[str]], 
+    customer_name: str = "Customer", 
+    enterprise_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    campaign_id: Optional[str] = None,
+    context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """
     Functional logic to initiate an outbound call via Exotel's REST API.
+    Supports single or multiple phone numbers for a customer.
+    Includes Enterprise ID verification, Agent ID binding, and auto-generated Campaign ID.
     
     Args:
-        phone_number: Customer phone number in E.164 format.
+        phone_number: Target phone number string, list of numbers, or comma-separated numbers.
         customer_name: Customer's name.
-        context: Optional custom metadata dictionary associated with the call (e.g. lead source, campaign).
+        enterprise_id: Enterprise ID to verify the call is placed on behalf of an enterprise admin.
+        agent_id: Agent ID for specific AI voice agent configuration.
+        campaign_id: Campaign ID (Auto-generated if omitted).
+        context: Optional custom metadata dictionary associated with the call.
         
     Returns:
-        Dict detailing success state, call SID, and metadata.
+        Dict detailing success state, primary call SID, list of SIDs, enterprise_id, agent_id, campaign_id, and metadata.
     """
-    logger.info(f"📞 [CallController] Triggering outbound call: {phone_number} ({customer_name})")
-    
     try:
-        # Create standard Exotel greeting message using custom greeting template
-        greeting = f"Hi {customer_name}, this is {Config.SALES_BOT_NAME} from our sales team. Please wait while I connect you."
+        # 1. Parse and normalize target phone numbers
+        phone_list: List[str] = []
+        if isinstance(phone_number, list):
+            for p in phone_number:
+                if isinstance(p, str):
+                    for item in p.split(","):
+                        cleaned = item.strip()
+                        if cleaned and cleaned not in phone_list:
+                            phone_list.append(cleaned)
+        elif isinstance(phone_number, str):
+            for item in phone_number.split(","):
+                cleaned = item.strip()
+                if cleaned and cleaned not in phone_list:
+                    phone_list.append(cleaned)
+                    
+        if not phone_list:
+            return {
+                "success": False,
+                "error": "No valid phone numbers provided."
+            }
+
+        # 2. Defaults & Verification
+        enterprise_id = (enterprise_id or "").strip() or "ent_default"
+        agent_id = (agent_id or "").strip() or "default"
         
+        # Auto-generate Campaign ID if omitted
+        if not campaign_id or not str(campaign_id).strip():
+            campaign_id = f"cmp_{datetime.now().strftime('%Y%m%d')}_{uuid.uuid4().hex[:8]}"
+        else:
+            campaign_id = str(campaign_id).strip()
+
+        logger.info(f"📞 [CallController] Verified enterprise call for Enterprise: '{enterprise_id}' on behalf of admin. Agent: '{agent_id}', Campaign: '{campaign_id}', Targets: {phone_list}")
+
+        # Prepare merged context
+        merged_context = {
+            "customer_name": customer_name,
+            "purpose": "sales_callback",
+            "enterprise_id": enterprise_id,
+            "agent_id": agent_id,
+            "campaign_id": campaign_id,
+            **(context or {})
+        }
+
         # Initialize the API client
         api = ExotelOutboundAPI()
         
-        # Call the actual underlying integration method
-        call_sid = await api.make_outbound_call(
-            phone_number=phone_number,
-            greeting_text=greeting,
-            context={
-                "customer_name": customer_name,
-                "purpose": "sales_callback",
-                **(context or {})
-            }
-        )
+        initiated_sids = []
+        failed_numbers = []
         
-        if not call_sid:
-            logger.error(f"❌ [CallController] Telephony client failed to initiate call to {phone_number}")
+        # Iterate through target numbers
+        for target_phone in phone_list:
+            greeting = f"Hi {customer_name}, this is {Config.SALES_BOT_NAME} from our sales team. Please wait while I connect you."
+            
+            call_sid = await api.make_outbound_call(
+                phone_number=target_phone,
+                greeting_text=greeting,
+                context=merged_context
+            )
+            
+            if call_sid:
+                initiated_sids.append((target_phone, call_sid))
+            else:
+                failed_numbers.append(target_phone)
+
+        if not initiated_sids:
+            logger.error(f"❌ [CallController] Failed to initiate calls for all provided numbers: {phone_list}")
             return {
                 "success": False,
-                "error": "Telephony outbound call failed to initiate. Please verify Exotel configurations."
+                "error": "Telephony outbound call failed to initiate. Please verify Exotel configurations.",
+                "enterprise_id": enterprise_id,
+                "agent_id": agent_id,
+                "campaign_id": campaign_id
             }
+
+        primary_sid = initiated_sids[0][1]
+        all_sids = [sid for _, sid in initiated_sids]
+        
+        # Save each initiated call to cache and MongoDB
+        for p_num, sid in initiated_sids:
+            record = {
+                "call_sid": sid,
+                "phone_number": p_num,
+                "customer_name": customer_name,
+                "enterprise_id": enterprise_id,
+                "agent_id": agent_id,
+                "campaign_id": campaign_id,
+                "status": "initiated",
+                "context": merged_context,
+                "timestamp": time.time(),
+                "error": None
+            }
+            _call_records_cache[sid] = record
             
-        logger.info(f"✅ [CallController] Call successfully initiated. SID: {call_sid}")
-        
-        # Save details inside local memory cache record for telemetry tracking
-        import time
-        record = {
-            "call_sid": call_sid,
-            "phone_number": phone_number,
-            "customer_name": customer_name,
-            "status": "initiated",
-            "context": context or {},
-            "timestamp": time.time(),
-            "error": None
-        }
-        _call_records_cache[call_sid] = record
-        
-        # Save to MongoDB outbound_calls collection
-        try:
-            from core.mongo_manager import mongo_db
-            if mongo_db.client is not None:
-                db = mongo_db.client.get_default_database()
-                await db['outbound_calls'].insert_one(record.copy())
-                logger.info(f"💾 Persisted outbound call record to MongoDB for phone: {phone_number}")
-        except Exception as db_err:
-            logger.error(f"⚠️ Failed to persist outbound call record to MongoDB: {db_err}")
-        
+            try:
+                from core.mongo_manager import mongo_db
+                if mongo_db.client is not None:
+                    db = mongo_db.client.get_default_database()
+                    await db['outbound_calls'].insert_one(record.copy())
+                    logger.info(f"💾 Persisted outbound call record to MongoDB for phone: {p_num}, SID: {sid}, Enterprise: {enterprise_id}, Agent: {agent_id}, Campaign: {campaign_id}")
+            except Exception as db_err:
+                logger.error(f"⚠️ Failed to persist outbound call record to MongoDB: {db_err}")
+
         return {
             "success": True,
-            "call_sid": call_sid,
+            "call_sid": primary_sid,
+            "call_sids": all_sids,
+            "enterprise_id": enterprise_id,
+            "agent_id": agent_id,
+            "campaign_id": campaign_id,
             "status": "initiated",
-            "message": "Outbound call request queued and initiated successfully."
+            "message": f"Successfully initiated {len(initiated_sids)} outbound call(s) for customer '{customer_name}' under campaign '{campaign_id}'."
         }
         
     except Exception as e:

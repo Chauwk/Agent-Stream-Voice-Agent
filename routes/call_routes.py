@@ -23,19 +23,39 @@ router = APIRouter(
 # === Pydantic Input Schemas for Request Validation ===
 
 class OutboundCallRequest(BaseModel):
-    phone_number: str = Field(
-        ..., 
+    phone_number: Optional[Union[str, List[str]]] = Field(
+        None, 
         example="+919876543210", 
-        description="Target phone number in international E.164 standard formatting."
+        description="Target phone number string or list of phone numbers for the customer in E.164 standard formatting."
+    )
+    phone_numbers: Optional[Union[str, List[str]]] = Field(
+        None,
+        example=["+919876543210", "+919876543211"],
+        description="Alternative field to provide multiple target phone numbers for the customer."
     )
     customer_name: str = Field(
         "Customer", 
         example="John Doe", 
         description="Name of the customer being called to personalize synthesized greeting."
     )
+    enterprise_id: Optional[str] = Field(
+        "ent_default",
+        example="ent_admin_101",
+        description="Enterprise ID to verify and associate the call on behalf of an enterprise admin."
+    )
+    agent_id: Optional[str] = Field(
+        "default",
+        example="agent_sales_01",
+        description="Agent ID associated with this call for specific AI voice configuration."
+    )
+    campaign_id: Optional[str] = Field(
+        None,
+        example="cmp_20260731_a1b2c3d4",
+        description="Campaign ID. Automatically generated if omitted."
+    )
     context: Optional[Dict[str, Any]] = Field(
         None,
-        example={"campaign_id": "spring_promotion_2026", "source": "HubSpot"},
+        example={"source": "HubSpot"},
         description="Arbitrary dictionary context to trace conversation history and CRM updates."
     )
 
@@ -50,6 +70,10 @@ class WebhookCallbackPayload(BaseModel):
 class CallActionResponse(BaseModel):
     success: bool = Field(..., json_schema_extra={"example": True})
     call_sid: Optional[str] = Field(None, json_schema_extra={"example": "ex_call_8e90810557fc4dc4ab5c04"})
+    call_sids: Optional[List[str]] = Field(None, json_schema_extra={"example": ["ex_call_8e90810557fc4dc4ab5c04"]})
+    enterprise_id: Optional[str] = Field(None, json_schema_extra={"example": "ent_admin_101"})
+    agent_id: Optional[str] = Field(None, json_schema_extra={"example": "agent_sales_01"})
+    campaign_id: Optional[str] = Field(None, json_schema_extra={"example": "cmp_20260731_a1b2c3d4"})
     status: Optional[str] = Field(None, json_schema_extra={"example": "initiated"})
     message: Optional[str] = Field(None, json_schema_extra={"example": "Outbound call request initiated successfully."})
     error: Optional[str] = Field(None, json_schema_extra={"example": None})
@@ -73,13 +97,23 @@ class CallStatusDetailsResponse(BaseModel):
     response_model=CallActionResponse,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Trigger Outbound Lead Call",
-    description="Dial an outbound phone call via the Exotel gateway. PERSONALIZES greeting and prepares system to bridge call to low-latency AI conversation stream."
+    description="Dial an outbound phone call (or batch of numbers) via the Exotel gateway on behalf of an Enterprise Admin & Agent. Auto-generates campaign ID if omitted."
 )
 async def trigger_call(payload: OutboundCallRequest):
     """Trigger an outbound call using Exotel gateway REST API."""
+    target_phones = payload.phone_numbers or payload.phone_number
+    if not target_phones:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one target phone number must be provided in 'phone_number' or 'phone_numbers'."
+        )
+
     result = await call_controller.initiate_outbound_call(
-        phone_number=payload.phone_number,
+        phone_number=target_phones,
         customer_name=payload.customer_name,
+        enterprise_id=payload.enterprise_id,
+        agent_id=payload.agent_id,
+        campaign_id=payload.campaign_id,
         context=payload.context
     )
     
@@ -174,16 +208,28 @@ async def get_outbound_calls():
             detail=f"Internal Server Error: {str(e)}"
         )
 
+from fastapi import Query, UploadFile, File
+import uuid
+from datetime import datetime
+
 @router.post(
     "/outbound/bulk",
     summary="Bulk Outbound Calls via CSV or Excel",
     description="Upload a CSV or Excel (.xlsx) file containing phone_number and customer_name to initiate a batch of outbound calls."
 )
-async def trigger_bulk_calls(file: UploadFile = File(...)):
+async def trigger_bulk_calls(
+    file: UploadFile = File(...),
+    enterprise_id: Optional[str] = Query(None, description="Enterprise ID for verification on behalf of enterprise admin"),
+    agent_id: Optional[str] = Query(None, description="Agent ID for AI configuration"),
+    campaign_id: Optional[str] = Query(None, description="Campaign ID (Auto-generated if omitted)")
+):
     filename = file.filename.lower()
     if not (filename.endswith('.csv') or filename.endswith('.xlsx')):
         raise HTTPException(status_code=400, detail="Only CSV and Excel (.xlsx) files are supported.")
     
+    # Auto-generate a single campaign_id for this bulk batch if omitted
+    batch_campaign_id = campaign_id or f"cmp_bulk_{datetime.now().strftime('%Y%m%d')}_{uuid.uuid4().hex[:8]}"
+
     try:
         contents = await file.read()
         contacts = []
@@ -194,8 +240,18 @@ async def trigger_bulk_calls(file: UploadFile = File(...)):
             for row in csv_reader:
                 phone = row.get("phone_number") or row.get("phone") or row.get("Phone Number") or row.get("phonenumber")
                 name = row.get("customer_name") or row.get("name") or row.get("Customer Name") or row.get("customername") or "Customer"
+                r_ent = row.get("enterprise_id") or row.get("enterprise") or enterprise_id
+                r_ag = row.get("agent_id") or row.get("agent") or agent_id
+                r_cmp = row.get("campaign_id") or row.get("campaign") or batch_campaign_id
+                
                 if phone:
-                    contacts.append({"phone": str(phone).strip(), "name": str(name).strip()})
+                    contacts.append({
+                        "phone": str(phone).strip(),
+                        "name": str(name).strip(),
+                        "enterprise_id": r_ent,
+                        "agent_id": r_ag,
+                        "campaign_id": r_cmp
+                    })
         else:
             # Excel parser using openpyxl
             from openpyxl import load_workbook
@@ -208,6 +264,10 @@ async def trigger_bulk_calls(file: UploadFile = File(...)):
             
             phone_idx = None
             name_idx = None
+            ent_idx = None
+            ag_idx = None
+            cmp_idx = None
+            
             for idx, header in enumerate(headers):
                 if header:
                     h = str(header).lower().strip()
@@ -215,6 +275,12 @@ async def trigger_bulk_calls(file: UploadFile = File(...)):
                         phone_idx = idx
                     elif h in ["customer_name", "name", "customer name", "customername"]:
                         name_idx = idx
+                    elif h in ["enterprise_id", "enterprise", "enterprise id"]:
+                        ent_idx = idx
+                    elif h in ["agent_id", "agent", "agent id"]:
+                        ag_idx = idx
+                    elif h in ["campaign_id", "campaign", "campaign id"]:
+                        cmp_idx = idx
                         
             # Fallbacks if headers are missing
             if phone_idx is None:
@@ -228,11 +294,17 @@ async def trigger_bulk_calls(file: UploadFile = File(...)):
                     continue
                 phone = row[phone_idx]
                 name = row[name_idx] if len(row) > name_idx else "Customer"
+                r_ent = row[ent_idx] if ent_idx is not None and len(row) > ent_idx else enterprise_id
+                r_ag = row[ag_idx] if ag_idx is not None and len(row) > ag_idx else agent_id
+                r_cmp = row[cmp_idx] if cmp_idx is not None and len(row) > cmp_idx else batch_campaign_id
                 
                 if phone:
                     contacts.append({
                         "phone": str(phone).strip(),
-                        "name": str(name).strip() if name else "Customer"
+                        "name": str(name).strip() if name else "Customer",
+                        "enterprise_id": str(r_ent).strip() if r_ent else enterprise_id,
+                        "agent_id": str(r_ag).strip() if r_ag else agent_id,
+                        "campaign_id": str(r_cmp).strip() if r_cmp else batch_campaign_id
                     })
 
         initiated_calls = []
@@ -243,19 +315,27 @@ async def trigger_bulk_calls(file: UploadFile = File(...)):
             # Call initiate_outbound_call controller function
             result = await call_controller.initiate_outbound_call(
                 phone_number=phone,
-                customer_name=name
+                customer_name=name,
+                enterprise_id=contact.get("enterprise_id"),
+                agent_id=contact.get("agent_id"),
+                campaign_id=contact.get("campaign_id")
             )
             initiated_calls.append({
                 "phone_number": phone,
                 "customer_name": name,
+                "enterprise_id": result.get("enterprise_id"),
+                "agent_id": result.get("agent_id"),
+                "campaign_id": result.get("campaign_id"),
                 "success": result.get("success", False),
                 "call_sid": result.get("call_sid"),
+                "call_sids": result.get("call_sids"),
                 "error": result.get("error")
             })
             
         return {
             "success": True,
-            "message": f"Successfully processed file. Initiated {len(initiated_calls)} calls.",
+            "campaign_id": batch_campaign_id,
+            "message": f"Successfully processed file under campaign '{batch_campaign_id}'. Initiated {len(initiated_calls)} calls.",
             "details": initiated_calls
         }
     except Exception as e:

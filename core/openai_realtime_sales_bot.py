@@ -171,13 +171,20 @@ class OpenAIRealtimeSalesBot:
                             outbound_record = newest_record
                             logger.info(f"📞 Cache Fallback MATCH: Matched recent outbound call to customer {outbound_record.get('customer_name')}")
                             
-            if agent_config is None and to_phone != "default":
-                # Resolve agent config dynamically
-                try:
-                    from core.agent_resolver import resolve_agent_config
-                    agent_config = await resolve_agent_config(to_phone)
-                except Exception as e:
-                    logger.error(f"⚠️ Failed to dynamically resolve agent for DID {to_phone}: {e}")
+            if agent_config is None:
+                # Resolve target ID from matched outbound record (agent_id or enterprise_id) or default to to_phone
+                target_agent = None
+                if outbound_record:
+                    target_agent = outbound_record.get("agent_id") or outbound_record.get("enterprise_id")
+                
+                target_id = target_agent if (target_agent and target_agent != "default" and target_agent != "ent_default") else to_phone
+                
+                if target_id != "default":
+                    try:
+                        from core.agent_resolver import resolve_agent_config
+                        agent_config = await resolve_agent_config(target_id)
+                    except Exception as e:
+                        logger.error(f"⚠️ Failed to dynamically resolve agent for ID {target_id}: {e}")
 
             # Determine voice and instructions dynamically
             voice = self.openai_voice
