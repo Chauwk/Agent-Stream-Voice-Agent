@@ -544,26 +544,12 @@ class ModularSalesBot:
                                 outbound_record = record
                                 logger.info(f"📞 MongoDB Matches! Detected OUTBOUND call to customer: {record.get('customer_name')}")
                                 break
-                                
-                    # Fallback: check for any recently initiated call in the last 120 seconds
-                    if not outbound_record:
-                        import time
-                        now = time.time()
-                        cursor = outbound_calls_coll.find({
-                            "status": {"$in": ["initiated", "ringing"]},
-                            "timestamp": {"$gt": now - 120}
-                        }).sort([("timestamp", -1)]).limit(1)
-                        async for record in cursor:
-                            outbound_record = record
-                            logger.info(f"📞 MongoDB Fallback MATCH: Matched recent outbound call to customer {outbound_record.get('customer_name')}")
-                            break
                 except Exception as db_err:
                     logger.error(f"⚠️ Failed to query outbound_calls collection from MongoDB: {db_err}")
             
             # Fallback to in-memory _call_records_cache if MongoDB did not resolve
             if not outbound_record:
                 from controllers.call_controller import _call_records_cache
-                logger.info(f"📋 Falling back to _call_records_cache keys: {list(_call_records_cache.keys())}")
                 if clean_caller:
                     for call_sid, record in _call_records_cache.items():
                         if record.get("status") not in ["completed", "failed", "no-answer", "busy"]:
@@ -573,23 +559,6 @@ class ModularSalesBot:
                                 outbound_record = record
                                 logger.info(f"📞 Cache Matches! Detected OUTBOUND call to customer: {record.get('customer_name')}")
                                 break
-                                
-                # Fallback time-based match in memory cache
-                if not outbound_record:
-                    import time
-                    now = time.time()
-                    newest_record = None
-                    newest_time = 0
-                    for call_sid, record in _call_records_cache.items():
-                        if record.get("status") in ["initiated", "ringing"]:
-                            record_time = record.get("timestamp", 0)
-                            if now - record_time < 120:
-                                if record_time > newest_time:
-                                    newest_time = record_time
-                                    newest_record = record
-                    if newest_record:
-                        outbound_record = newest_record
-                        logger.info(f"📞 Cache Fallback MATCH: Matched recent outbound call to customer {outbound_record.get('customer_name')}")
                         
         if agent_config is None:
             # Resolve target ID from matched outbound record (agent_id or enterprise_id) or default to session_to_phone
