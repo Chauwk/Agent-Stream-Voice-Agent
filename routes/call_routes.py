@@ -7,7 +7,7 @@ Generates comprehensive OpenAPI Swagger schemas.
 
 from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel, Field
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union, List
 from controllers import call_controller
 
 router = APIRouter(
