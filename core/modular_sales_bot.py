@@ -385,9 +385,22 @@ class ModularSalesBot:
             return None
             
         agent_id = agent_config.get("agentId", "default")
-        first_msg = agent_config.get("firstMessage", "")
+        agent_name = agent_config.get("name", Config.SALES_BOT_NAME)
+        first_msg = (agent_config.get("firstMessage") or "").strip()
         voice_id = agent_config.get("voiceId", Config.SARVAM_SPEAKER)
+        if not voice_id or voice_id == "default":
+            voice_id = Config.SARVAM_SPEAKER
         lang = agent_config.get("language", Config.SARVAM_LANGUAGE_CODE)
+        
+        if not first_msg:
+            if lang and lang.startswith("hi"):
+                first_msg = f"नमस्ते! मैं {Config.COMPANY_NAME} से {agent_name} बोल रही हूँ। मैं आज आपकी क्या सहायता कर सकती हूँ?"
+            elif lang and lang.startswith("te"):
+                first_msg = f"నమస్కారం! నేను {Config.COMPANY_NAME} నుండి {agent_name} మాట్లాడుతున్నాను. ఈరోజు నేను మీకు ఎలా సహాయపడగలను?"
+            elif lang and lang.startswith("ta"):
+                first_msg = f"வணக்கம்! நான் {Config.COMPANY_NAME} இலிருந்து {agent_name} பேசுகிறேன். இன்று உங்களுக்கு எப்படி உதவ முடியும்?"
+            else:
+                first_msg = f"Hello! I'm {agent_name} calling back from {Config.COMPANY_NAME}. How can I help you today?"
         
         # Check in memory cache
         if not hasattr(self, "_agent_greeting_cache"):

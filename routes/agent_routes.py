@@ -307,7 +307,6 @@ async def create_agent(
         "languages": resolved_languages,
         "hinglish_mode": payload.hinglish_mode if payload.hinglish_mode is not None else False,
         "description": payload.description or "",
-        "phoneNumber": payload.phoneNumber or "",
         "agentId": agent_uuid,
         "knowledgeBaseIds": payload.knowledgeBaseIds or [],
         "terms": {
@@ -593,11 +592,18 @@ async def update_agent(
             "enabled": payload.terms.enabled,
             "content": payload.terms.content
         }
-    if payload.language is not None:
-        resolved_lang = payload.language
-        if isinstance(resolved_lang, list):
-            resolved_lang = resolved_lang[0] if len(resolved_lang) > 0 else "en"
-        update_data["language"] = resolved_lang
+    if payload.phoneNumber is not None:
+        update_data["phoneNumber"] = payload.phoneNumber
+    if payload.languages is not None or payload.language is not None:
+        raw_langs = payload.languages or payload.language
+        resolved_languages = []
+        if isinstance(raw_langs, list):
+            resolved_languages = [str(l).strip() for l in raw_langs if l]
+        elif isinstance(raw_langs, str) and raw_langs.strip():
+            resolved_languages = [l.strip() for l in raw_langs.split(",") if l.strip()]
+        if resolved_languages:
+            update_data["languages"] = resolved_languages
+            update_data["language"] = resolved_languages[0]
 
     if not update_data:
         agent["_id"] = str(agent["_id"])
