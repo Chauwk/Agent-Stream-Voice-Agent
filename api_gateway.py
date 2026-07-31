@@ -1840,7 +1840,7 @@ async def admin_portal():
                         throw new Error(result.detail || 'Call trigger failed');
                     }}
                     
-                    showAlert('outbound-alert', `✅ Call initiated. Campaign: ${result.campaign_id}. Primary SID: ${result.call_sid}`);
+                    showAlert('outbound-alert', `✅ Call initiated. Campaign: ${{result.campaign_id}}. Primary SID: ${{result.call_sid}}`);
                     document.getElementById('outbound-call-form').reset();
                     
                     const sids = result.call_sids || [result.call_sid];
