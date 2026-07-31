@@ -90,6 +90,34 @@ class CallStatusDetailsResponse(BaseModel):
     price: Optional[str] = Field(None, json_schema_extra={"example": "0.50"})
     error: Optional[str] = Field(None, json_schema_extra={"example": None})
 
+class CampaignCallDetail(BaseModel):
+    call_sid: Optional[str] = Field(None, json_schema_extra={"example": "ex_call_8e90810557fc4dc4ab5c04"})
+    phone_number: Optional[str] = Field(None, json_schema_extra={"example": "+919876543210"})
+    customer_name: Optional[str] = Field(None, json_schema_extra={"example": "John Doe"})
+    status: Optional[str] = Field(None, json_schema_extra={"example": "completed"})
+    duration: Optional[int] = Field(None, json_schema_extra={"example": 45})
+    timestamp: Optional[float] = Field(None, json_schema_extra={"example": 1785228102.8})
+
+class CampaignSummary(BaseModel):
+    campaign_id: str = Field(..., json_schema_extra={"example": "cmp_20260731_a1b2c3d4"})
+    enterprise_id: str = Field(..., json_schema_extra={"example": "ent_admin_101"})
+    agent_id: str = Field(..., json_schema_extra={"example": "agent_sales_01"})
+    total_calls: int = Field(..., json_schema_extra={"example": 10})
+    completed_calls: int = Field(..., json_schema_extra={"example": 8})
+    failed_calls: int = Field(..., json_schema_extra={"example": 1})
+    initiated_calls: int = Field(..., json_schema_extra={"example": 1})
+    in_progress_calls: int = Field(..., json_schema_extra={"example": 0})
+    first_call_timestamp: Optional[float] = Field(None, json_schema_extra={"example": 1785228102.8})
+    latest_call_timestamp: Optional[float] = Field(None, json_schema_extra={"example": 1785229000.0})
+    calls: List[CampaignCallDetail] = Field(default_factory=list)
+
+class CampaignsResponse(BaseModel):
+    success: bool = Field(..., json_schema_extra={"example": True})
+    enterprise_id: str = Field(..., json_schema_extra={"example": "ent_admin_101"})
+    agent_id: Optional[str] = Field(None, json_schema_extra={"example": "agent_sales_01"})
+    total_campaigns: int = Field(..., json_schema_extra={"example": 1})
+    campaigns: List[CampaignSummary] = Field(default_factory=list)
+
 # === API Endpoint Route Mappings ===
 
 @router.post(
@@ -344,3 +372,34 @@ async def trigger_bulk_calls(
             status_code=500,
             detail=f"Internal Server Error: {str(e)}"
         )
+
+@router.get(
+    "/campaigns",
+    response_model=CampaignsResponse,
+    summary="Get Enterprise & Agent Campaign Data",
+    description="Retrieve all campaign data and call aggregations executed by an enterprise under a specific agent ID."
+)
+@router.get(
+    "/outbound/campaigns",
+    response_model=CampaignsResponse,
+    include_in_schema=False
+)
+async def get_campaign_data(
+    enterprise_id: str = Query(..., description="Enterprise ID to filter campaign data"),
+    agent_id: Optional[str] = Query(None, description="Optional Agent ID to filter campaigns under the enterprise"),
+    campaign_id: Optional[str] = Query(None, description="Optional specific Campaign ID to retrieve")
+):
+    """Retrieve campaign summaries and call details filtered by enterprise_id and optional agent_id."""
+    result = await call_controller.fetch_campaign_data(
+        enterprise_id=enterprise_id,
+        agent_id=agent_id,
+        campaign_id=campaign_id
+    )
+    
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.get("error", "An error occurred retrieving campaign data")
+        )
+        
+    return result

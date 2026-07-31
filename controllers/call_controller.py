@@ -292,3 +292,128 @@ async def process_telephony_webhook(webhook_payload: Dict[str, Any]) -> Dict[str
         "processed_event": event_type,
         "message": "Callback event successfully audited and integrated."
     }
+
+async def fetch_campaign_data(
+    enterprise_id: str,
+    agent_id: Optional[str] = None,
+    campaign_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Query and aggregate all campaign data executed under a given enterprise_id and optional agent_id / campaign_id.
+    """
+    logger.info(f"🔍 [CallController] Querying campaign data for Enterprise: '{enterprise_id}', Agent: '{agent_id}', Campaign: '{campaign_id}'")
+    try:
+        from core.mongo_manager import mongo_db
+        if mongo_db.client is None:
+            return {
+                "success": True,
+                "enterprise_id": enterprise_id,
+                "agent_id": agent_id,
+                "total_campaigns": 0,
+                "campaigns": []
+            }
+            
+        db = mongo_db.client.get_default_database()
+        
+        # Build query filter matching enterprise_id and optional agent_id / campaign_id
+        and_conditions = []
+        
+        if enterprise_id:
+            and_conditions.append({
+                "$or": [
+                    {"enterprise_id": enterprise_id},
+                    {"context.enterprise_id": enterprise_id}
+                ]
+            })
+            
+        if agent_id:
+            and_conditions.append({
+                "$or": [
+                    {"agent_id": agent_id},
+                    {"context.agent_id": agent_id}
+                ]
+            })
+
+        if campaign_id:
+            and_conditions.append({
+                "$or": [
+                    {"campaign_id": campaign_id},
+                    {"context.campaign_id": campaign_id}
+                ]
+            })
+
+        query_filter = {"$and": and_conditions} if and_conditions else {}
+
+        cursor = db['outbound_calls'].find(query_filter).sort("timestamp", -1)
+        
+        campaigns_map: Dict[str, Dict[str, Any]] = {}
+        
+        async for doc in cursor:
+            doc["_id"] = str(doc["_id"])
+            cmp_id = doc.get("campaign_id") or doc.get("context", {}).get("campaign_id") or "cmp_default"
+            ent_id = doc.get("enterprise_id") or doc.get("context", {}).get("enterprise_id") or enterprise_id
+            ag_id = doc.get("agent_id") or doc.get("context", {}).get("agent_id") or agent_id or "default"
+            status = doc.get("status", "unknown")
+            ts = doc.get("timestamp", 0)
+            
+            if cmp_id not in campaigns_map:
+                campaigns_map[cmp_id] = {
+                    "campaign_id": cmp_id,
+                    "enterprise_id": ent_id,
+                    "agent_id": ag_id,
+                    "total_calls": 0,
+                    "completed_calls": 0,
+                    "failed_calls": 0,
+                    "initiated_calls": 0,
+                    "in_progress_calls": 0,
+                    "other_calls": 0,
+                    "first_call_timestamp": ts,
+                    "latest_call_timestamp": ts,
+                    "calls": []
+                }
+                
+            cmp = campaigns_map[cmp_id]
+            cmp["total_calls"] += 1
+            
+            if status == "completed":
+                cmp["completed_calls"] += 1
+            elif status in ["failed", "no-answer", "busy", "canceled"]:
+                cmp["failed_calls"] += 1
+            elif status == "initiated":
+                cmp["initiated_calls"] += 1
+            elif status in ["in-progress", "ringing"]:
+                cmp["in_progress_calls"] += 1
+            else:
+                cmp["other_calls"] += 1
+                
+            if ts and ts < cmp["first_call_timestamp"]:
+                cmp["first_call_timestamp"] = ts
+            if ts and ts > cmp["latest_call_timestamp"]:
+                cmp["latest_call_timestamp"] = ts
+                
+            cmp["calls"].append({
+                "call_sid": doc.get("call_sid"),
+                "phone_number": doc.get("phone_number"),
+                "customer_name": doc.get("customer_name"),
+                "status": status,
+                "duration": doc.get("duration"),
+                "timestamp": ts
+            })
+
+        campaign_list = list(campaigns_map.values())
+        campaign_list.sort(key=lambda c: c["latest_call_timestamp"], reverse=True)
+
+        return {
+            "success": True,
+            "enterprise_id": enterprise_id,
+            "agent_id": agent_id,
+            "total_campaigns": len(campaign_list),
+            "campaigns": campaign_list
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ [CallController] Exception fetching campaign data: {e}")
+        return {
+            "success": False,
+            "error": f"Internal Server Error: {str(e)}"
+        }

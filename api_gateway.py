@@ -1248,6 +1248,24 @@ async def admin_portal():
                         </div>
                     </div>
 
+                    <!-- Campaign Data Explorer -->
+                    <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--border); padding: 1.5rem; border-radius: 12px; margin-bottom: 2rem;">
+                        <h3>📊 Campaign Data Explorer</h3>
+                        <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem; margin-bottom: 1rem;">Query all campaign analytics executed by an Enterprise ID under a specific Agent ID.</p>
+                        <form onsubmit="handleFetchCampaigns(event)" style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
+                            <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 180px;">
+                                <label for="campaign-query-ent">Enterprise ID *</label>
+                                <input type="text" id="campaign-query-ent" required placeholder="e.g. ent_admin_101">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 180px;">
+                                <label for="campaign-query-agent">Agent ID (Optional)</label>
+                                <input type="text" id="campaign-query-agent" placeholder="e.g. agent_sales_01">
+                            </div>
+                            <button type="submit" id="campaign-query-btn" class="btn btn-secondary" style="height: 42px;">🔍 Fetch Campaigns</button>
+                        </form>
+                        <div id="campaign-results-container" style="margin-top: 1.5rem; display: none;"></div>
+                    </div>
+
                     <h3>Active & Recent Outbound Calls</h3>
                     <table style="margin-top: 1rem;">
                         <thead>
@@ -1892,6 +1910,65 @@ async def admin_portal():
                         console.error(err);
                     }}
                 }}, 3000);
+            }}
+
+            async function handleFetchCampaigns(e) {{
+                e.preventDefault();
+                const entId = document.getElementById('campaign-query-ent').value;
+                const agentId = document.getElementById('campaign-query-agent').value;
+                const btn = document.getElementById('campaign-query-btn');
+                const resultsEl = document.getElementById('campaign-results-container');
+                
+                btn.disabled = true;
+                btn.innerText = "⏳ Querying...";
+                
+                try {{
+                    let url = `/api/v1/calls/campaigns?enterprise_id=${{encodeURIComponent(entId)}}`;
+                    if (agentId) url += `&agent_id=${{encodeURIComponent(agentId)}}`;
+                    
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    
+                    if (!response.ok || !data.success) {{
+                        throw new Error(data.detail || data.error || 'Failed to fetch campaign data');
+                    }}
+                    
+                    resultsEl.style.display = 'block';
+                    if (!data.campaigns || data.campaigns.length === 0) {{
+                        resultsEl.innerHTML = `<div style="padding:1rem; background:rgba(255,255,255,0.02); border-radius:8px; color:var(--text-muted);">No campaigns found for Enterprise '${{entId}}'${{agentId ? ` under Agent '${{agentId}}'` : ''}}.</div>`;
+                        return;
+                    }}
+                    
+                    resultsEl.innerHTML = `
+                        <div style="display:flex; flex-direction:column; gap:1rem;">
+                            <div style="font-size:0.9rem; color:var(--text-muted);">Found <strong>${{data.total_campaigns}}</strong> campaign(s) for Enterprise <code>${{entId}}</code>${{agentId ? ` (Agent: <code>${{agentId}}</code>)` : ''}}:</div>
+                            ${{data.campaigns.map(c => `
+                                <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px; padding:1.25rem;">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.75rem;">
+                                        <div>
+                                            <span style="font-size:1.05rem; font-weight:600; color:var(--accent);">📋 ${{c.campaign_id}}</span>
+                                            <span style="margin-left:0.75rem; font-size:0.8rem; color:var(--text-muted);">Agent: <code>${{c.agent_id}}</code></span>
+                                        </div>
+                                        <div style="display:flex; gap:0.5rem;">
+                                            <span class="status-badge status-processed">Total: ${{c.total_calls}}</span>
+                                            <span class="status-badge status-processed" style="background:rgba(46,204,113,0.15); color:#2ecc71;">Completed: ${{c.completed_calls}}</span>
+                                            <span class="status-badge status-failed">Failed: ${{c.failed_calls}}</span>
+                                        </div>
+                                    </div>
+                                    <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.75rem;">
+                                        Calls: ${{c.calls.map(call => `<code>${{call.phone_number}} (${{call.status}})</code>`).join(', ')}}
+                                    </div>
+                                </div>
+                            `).join('')}}
+                        </div>
+                    `;
+                }} catch (err) {{
+                    resultsEl.style.display = 'block';
+                    resultsEl.innerHTML = `<div style="padding:1rem; background:rgba(231,76,60,0.1); border:1px solid rgba(231,76,60,0.3); border-radius:8px; color:#e74c3c;">❌ ${{err.message}}</div>`;
+                }} finally {{
+                    btn.disabled = false;
+                    btn.innerText = "🔍 Fetch Campaigns";
+                }}
             }}
 
             async function loadOutboundCalls() {{
