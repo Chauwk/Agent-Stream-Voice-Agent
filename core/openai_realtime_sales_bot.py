@@ -203,10 +203,35 @@ class OpenAIRealtimeSalesBot:
             else:
                 agent_instructions = ""
 
-            agent_lang = (agent_config.get("language") if agent_config else None) or Config.SARVAM_LANGUAGE_CODE
-            is_hindi = agent_lang and agent_lang.startswith("hi")
+            # Resolve selected languages (defaulting to English 'en-IN' if omitted)
+            agent_languages = (agent_config.get("languages") if agent_config else None) or []
+            if isinstance(agent_languages, str):
+                agent_languages = [l.strip() for l in agent_languages.split(",") if l.strip()]
+            if not agent_languages:
+                primary = (agent_config.get("language") if agent_config else None) or Config.SARVAM_LANGUAGE_CODE
+                agent_languages = [primary]
             
-            lang_prompt = "You must speak and respond EXCLUSIVELY in Hindi (हिंदी). Do not respond in English unless the customer explicitly demands English." if is_hindi else "You must speak and respond EXCLUSIVELY in English."
+            primary_lang = agent_languages[0]
+            is_hindi = primary_lang.startswith("hi")
+            
+            LANG_NAMES = {
+                "en": "English", "en-IN": "English", "en-US": "English",
+                "hi": "Hindi", "hi-IN": "Hindi",
+                "ta": "Tamil", "ta-IN": "Tamil",
+                "te": "Telugu", "te-IN": "Telugu",
+                "kn": "Kannada", "kn-IN": "Kannada",
+                "ml": "Malayalam", "ml-IN": "Malayalam",
+                "mr": "Marathi", "mr-IN": "Marathi",
+                "bn": "Bengali", "bn-IN": "Bengali",
+                "gu": "Gujarati", "gu-IN": "Gujarati"
+            }
+            allowed_names = list(dict.fromkeys([LANG_NAMES.get(l, l) for l in agent_languages]))
+            
+            if len(allowed_names) == 1:
+                lang_prompt = f"STRICT LANGUAGE RESTRICTION: You MUST speak and respond EXCLUSIVELY in {allowed_names[0]}. Do not speak or respond in any other language."
+            else:
+                langs_str = ", ".join(allowed_names)
+                lang_prompt = f"STRICT LANGUAGE RESTRICTION: You are allowed to speak ONLY in the following selected languages: {langs_str}. Do not respond in any language outside of this allowed list. Adapt dynamically to whichever of these allowed languages the customer speaks."
 
             # Unify system instructions to be identical for both inbound and outbound calls
             instructions = (
@@ -228,12 +253,14 @@ class OpenAIRealtimeSalesBot:
                 inbound_fallback = f"Hello! Thank you for calling {Config.COMPANY_NAME}. How can I help you today?"
 
             if outbound_record:
-                first_message = (agent_config.get("firstMessageOutbound") if agent_config else None) or (agent_config.get("firstMessage") if agent_config else None) or outbound_fallback
+                custom_outbound = (agent_config.get("firstMessageOutbound") or agent_config.get("firstMessage") or "").strip() if agent_config else ""
+                first_message = custom_outbound or outbound_fallback
                 customer_name = outbound_record.get("customer_name", "")
                 if customer_name:
                     first_message = first_message.replace("{customer_name}", customer_name).replace("{name}", customer_name)
             else:
-                first_message = (agent_config.get("firstMessage") if agent_config else None) or inbound_fallback
+                custom_inbound = (agent_config.get("firstMessage") or "").strip() if agent_config else ""
+                first_message = custom_inbound or inbound_fallback
 
             # Enhanced URL for latest OpenAI Realtime API
             url = f"wss://api.openai.com/v1/realtime?model={self.openai_model}"

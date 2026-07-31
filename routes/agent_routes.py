@@ -84,19 +84,19 @@ class TermsModel(BaseModel):
 
 class AgentCreateRequest(BaseModel):
     name: str = Field(..., json_schema_extra={"example": "Support Assistant"}, description="The name of the AI agent.")
-    instructions: str = Field(..., json_schema_extra={"example": "You are a helpful customer support agent..."}, description="Prompt or core instructions.")
-    firstMessage: str = Field(..., json_schema_extra={"example": "Hello! How can I help you today?"}, description="The first message said by the agent.")
-    voiceId: str = Field(..., json_schema_extra={"example": "pNInz6obbfDQGcgMyIGD"}, description="The ID of the voice to be used.")
-    language: Union[str, List[str]] = Field(..., json_schema_extra={"example": "en"}, description="Primary language of the agent (string or array).")
+    instructions: Optional[str] = Field("", json_schema_extra={"example": "You are a helpful customer support agent..."}, description="Prompt or core instructions.")
+    firstMessage: Optional[str] = Field(None, json_schema_extra={"example": "Hello! How can I help you today?"}, description="Optional custom greeting message for inbound calls. Default greeting spoken if omitted.")
+    firstMessageOutbound: Optional[str] = Field(None, json_schema_extra={"example": "Hello! I'm Zara calling back from Chauwk. How can I help you today?"}, description="Optional custom greeting message for outbound calls. Default greeting spoken if omitted.")
+    voiceId: Optional[str] = Field("default", json_schema_extra={"example": "meera"}, description="The ID of the voice to be used.")
+    language: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": "en-IN"}, description="Primary language code. Default is 'en-IN' (English) if omitted.")
+    languages: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": ["en-IN", "hi-IN"]}, description="List of allowed languages for multi-lingual restriction. Default is ['en-IN'] if omitted.")
     
     # Optional Fields
-    firstMessageOutbound: Optional[str] = Field(None, json_schema_extra={"example": "Hello! I'm Zara calling back from Chauwk. How can I help you today?"}, description="The first message said by the agent during outbound calls.")
     description: Optional[str] = Field("", json_schema_extra={"example": "Handles general customer inquiries."})
     knowledgeBaseIds: Optional[List[str]] = Field(default_factory=list, json_schema_extra={"example": ["64a2f8c8d8b9a7f3e1c2d3a4"]})
     terms: Optional[TermsModel] = Field(default_factory=lambda: TermsModel(enabled=False, content=""))
     platformAgreement: Optional[Union[str, bool]] = Field(None, json_schema_extra={"example": True})
     hinglish_mode: Optional[bool] = Field(False, json_schema_extra={"example": False})
-    # New optional field for virtual number binding
     phoneNumber: Optional[str] = Field(None, json_schema_extra={"example": "04040377112"}, description="Exotel virtual number to bind to this agent.")
 
 class AgentUpdateRequest(BaseModel):
@@ -104,13 +104,13 @@ class AgentUpdateRequest(BaseModel):
     instructions: Optional[str] = Field(None, json_schema_extra={"example": "You are a polite customer support agent..."})
     firstMessage: Optional[str] = Field(None, json_schema_extra={"example": "Hello, how can I help you today?"})
     firstMessageOutbound: Optional[str] = Field(None, json_schema_extra={"example": "Hello! I'm Zara calling back from Chauwk. How can I help you today?"})
-    voiceId: Optional[str] = Field(None, json_schema_extra={"example": "pNInz6obbfDQGcgMyIGD"})
-    language: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": "en"})
+    voiceId: Optional[str] = Field(None, json_schema_extra={"example": "meera"})
+    language: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": "en-IN"})
+    languages: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": ["en-IN", "hi-IN"]})
     description: Optional[str] = Field(None, json_schema_extra={"example": "Handles general inquiries"})
     knowledgeBaseIds: Optional[List[str]] = Field(None)
     terms: Optional[TermsModel] = Field(None)
     hinglish_mode: Optional[bool] = Field(None)
-    # New optional field for updating virtual number
     phoneNumber: Optional[str] = Field(None, example="04040377112", description="Exotel virtual number to bind to this agent.")
 
 class SimulateRequest(BaseModel):
@@ -134,21 +134,22 @@ class AgentDataResponse(BaseModel):
     id: str = Field(..., alias="_id", example="65b123456789abcdef012345")
     enterprise: str = Field(..., example="enterprise_id_here")
     name: str = Field(..., example="Support Assistant")
-    instructions: str = Field(..., example="You are a helpful customer support agent...")
-    firstMessage: str = Field(..., example="Hello! How can I help you today?")
+    instructions: Optional[str] = Field("", example="You are a helpful customer support agent...")
+    firstMessage: Optional[str] = Field(default="", example="Hello! How can I help you today?")
     firstMessageOutbound: Optional[str] = Field(default="", example="Hello! I'm Zara calling back from Chauwk. How can I help you today?")
-    voiceId: str = Field(..., example="pNInz6obbfDQGcgMyIGD")
-    language: str = Field(..., example="en")
+    voiceId: Optional[str] = Field(default="default", example="meera")
+    language: Optional[str] = Field(default="en-IN", example="en-IN")
+    languages: Optional[List[str]] = Field(default_factory=lambda: ["en-IN"], example=["en-IN", "hi-IN"])
     hinglish_mode: bool = Field(False)
-    description: str = Field("")
+    description: Optional[str] = Field("")
     agentId: str = Field(..., example="agent_3a2e7c8f9b1d")
     knowledgeBaseIds: List[str] = Field(default_factory=list)
-    terms: TermsModel
+    terms: Optional[TermsModel] = Field(default_factory=lambda: TermsModel(enabled=False, content=""))
     status: str = Field("active")
-    createdBy: str = Field(..., example="enterprise_id_here")
+    createdBy: Optional[str] = Field(default="", example="enterprise_id_here")
     createdAt: str = Field(...)
     updatedAt: str = Field(...)
-    v: int = Field(0, alias="__v")
+    v: Optional[int] = Field(0, alias="__v")
 
 class AgentCreateResponse(BaseModel):
     success: bool = Field(True, example=True)
@@ -249,13 +250,18 @@ async def create_agent(
     validate_enterprise(x_enterprise_id)
     enterprise_id = x_enterprise_id
         
-    # 2. Resolve language field (if array, pick first element)
-    resolved_lang = payload.language
-    if isinstance(resolved_lang, list):
-        if len(resolved_lang) > 0:
-            resolved_lang = resolved_lang[0]
-        else:
-            resolved_lang = "en"
+    # 2. Resolve languages and primary language field (default is English 'en-IN' if omitted)
+    raw_langs = payload.languages or payload.language
+    resolved_languages = []
+    if isinstance(raw_langs, list):
+        resolved_languages = [str(l).strip() for l in raw_langs if l]
+    elif isinstance(raw_langs, str) and raw_langs.strip():
+        resolved_languages = [l.strip() for l in raw_langs.split(",") if l.strip()]
+        
+    if not resolved_languages:
+        resolved_languages = ["en-IN"]
+        
+    primary_language = resolved_languages[0]
 
     # 3. Duplicate check: reject if an agent with the same name already exists for this enterprise
     if mongo_db.client is not None:
@@ -293,11 +299,12 @@ async def create_agent(
         "_id": mongo_id,
         "enterprise": enterprise_id,
         "name": payload.name,
-        "instructions": payload.instructions,
-        "firstMessage": payload.firstMessage,
+        "instructions": payload.instructions or "",
+        "firstMessage": payload.firstMessage or "",
         "firstMessageOutbound": payload.firstMessageOutbound or "",
-        "voiceId": payload.voiceId,
-        "language": resolved_lang,
+        "voiceId": payload.voiceId or "default",
+        "language": primary_language,
+        "languages": resolved_languages,
         "hinglish_mode": payload.hinglish_mode if payload.hinglish_mode is not None else False,
         "description": payload.description or "",
         "agentId": agent_uuid,
