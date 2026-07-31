@@ -251,15 +251,7 @@ class RuleBasedNLP:
         base_response = random.choice(templates)
         
         # Customize response based on entities and context
-        if intent == "product_inquiry" and config.PRODUCTS:
-            product_names = [p.get("name", "") for p in config.PRODUCTS]
-            base_response += f" Our main solutions are: {', '.join(product_names[:3])}."
-        
-        elif intent == "pricing" and config.PRODUCTS:
-            cheapest_product = min(config.PRODUCTS, key=lambda p: self._extract_price(p.get("price", "$999")))
-            base_response += f" For example, our {cheapest_product['name']} starts at {cheapest_product['price']}."
-        
-        elif intent == "contact_info" and entities:
+        if intent == "contact_info" and entities:
             if "name" in entities:
                 base_response = f"Nice to meet you, {entities['name'][0]}! " + base_response
         

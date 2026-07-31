@@ -207,8 +207,9 @@ class OpenAIRealtimeSalesBot:
             instructions = (
                 f"You are a professional representative named {agent_name}. Here are your custom instructions:\n"
                 f"{agent_instructions}\n\n"
+                "Base your responses strictly and exclusively on your custom instructions and the knowledge base. "
+                "If asked about products, services, pricing, or policies not in your instructions, call the query_knowledge_base tool to search. Do not invent products or guess information. "
                 "You must speak and respond EXCLUSIVELY in English. "
-                "Even if the user speaks in another language, or if there is noise, keep your responses in English. "
                 "Keep responses very concise, short, and natural (1-2 sentences). "
                 "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
             )

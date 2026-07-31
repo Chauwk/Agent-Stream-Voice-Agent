@@ -133,23 +133,8 @@ class Config:
     PRODUCTION_MODE = os.getenv('PRODUCTION_MODE', 'false').lower() == 'true'
     
     # ===== PRODUCTS/SERVICES CONFIGURATION =====
-    PRODUCTS = [
-        {
-            "name": "AI Voice Assistant Pro",
-            "price": "$99/month",
-            "description": "Advanced AI-powered voice assistant for customer support"
-        },
-        {
-            "name": "Custom Bot Development",
-            "price": "$299/month", 
-            "description": "Tailored voice bot solutions for your specific business needs"
-        },
-        {
-            "name": "Enterprise Voice Platform",
-            "price": "$599/month",
-            "description": "Full-scale voice AI platform with analytics and integrations"
-        }
-    ]
+    # Purely reliant on system instructions and knowledge base RAG
+    PRODUCTS = []
     
     # ===== VALIDATION =====
     @classmethod
