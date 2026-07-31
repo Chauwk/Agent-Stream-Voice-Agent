@@ -590,6 +590,8 @@ class ModularSalesBot:
                 try:
                     from core.agent_resolver import resolve_agent_config
                     agent_config = await resolve_agent_config(target_id)
+                    if not agent_config and session_from_phone:
+                        agent_config = await resolve_agent_config(session_from_phone)
                 except Exception as e:
                     logger.error(f"⚠️ Failed to dynamically resolve agent for ID {target_id}: {e}")
         # Ensure Gemini warmup runs if it hasn't completed yet

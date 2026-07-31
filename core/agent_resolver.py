@@ -7,14 +7,9 @@ logger = logging.getLogger(__name__)
 
 async def resolve_agent_config(destination_id: str) -> dict | None:
     """
-    Resolves the voice agent configuration based on the incoming SIP destination ID.
-    
-    1. First tries to find the agent by exact agentId or MongoDB ObjectId.
-    2. If not found, looks up the company ID (enterprise ID) using the destination_id 
-       as a phone number, and retrieves the active agent configured for that company.
+    Resolves the voice agent configuration based on the incoming SIP destination ID or phone number.
     """
-    if not mongo_db.client:
-        logger.warning("⚠️ MongoDB client offline, cannot resolve agent config dynamically.")
+    if not mongo_db.client or not destination_id:
         return None
         
     try:
@@ -27,11 +22,19 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
             logger.info(f"🎯 Dynamic agent resolved by Agent ID: {agent.get('name')} ({agent.get('agentId')})")
             return agent
 
-        # 1.5 Search by assigned phoneNumber in MongoDB
+        # 1.5 Search by assigned phoneNumber in MongoDB (exact match)
         agent = await agents_collection.find_one({"phoneNumber": destination_id, "status": "active"})
         if agent:
             logger.info(f"🎯 Dynamic agent resolved by Phone Number: {agent.get('name')} ({agent.get('agentId')})")
             return agent
+
+        # 1.6 Search by digits of phoneNumber (last 10 digits regex match)
+        clean_10 = re.sub(r'\D', '', str(destination_id))[-10:] if destination_id else ""
+        if clean_10 and len(clean_10) >= 7:
+            agent = await agents_collection.find_one({"phoneNumber": {"$regex": clean_10}, "status": "active"})
+            if agent:
+                logger.info(f"🎯 Dynamic agent resolved by Phone Number Regex ({clean_10}): {agent.get('name')} ({agent.get('agentId')})")
+                return agent
             
         # 2. Search by MongoDB string _id (agents store _id as string, not ObjectId)
         agent = await agents_collection.find_one({"_id": destination_id, "status": "active"})
@@ -42,12 +45,16 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
         # 3. Search by phone number mapping (using Company SQL lookup)
         company_id = await get_company_id_by_phone(destination_id)
         if company_id:
-            # Load the most recently updated active agent belonging to this company/enterprise
-            # Support both 'enterprise' (new field) and 'company_id' (legacy field)
-            agent = await agents_collection.find_one(
-                {"enterprise": company_id, "status": "active"},
-                sort=[("updatedAt", -1)]
-            )
+            # Load the active agent bound to this phone or the most recently updated active agent
+            if clean_10:
+                agent = await agents_collection.find_one(
+                    {"phoneNumber": {"$regex": clean_10}, "enterprise": company_id, "status": "active"}
+                )
+            if not agent:
+                agent = await agents_collection.find_one(
+                    {"enterprise": company_id, "status": "active"},
+                    sort=[("updatedAt", -1)]
+                )
             if not agent:
                 agent = await agents_collection.find_one(
                     {"company_id": company_id, "status": "active"},
