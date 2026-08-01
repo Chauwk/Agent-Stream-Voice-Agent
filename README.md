@@ -72,6 +72,19 @@ flowchart TD
 * **`<agent-stream-voice>` Web Component**: Easily embeddable JavaScript widget (`/static/widget.js`) for direct in-browser voice interactions.
 * **WebSocket Endpoint**: `ws://<host>:5000/api/v1/ws/browser-stream?agent_id=<id>` streaming 16kHz PCM audio.
 
+### 4. Call Direction Resolution & Flow
+The system determines the direction (Inbound vs Outbound) of incoming trunk calls dynamically using the following logic:
+* **Active Flow**:
+  1. Triggering an outbound campaign call inserts a record in the `outbound_calls` MongoDB collection, marking the target customer's phone number as `"initiated"` with a timestamp.
+  2. When PJSIP receives an incoming carrier `INVITE` connection on port `5060`, it extracts the last 10 digits of the customer's phone number.
+  3. The server queries the `outbound_calls` collection for any non-completed records matching this phone number suffix created in the last 1 hour.
+  4. If a match is found, the system marks the call as `outbound`, greets the customer dynamically (e.g. *"Hello, am I speaking with {customer_name}?"*), and binds the specific campaign agent.
+  5. If no match is found, the system assumes the call is `inbound`, mapping the configuration based on the dialed virtual DID number or mapping fallback.
+* **Architectural Alternatives**:
+  * **SIP Custom Headers**: Pass a custom routing parameter (like `X-Exotel-CustomField`) from the Exotel outbound REST request. PJSIP parses this header directly from the SIP INVITE packet, providing 1-to-1 matching without database queries.
+  * **Dedicated DID Allocation**: Dedicate specific DID numbers solely for inbound routing vs. outbound campaign bridging, detecting direction instantly by evaluating the `To` user string.
+  * **Exotel Call SID Cache Keying**: Store the returned `CallSid` from the Exotel REST response in an in-memory cache (Redis) on dial trigger, and query it directly when the user agent connects.
+
 ---
 
 ## ⚡ Dual AI Processing Engines
@@ -94,9 +107,11 @@ Designed for ultra-low latency end-to-end conversational naturalness.
 ## 🚀 Key Subsystems & Features
 
 ### 🏢 Multi-Tenant RAG (Retrieval-Augmented Generation)
-* **Document Parsing**: Uploads PDF, DOCX, and TXT files per agent/company.
-* **Vector Store**: Embeddings generated via Vertex AI / OpenAI and indexed in **ChromaDB** with strict tenant isolation (`knowledgeBaseIds`).
-* **Persistent Backup**: Raw files backed up to AWS S3 (`chauwk-aivoiceagent-stream`).
+* **Document Ingestion**: Supports uploading PDFs, Word documents (`.docx`), text files, or Excel templates. Extracted text is split into chunks of 500 characters with a 50-character overlap using a recursive character text splitter.
+* **Vector Embeddings**: Generates 768-dimension vector embeddings using Gemini's `text-embedding-004` model asynchronously via thread execution, protecting the main async loop.
+* **Tenant Namespace Partitioning**: Vectors are stored in ChromaDB collections segregated by enterprise (prefixed with `tenant-{company_id}`). Inside each collection, every chunk is tagged with its source `document_id` and associated `agent_id` metadata.
+* **In-Call Context Injections**: During live calls, the bot accesses the `query_knowledge_base` tool. ChromaDB queries are strictly filtered by the agent's allowed `knowledgeBaseIds` to ensure multi-tenant security, returning the top-2 semantic matches as prompt context.
+* **Raw Document Backing**: Raw files are persistently stored in the `chauwk-aivoiceagent-stream` AWS S3 bucket.
 
 ### 📧 Automated SMTP Email & Post-Call System
 * **Async SMTP Client**: `core/email_client.py` wrapping `smtplib` in non-blocking `asyncio.to_thread` (configured for **Zoho SMTP** `smtp.zoho.in:465`).
