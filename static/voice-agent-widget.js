@@ -259,6 +259,10 @@ class VoiceAgentWidget extends HTMLElement {
                 100% { transform: rotate(360deg); }
             }
 
+            .spin {
+                animation: spin 1s linear infinite;
+            }
+
             @keyframes pulse-border {
                 0% { transform: scale(1); opacity: 0.6; }
                 100% { transform: scale(1.06); opacity: 1; }
@@ -490,6 +494,17 @@ class VoiceAgentWidget extends HTMLElement {
     async startCall() {
         try {
             this.updateState('connecting', 'Connecting...');
+            const shadow = this.shadowRoot;
+            const startBtn = shadow.getElementById('start-btn');
+            if (startBtn) {
+                startBtn.disabled = true;
+                startBtn.innerHTML = `
+                    <svg class="spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"></circle>
+                    </svg>
+                    Connecting...
+                `;
+            }
 
             // Initialize Web Audio Context at native browser rate
             // (We let the server handle any conversion to OpenAI's required 24kHz)
