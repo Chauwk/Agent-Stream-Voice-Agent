@@ -367,11 +367,29 @@ class ModularSalesBot:
             except Exception as e:
                 logger.error(f"❌ Failed to regenerate greeting audio: {e}")
 
+SARVAM_VALID_SPEAKERS = {
+    "anushka", "abhilash", "manisha", "vidya", "arya", "karun", "hitesh", "aditya", 
+    "ritu", "priya", "neha", "rahul", "pooja", "rohan", "simran", "kavya", 
+    "amit", "dev", "ishita", "shreya", "ratan", "varun", "manan", "sumit", 
+    "roopa", "kabir", "aayan", "shubh", "ashutosh", "advait", "anand", "tanya", 
+    "tarun", "sunny", "mani", "gokul", "vijay", "shruti", "suhani", "mohit", 
+    "kavitha", "rehan", "soham", "rupali"
+}
+
+def sanitize_sarvam_speaker(speaker: str | None) -> str:
+    """Ensure speaker name is a valid Sarvam AI speaker, falling back to Config.SARVAM_SPEAKER if unknown."""
+    if not speaker or not isinstance(speaker, str):
+        return Config.SARVAM_SPEAKER
+    spk_lower = speaker.strip().lower()
+    if spk_lower in SARVAM_VALID_SPEAKERS:
+        return spk_lower
+    return Config.SARVAM_SPEAKER if Config.SARVAM_SPEAKER in SARVAM_VALID_SPEAKERS else "anushka"
+
     def _resolve_agent_voice_and_lang(self, session_state: dict, default_lang: str | None = None) -> tuple[str, str]:
         """Resolves target speaker and language code from the agent config, falling back to global Config defaults"""
         agent_config = session_state.get("agent_config")
         if agent_config:
-            speaker = agent_config.get("voiceId") or Config.SARVAM_SPEAKER
+            speaker = sanitize_sarvam_speaker(agent_config.get("voiceId"))
             lang = default_lang or agent_config.get("language") or Config.SARVAM_LANGUAGE_CODE
             # Normalize language code for Sarvam
             if lang == "en":
@@ -387,9 +405,7 @@ class ModularSalesBot:
         agent_id = agent_config.get("agentId", "default")
         agent_name = agent_config.get("name", Config.SALES_BOT_NAME)
         first_msg = (agent_config.get("firstMessage") or "").strip()
-        voice_id = agent_config.get("voiceId", Config.SARVAM_SPEAKER)
-        if not voice_id or voice_id == "default":
-            voice_id = Config.SARVAM_SPEAKER
+        voice_id = sanitize_sarvam_speaker(agent_config.get("voiceId"))
         lang = agent_config.get("language", Config.SARVAM_LANGUAGE_CODE)
         
         if not first_msg:
@@ -412,7 +428,7 @@ class ModularSalesBot:
             
         # Generate on-the-fly and cache
         try:
-            logger.info(f"⏳ Generating custom greeting audio for agent {agent_id}...")
+            logger.info(f"⏳ Generating custom greeting audio for agent {agent_id} (speaker: {voice_id})...")
             kwargs: dict = {
                 "text": first_msg,
                 "target_language_code": lang if lang != "en" else "en-IN", # Sarvam expects en-IN
@@ -444,6 +460,7 @@ class ModularSalesBot:
         if Config.DISABLE_AI_ENGINES:
             return None
         try:
+            voice_id = sanitize_sarvam_speaker(voice_id)
             if lang and lang.startswith("hi"):
                 default_outbound_fallback = f"नमस्ते! मैं {Config.COMPANY_NAME} से {agent_name} बोल रही हूँ। क्या मेरी बात {{customer_name}} से हो रही है?"
             else:
