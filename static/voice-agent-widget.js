@@ -605,7 +605,11 @@ class VoiceAgentWidget extends HTMLElement {
         try {
             const data = JSON.parse(dataStr);
 
-            if (data.event === 'audio' && data.audio) {
+            if (data.error || data.event === 'error') {
+                const errText = data.error || 'Server connection error';
+                console.error('VoiceAgentWidget: Server reported error:', errText);
+                this.updateState('error', errText);
+            } else if (data.event === 'audio' && data.audio) {
                 // Incoming audio response from AI agent
                 this.updateState('speaking', 'Speaking...');
                 const sampleRate = data.sample_rate || 24000; // default to 24kHz (OpenAI Realtime native)

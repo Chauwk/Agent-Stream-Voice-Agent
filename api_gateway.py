@@ -295,8 +295,10 @@ async def browser_stream_endpoint(websocket: WebSocket):
         elif hasattr(sales_bot_engine, "connect_to_openai_enhanced"):
             logger.info(f"🌐 [Browser Widget] Connecting to OpenAI Realtime pipeline for {stream_id}")
             
-            # 1. Connect to OpenAI Realtime API
-            #    Pre-set sample rate to 24kHz (OpenAI Realtime PCM16 native rate)
+            # 1. Pre-set connection entry with browser_websocket so initial greeting audio is delivered
+            sales_bot_engine.openai_connections[stream_id] = {
+                "browser_websocket": websocket
+            }
             sales_bot_engine.connection_sample_rates[stream_id] = 24000
             await sales_bot_engine.connect_to_openai_enhanced(stream_id, agent_config)
             

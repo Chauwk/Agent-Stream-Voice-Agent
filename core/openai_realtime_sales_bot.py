@@ -276,8 +276,10 @@ class OpenAIRealtimeSalesBot:
             input_format = session_config.get('input_audio_format', 'g711_ulaw')
             output_format = session_config.get('output_audio_format', 'g711_ulaw')
             
+            existing_browser_ws = self.openai_connections.get(stream_id, {}).get("browser_websocket")
             self.openai_connections[stream_id] = {
                 "websocket": openai_ws,
+                "browser_websocket": existing_browser_ws,
                 "start_time": time.time(),
                 "sample_rate": sample_rate,
                 "input_format": input_format,
