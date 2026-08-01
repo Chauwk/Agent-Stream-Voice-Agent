@@ -607,7 +607,6 @@ class ModularSalesBot:
             clean_to = "".join(filter(str.isdigit, str(session_to_phone)))[-10:]
             logger.info(f"🔎 Outbound match check: raw_from={sip_call.from_uri}, clean_from={clean_from}, clean_to={clean_to}")
             
-            import time
             now_ts = time.time()
 
             # Check MongoDB outbound_calls collection
