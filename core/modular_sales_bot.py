@@ -598,10 +598,13 @@ class ModularSalesBot:
             logger.info(f"Resolved called DID number: {session_to_phone}, caller number: {session_from_phone}")
             
             # Check if this is an outbound call to a customer
-            caller_phone = session_from_phone
-            clean_caller = "".join(filter(str.isdigit, caller_phone))[-10:]
-            logger.info(f"🔎 Outbound match check: raw_from={sip_call.from_uri}, caller_phone={caller_phone}, clean_caller={clean_caller}")
+            clean_from = "".join(filter(str.isdigit, str(session_from_phone)))[-10:]
+            clean_to = "".join(filter(str.isdigit, str(session_to_phone)))[-10:]
+            logger.info(f"🔎 Outbound match check: raw_from={sip_call.from_uri}, clean_from={clean_from}, clean_to={clean_to}")
             
+            import time
+            now_ts = time.time()
+
             # Check MongoDB outbound_calls collection
             from core.mongo_manager import mongo_db
             if mongo_db.client is not None:
@@ -609,35 +612,51 @@ class ModularSalesBot:
                     db = mongo_db.client.get_default_database()
                     outbound_calls_coll = db['outbound_calls']
                     
-                    if clean_caller:
-                        # Search for active/non-completed records for this phone number suffix created in the last 1 hour
-                        import time
-                        cursor = outbound_calls_coll.find({
-                            "status": {"$not": {"$in": ["completed", "failed", "no-answer", "busy"]}},
-                            "timestamp": {"$gt": time.time() - 3600}
-                        })
-                        async for record in cursor:
-                            record_phone = record.get("phone_number", "")
-                            clean_record = "".join(filter(str.isdigit, record_phone))[-10:]
-                            if clean_record == clean_caller:
-                                outbound_record = record
-                                logger.info(f"📞 MongoDB Matches! Detected OUTBOUND call to customer: {record.get('customer_name')}")
+                    cursor = outbound_calls_coll.find({
+                        "timestamp": {"$gt": now_ts - 3600}
+                    }).sort("timestamp", -1)
+                    
+                    candidates = []
+                    async for record in cursor:
+                        rec_status = str(record.get("status") or "").lower().replace("-", "_").strip()
+                        if rec_status in ["completed", "failed", "no_answer", "busy", "canceled"]:
+                            continue
+                        candidates.append(record)
+                        record_phone = record.get("phone_number", "")
+                        clean_record = "".join(filter(str.isdigit, str(record_phone)))[-10:]
+                        if clean_record and (clean_record == clean_from or clean_record == clean_to):
+                            outbound_record = record
+                            logger.info(f"📞 MongoDB Phone Match! Detected OUTBOUND call to customer: '{record.get('customer_name')}' (phone: {record_phone})")
+                            break
+
+                    # Fallback: match most recent initiated call within 180 seconds if number format differed
+                    if not outbound_record and candidates:
+                        for cand in candidates:
+                            cand_ts = cand.get("timestamp", 0)
+                            if (now_ts - cand_ts) <= 180:
+                                outbound_record = cand
+                                logger.info(f"📞 MongoDB Recent Match! Detected OUTBOUND call to customer: '{cand.get('customer_name')}' (agent: {cand.get('agent_id')})")
                                 break
+
                 except Exception as db_err:
                     logger.error(f"⚠️ Failed to query outbound_calls collection from MongoDB: {db_err}")
             
             # Fallback to in-memory _call_records_cache if MongoDB did not resolve
             if not outbound_record:
                 from controllers.call_controller import _call_records_cache
-                if clean_caller:
-                    for call_sid, record in _call_records_cache.items():
-                        if record.get("status") not in ["completed", "failed", "no-answer", "busy"]:
-                            record_phone = record.get("phone_number", "")
-                            clean_record = "".join(filter(str.isdigit, record_phone))[-10:]
-                            if clean_record == clean_caller:
-                                outbound_record = record
-                                logger.info(f"📞 Cache Matches! Detected OUTBOUND call to customer: {record.get('customer_name')}")
-                                break
+                for call_sid, record in _call_records_cache.items():
+                    rec_status = str(record.get("status") or "").lower().replace("-", "_").strip()
+                    if rec_status not in ["completed", "failed", "no_answer", "busy", "canceled"]:
+                        record_phone = record.get("phone_number", "")
+                        clean_record = "".join(filter(str.isdigit, str(record_phone)))[-10:]
+                        if clean_record and (clean_record == clean_from or clean_record == clean_to):
+                            outbound_record = record
+                            logger.info(f"📞 Cache Phone Match! Detected OUTBOUND call to customer: '{record.get('customer_name')}'")
+                            break
+                        elif (now_ts - record.get("timestamp", 0)) <= 180:
+                            outbound_record = record
+                            logger.info(f"📞 Cache Recent Match! Detected OUTBOUND call to customer: '{record.get('customer_name')}'")
+                            break
                         
         if agent_config is None:
             # Resolve target ID from matched outbound record (agent_id or enterprise_id) or default to session_to_phone
@@ -907,6 +926,7 @@ class ModularSalesBot:
             customer_name = outbound_record.get("customer_name", "Customer")
             voice_id = agent_config.get("voiceId", Config.SARVAM_SPEAKER) if agent_config else Config.SARVAM_SPEAKER
             lang = agent_config.get("language", Config.SARVAM_LANGUAGE_CODE) if agent_config else Config.SARVAM_LANGUAGE_CODE
+            agent_name = agent_config.get("name", Config.SALES_BOT_NAME) if agent_config else Config.SALES_BOT_NAME
             greeting_audio = await self._get_outbound_greeting_audio(customer_name, voice_id, lang, agent_name, agent_config)
         elif agent_config:
             greeting_audio = await self._get_agent_greeting_audio(agent_config)
