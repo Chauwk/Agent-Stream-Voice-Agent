@@ -18,15 +18,15 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
         agents_collection = db['agents']
         
         # 1. Search directly by custom agentId
-        agent = await agents_collection.find_one({"agentId": destination_id})
+        agent = await agents_collection.find_one({"agentId": destination_id, "status": "active"})
         if agent:
             logger.info(f"🎯 Dynamic agent resolved by Agent ID: {agent.get('name')} ({agent.get('agentId')})")
             return agent
 
         # 2. Search by MongoDB _id (string or ObjectId)
-        agent = await agents_collection.find_one({"_id": destination_id})
+        agent = await agents_collection.find_one({"_id": destination_id, "status": "active"})
         if not agent and ObjectId.is_valid(destination_id):
-            agent = await agents_collection.find_one({"_id": ObjectId(destination_id)})
+            agent = await agents_collection.find_one({"_id": ObjectId(destination_id), "status": "active"})
         if agent:
             logger.info(f"🎯 Dynamic agent resolved by MongoDB _id: {agent.get('name')} ({agent.get('agentId')})")
             return agent

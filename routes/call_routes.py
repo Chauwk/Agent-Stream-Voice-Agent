@@ -82,7 +82,7 @@ class CallStatusDetailsResponse(BaseModel):
     from_number: Optional[str] = Field(None, json_schema_extra={"example": "+918047190000"})
     to_number: Optional[str] = Field(None, json_schema_extra={"example": "+919876543210"})
     start_time: Optional[str] = Field(None, json_schema_extra={"example": "2026-05-22 10:17:41"})
-    price: Optional[str] = Field(None, json_schema_extra={"example": "0.50"})
+    price: Optional[Union[str, float]] = Field(None, json_schema_extra={"example": "0.50"})
     error: Optional[str] = Field(None, json_schema_extra={"example": None})
 
 class CampaignCallDetail(BaseModel):

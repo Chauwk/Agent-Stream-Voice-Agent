@@ -92,11 +92,19 @@ async def initiate_outbound_call(
         if agent_id or enterprise_id:
             try:
                 from core.mongo_manager import mongo_db
+                from bson import ObjectId
                 if mongo_db.client is not None:
                     db = mongo_db.client.get_default_database()
                     agents_col = db['agents']
                     target_query = agent_id if (agent_id and agent_id != "default") else enterprise_id
-                    agent_doc = await agents_col.find_one({"$or": [{"agentId": target_query}, {"_id": target_query}, {"enterprise": target_query}], "status": "active"})
+                    or_conditions = [
+                        {"agentId": target_query},
+                        {"_id": target_query},
+                        {"enterprise": target_query}
+                    ]
+                    if target_query and ObjectId.is_valid(target_query):
+                        or_conditions.append({"_id": ObjectId(target_query)})
+                    agent_doc = await agents_col.find_one({"$or": or_conditions, "status": "active"})
                     if agent_doc and agent_doc.get("phoneNumber"):
                         agent_phone = agent_doc.get("phoneNumber")
                         logger.info(f"🎯 Resolved agent virtual phone number '{agent_phone}' for Agent ID '{agent_id}'")
