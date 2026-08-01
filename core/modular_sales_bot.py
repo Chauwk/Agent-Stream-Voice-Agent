@@ -12,6 +12,7 @@ import base64
 import websockets
 from google import genai
 from sarvamai import SarvamAI, AsyncSarvamAI
+from urllib.parse import quote
 from config import Config
 from websockets.connection import State
 
@@ -909,35 +910,44 @@ class ModularSalesBot:
 
         endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
         
-        # Build dynamic keyword boosts from agent config so every agent's brand name gets recognised correctly
+        # Build dynamic keyword boosts from agent config with proper URL encoding
         # Deepgram 'keywords' param: repeat param per keyword with optional boost weight (default 1.0, max ~10.0)
         keyword_parts = []
         
+        def _add_kw(kw: str, weight: float):
+            if not kw or not isinstance(kw, str):
+                return
+            cleaned = kw.strip()
+            if cleaned:
+                # URL encode the keyword phrase (e.g. spaces become %20)
+                encoded = quote(cleaned)
+                keyword_parts.append(f"keywords={encoded}:{weight}")
+
         # 1. Platform name variants (always boost "Chauwk" since it's the platform)
         platform_name = Config.COMPANY_NAME or "Chauwk"
-        platform_variants = set()
-        platform_variants.add(platform_name)
-        platform_variants.add(platform_name.lower())
-        # Add phonetic variants for Chauwk specifically since it is commonly misheard
+        _add_kw(platform_name, 10.0)
+        _add_kw(platform_name.lower(), 10.0)
         if "chauwk" in platform_name.lower():
-            platform_variants.update(["chauwk", "Chauwk", "chowk", "chawk", "chawk"])
-        for v in platform_variants:
-            keyword_parts.append(f"keywords={v}:10.0")
+            for variant in ["chauwk", "chowk", "chawk"]:
+                _add_kw(variant, 10.0)
         
         # 2. Bot / agent name (from agent config if available, else global config)
         agent_name_kw = agent_config.get("name") or Config.SALES_BOT_NAME
         if agent_name_kw:
-            keyword_parts.append(f"keywords={agent_name_kw}:5.0")
-            keyword_parts.append(f"keywords={agent_name_kw.lower()}:5.0")
+            _add_kw(agent_name_kw, 5.0)
+            _add_kw(agent_name_kw.lower(), 5.0)
         
         # 3. Agent's own company / enterprise name (from agent_config)
         agent_company = agent_config.get("companyName") or agent_config.get("enterprise")
         if agent_company and agent_company.lower() != platform_name.lower():
-            keyword_parts.append(f"keywords={agent_company}:8.0")
-            keyword_parts.append(f"keywords={agent_company.lower()}:8.0")
+            _add_kw(agent_company, 8.0)
+            _add_kw(agent_company.lower(), 8.0)
         
         keywords_query = "&".join(keyword_parts)
-        dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&{keywords_query}"
+        if keywords_query:
+            dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&{keywords_query}"
+        else:
+            dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
         import inspect
