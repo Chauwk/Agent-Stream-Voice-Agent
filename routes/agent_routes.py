@@ -696,14 +696,65 @@ async def get_agent_embed_link(
             detail={"success": False, "message": "Agent not found"}
         )
     
-    agent_id = agent.get("agentId")
-    embed_url = f"https://your-domain.com/widget?agentId={agent_id}"
-    iframe_code = f'<iframe src="{embed_url}" width="350" height="500" frameborder="0"></iframe>'
+    agent_id = agent.get("agentId") or str(agent.get("_id", id))
+    
+    from config import Config
+    base_url = Config.SERVER_BASE_URL.rstrip("/")
+    
+    # The HTML tag that embeds the widget on any webpage
+    html_tag = (
+        f'<agent-stream-voice '
+        f'agent-id="{agent_id}" '
+        f'server-url="{base_url}">'
+        f'</agent-stream-voice>'
+    )
+    
+    # The script tag that loads the widget JS
+    script_tag = f'<script src="{base_url}/static/voice-agent-widget.js" async></script>'
+    
+    # Full HTML snippet to paste into any page body
+    html_snippet = f"{html_tag}\n{script_tag}"
+    
+    # Iframe wrapper (optional, sandboxed embed)
+    iframe_code = (
+        f'<iframe src="{base_url}/widget?agentId={agent_id}" '
+        f'width="380" height="540" frameborder="0" allow="microphone"></iframe>'
+    )
+    
+    # Direct WebSocket URL for the voice stream
+    ws_url = base_url.replace("https://", "wss://").replace("http://", "ws://")
+    websocket_url = f"{ws_url}/api/v1/stream/browser?agent_id={agent_id}"
+    
+    # JavaScript console snippet for quick testing on any website
+    js_test_snippet = (
+        f"const s=document.createElement('script');"
+        f"s.src='{base_url}/static/voice-agent-widget.js';"
+        f"document.body.appendChild(s);"
+        f"s.onload=()=>{{"
+        f"const w=document.createElement('agent-stream-voice');"
+        f"w.setAttribute('agent-id','{agent_id}');"
+        f"w.setAttribute('server-url','{base_url}');"
+        f"document.body.appendChild(w);"
+        f"}};"
+    )
     
     return {
         "success": True,
-        "embedLink": embed_url,
-        "iframe": iframe_code
+        "agentId": agent_id,
+        "serverUrl": base_url,
+        "websocketUrl": websocket_url,
+        "embedCode": {
+            "htmlSnippet": html_snippet,
+            "htmlTag": html_tag,
+            "scriptTag": script_tag,
+            "iframe": iframe_code,
+            "jsConsoleSnippet": js_test_snippet
+        },
+        "instructions": {
+            "step1": f"Paste the htmlTag where you want the widget to appear on your webpage.",
+            "step2": f"Paste the scriptTag at the bottom of your <body> tag.",
+            "quickTest": f"Open any browser tab, press F12 → Console, type 'allow pasting', then paste jsConsoleSnippet."
+        }
     }
 
 @router.post(

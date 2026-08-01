@@ -50,6 +50,7 @@ class Config:
     SERVER_HOST = os.getenv('SERVER_HOST', '0.0.0.0')
     SERVER_PORT = int(os.getenv('SERVER_PORT', '5002'))
     WEB_DASHBOARD_PORT = int(os.getenv('WEB_DASHBOARD_PORT', '5001'))
+    SERVER_BASE_URL = os.getenv('SERVER_BASE_URL', 'https://ai-agent-stream.chauwk.com')
     
     # ===== LOGGING =====
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
