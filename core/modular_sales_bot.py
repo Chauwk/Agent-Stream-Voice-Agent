@@ -1661,15 +1661,15 @@ class ModularSalesBot:
                     if silence_count == 1:
                         logger.info(f"⏱️ Silence Intimation 1/3 for call {call_id}. Prompting customer.")
                         if llm_queue:
-                            await llm_queue.put("System: The customer has been silent for 15 seconds (Intimation 1/3). Please politely prompt them in their language to see if they are still on the line.")
+                            await llm_queue.put("System: The customer has been silent for 15 seconds (Intimation 1/3). Please politely prompt them in the allowed agent language(s) to see if they are still on the line.")
                     elif silence_count == 2:
                         logger.info(f"⏱️ Silence Intimation 2/3 for call {call_id}. Prompting customer again.")
                         if llm_queue:
-                            await llm_queue.put("System: The customer is still silent (Intimation 2/3). Please ask in their language if they are still there or need assistance.")
+                            await llm_queue.put("System: The customer is still silent (Intimation 2/3). Please ask in the allowed agent language(s) if they are still there or need assistance.")
                     elif silence_count >= 3:
                         logger.info(f"⏱️ Final Silence Intimation 3/3 reached for call {call_id}. Hanging up after warning.")
                         if llm_queue:
-                            await llm_queue.put("System: The customer has remained silent after 3 intimations. Please state politely in their language that since there is no response, you are hanging up now. Goodbye.")
+                            await llm_queue.put("System: The customer has remained silent after 3 intimations. Please state politely in the allowed agent language(s) that since there is no response, you are hanging up now. Goodbye.")
                         asyncio.create_task(self.delayed_hangup(call_id, delay_seconds=4.0))
                         break
                         
