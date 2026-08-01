@@ -43,6 +43,24 @@ def apply_audio_gain(pcm_data: bytes, gain: float) -> bytes:
         logger.error(f"Failed to apply audio gain: {e}")
         return pcm_data
 
+SARVAM_VALID_SPEAKERS = {
+    "anushka", "abhilash", "manisha", "vidya", "arya", "karun", "hitesh", "aditya", 
+    "ritu", "priya", "neha", "rahul", "pooja", "rohan", "simran", "kavya", 
+    "amit", "dev", "ishita", "shreya", "ratan", "varun", "manan", "sumit", 
+    "roopa", "kabir", "aayan", "shubh", "ashutosh", "advait", "anand", "tanya", 
+    "tarun", "sunny", "mani", "gokul", "vijay", "shruti", "suhani", "mohit", 
+    "kavitha", "rehan", "soham", "rupali"
+}
+
+def sanitize_sarvam_speaker(speaker: str | None) -> str:
+    """Ensure speaker name is a valid Sarvam AI speaker, falling back to Config.SARVAM_SPEAKER if unknown."""
+    if not speaker or not isinstance(speaker, str):
+        return Config.SARVAM_SPEAKER
+    spk_lower = speaker.strip().lower()
+    if spk_lower in SARVAM_VALID_SPEAKERS:
+        return spk_lower
+    return Config.SARVAM_SPEAKER if Config.SARVAM_SPEAKER in SARVAM_VALID_SPEAKERS else "anushka"
+
 
 async def trigger_post_call_emails(call_log: dict):
     """
@@ -366,24 +384,6 @@ class ModularSalesBot:
                     logger.error("❌ Failed to regenerate greeting: Empty response from Sarvam")
             except Exception as e:
                 logger.error(f"❌ Failed to regenerate greeting audio: {e}")
-
-SARVAM_VALID_SPEAKERS = {
-    "anushka", "abhilash", "manisha", "vidya", "arya", "karun", "hitesh", "aditya", 
-    "ritu", "priya", "neha", "rahul", "pooja", "rohan", "simran", "kavya", 
-    "amit", "dev", "ishita", "shreya", "ratan", "varun", "manan", "sumit", 
-    "roopa", "kabir", "aayan", "shubh", "ashutosh", "advait", "anand", "tanya", 
-    "tarun", "sunny", "mani", "gokul", "vijay", "shruti", "suhani", "mohit", 
-    "kavitha", "rehan", "soham", "rupali"
-}
-
-def sanitize_sarvam_speaker(speaker: str | None) -> str:
-    """Ensure speaker name is a valid Sarvam AI speaker, falling back to Config.SARVAM_SPEAKER if unknown."""
-    if not speaker or not isinstance(speaker, str):
-        return Config.SARVAM_SPEAKER
-    spk_lower = speaker.strip().lower()
-    if spk_lower in SARVAM_VALID_SPEAKERS:
-        return spk_lower
-    return Config.SARVAM_SPEAKER if Config.SARVAM_SPEAKER in SARVAM_VALID_SPEAKERS else "anushka"
 
     def _resolve_agent_voice_and_lang(self, session_state: dict, default_lang: str | None = None) -> tuple[str, str]:
         """Resolves target speaker and language code from the agent config, falling back to global Config defaults"""
