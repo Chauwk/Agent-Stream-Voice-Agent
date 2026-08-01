@@ -813,20 +813,7 @@ class ModularSalesBot:
             "sarvam_current_language_code": None
         }
         
-        # 3. Play greeting instantly (prefer dynamic agent audio, fall back to cached default)
-        greeting_audio = self.cached_greeting_audio
-        if is_active_outbound_leg:
-            customer_name = outbound_record.get("customer_name", "Customer")
-            voice_id = agent_config.get("voiceId", Config.SARVAM_SPEAKER) if agent_config else Config.SARVAM_SPEAKER
-            lang = agent_config.get("language", Config.SARVAM_LANGUAGE_CODE) if agent_config else Config.SARVAM_LANGUAGE_CODE
-            greeting_audio = await self._get_outbound_greeting_audio(customer_name, voice_id, lang, agent_name, agent_config)
-        elif agent_config:
-            greeting_audio = await self._get_agent_greeting_audio(agent_config)
-        if greeting_audio:
-            logger.info(f"🗣️ Playing greeting for call: {call_id}")
-            asyncio.create_task(self._send_audio_to_client(call_id, greeting_audio))
-
-        # 4. Connect to WebSockets
+        # 3. Connect to WebSockets and initialize pipeline workers
         try:
             await self._connect_websockets(call_id)
             logger.info(f"✅ Deepgram WebSocket connected for call: {call_id}")
@@ -847,6 +834,21 @@ class ModularSalesBot:
             logger.error(f"❌ Failed to initialize modular pipeline sockets: {e}")
             await self.cleanup_connections(call_id)
             raise
+
+        # 4. Play greeting AFTER RTP & WebSockets are ready
+        greeting_audio = self.cached_greeting_audio
+        if is_active_outbound_leg:
+            customer_name = outbound_record.get("customer_name", "Customer")
+            voice_id = agent_config.get("voiceId", Config.SARVAM_SPEAKER) if agent_config else Config.SARVAM_SPEAKER
+            lang = agent_config.get("language", Config.SARVAM_LANGUAGE_CODE) if agent_config else Config.SARVAM_LANGUAGE_CODE
+            greeting_audio = await self._get_outbound_greeting_audio(customer_name, voice_id, lang, agent_name, agent_config)
+        elif agent_config:
+            greeting_audio = await self._get_agent_greeting_audio(agent_config)
+            
+        if greeting_audio:
+            logger.info(f"🗣️ Playing greeting for call: {call_id}")
+            await asyncio.sleep(0.15)  # Brief pause to ensure RTP socket is open
+            asyncio.create_task(self._send_audio_to_client(call_id, greeting_audio))
 
     async def _connect_websockets(self, call_id: str):
         """Connect to Deepgram WebSocket"""
