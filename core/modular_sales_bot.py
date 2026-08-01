@@ -517,11 +517,16 @@ class ModularSalesBot:
             return None
         try:
             voice_id = sanitize_sarvam_speaker(voice_id)
-            if lang and lang.startswith("hi"):
+            if not lang:
+                lang = Config.SARVAM_LANGUAGE_CODE
+            elif "-" not in lang:
+                lang = f"{lang}-IN"
+
+            if lang.startswith("hi"):
                 default_outbound_fallback = f"नमस्ते! मैं {Config.COMPANY_NAME} से {agent_name} बोल रही हूँ। क्या मेरी बात {{customer_name}} से हो रही है?"
-            elif lang and lang.startswith("te"):
+            elif lang.startswith("te"):
                 default_outbound_fallback = f"నమస్కారం! నేను {Config.COMPANY_NAME} నుండి {agent_name} మాట్లాడుతున్నాను. నేను {{customer_name}} గారితో మాట్లాడుతున్నానా?"
-            elif lang and lang.startswith("ta"):
+            elif lang.startswith("ta"):
                 default_outbound_fallback = f"வணக்கம்! நான் {Config.COMPANY_NAME} இலிருந்து {agent_name} பேசுகிறேன். நான் {{customer_name}} அவர்களிடம் பேசுகிறேனா?"
             else:
                 default_outbound_fallback = f"Hello! I'm {agent_name} calling from {Config.COMPANY_NAME}. Am I speaking with {{customer_name}}?"
@@ -532,7 +537,7 @@ class ModularSalesBot:
             logger.info(f"⏳ Generating custom outbound greeting audio ({lang}): '{greeting_text}'")
             kwargs: dict = {
                 "text": greeting_text,
-                "target_language_code": lang if lang != "en" else "en-IN",
+                "target_language_code": lang,
                 "speaker": voice_id,
                 "model": Config.SARVAM_MODEL,
                 "output_audio_codec": "linear16",
@@ -928,6 +933,9 @@ class ModularSalesBot:
             lang = agent_config.get("language", Config.SARVAM_LANGUAGE_CODE) if agent_config else Config.SARVAM_LANGUAGE_CODE
             agent_name = agent_config.get("name", Config.SALES_BOT_NAME) if agent_config else Config.SALES_BOT_NAME
             greeting_audio = await self._get_outbound_greeting_audio(customer_name, voice_id, lang, agent_name, agent_config)
+            if not greeting_audio and agent_config:
+                logger.warning("⚠️ Outbound greeting generation failed, falling back to agent standard greeting audio")
+                greeting_audio = await self._get_agent_greeting_audio(agent_config)
         elif agent_config:
             greeting_audio = await self._get_agent_greeting_audio(agent_config)
         else:
