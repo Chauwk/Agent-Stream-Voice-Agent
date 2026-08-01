@@ -125,6 +125,16 @@ class OpenAIAudioPort(AudioMediaPortBase):
         except Exception as e:
             logger.error(f"❌ Error in onFrameRequested: {e}")
 
+    def __del__(self):
+        try:
+            if hasattr(self, 'sip_server') and self.sip_server and hasattr(self.sip_server, 'ep'):
+                try:
+                    self.sip_server.ep.libRegisterThread("Python_GC_AudioPort")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
 class MyCall(CallBase):
     """Subclass of pj.Call to manage individual call states and media connections"""
     
@@ -133,6 +143,16 @@ class MyCall(CallBase):
         self.sip_server = sip_server
         self.media_port = None
         self.sip_call_id = None
+        
+    def __del__(self):
+        try:
+            if hasattr(self, 'sip_server') and self.sip_server and hasattr(self.sip_server, 'ep'):
+                try:
+                    self.sip_server.ep.libRegisterThread("Python_GC_Call")
+                except Exception:
+                    pass
+        except Exception:
+            pass
         
     def onCallState(self, prm):
         try:
@@ -508,6 +528,12 @@ class SIPServer:
             
             # Hang up call if object was resolved
             if call:
+                if not hasattr(self, "_retired_call_objects"):
+                    self._retired_call_objects = []
+                self._retired_call_objects.append(call)
+                if len(self._retired_call_objects) > 50:
+                    self._retired_call_objects = self._retired_call_objects[-20:]
+
                 try:
                     if hasattr(self, 'ep'):
                         try:
