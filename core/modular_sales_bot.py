@@ -835,10 +835,9 @@ class ModularSalesBot:
             tts_process_task = asyncio.create_task(self._process_tts_queue(call_id))
             llm_process_task = asyncio.create_task(self._process_llm_queue(call_id))
             dg_keepalive_task = asyncio.create_task(self._send_deepgram_keepalives(call_id))
-            sarvam_ws_task = asyncio.create_task(self._run_sarvam_websocket_loop(call_id))
             silence_task = asyncio.create_task(self._silence_monitor_loop(call_id))
             
-            session_state["tasks"].extend([dg_task, tts_process_task, llm_process_task, dg_keepalive_task, sarvam_ws_task, silence_task])
+            session_state["tasks"].extend([dg_task, tts_process_task, llm_process_task, dg_keepalive_task, silence_task])
             
         except Exception as e:
             logger.error(f"❌ Failed to initialize modular pipeline sockets: {e}")
@@ -1457,98 +1456,49 @@ class ModularSalesBot:
                 # Detect language of sentence text dynamically (Hindi, Telugu, Tamil, or English)
                 detected_lang = self._detect_sentence_language(sentence_text, session_state)
                 
-                # Check Sarvam WebSocket connection readiness
-                sarvam_ws = session_state.get("sarvam_ws")
-                current_sarvam_lang = session_state.get("sarvam_current_language_code")
-                
-                if sarvam_ws and hasattr(sarvam_ws, "_websocket") and sarvam_ws._websocket.open:
-                    if current_sarvam_lang != detected_lang:
-                        logger.info(f"🔊 Re-configuring Sarvam WS for language {detected_lang}...")
-                        speaker, _ = self._resolve_agent_voice_and_lang(session_state, detected_lang)
-                        kwargs: dict = {
-                            "model": Config.SARVAM_MODEL,
-                            "target_language_code": detected_lang,
-                            "speaker": speaker,
-                            "speech_sample_rate": 16000,
-                            "output_audio_codec": "linear16"
-                        }
-                        pace = getattr(Config, "SARVAM_PACE", 1.15)
-                        if pace is not None:
-                            kwargs["pace"] = pace
-                        pitch = getattr(Config, "SARVAM_PITCH", 0.0)
-                        if pitch is not None and pitch != 0.0 and "bulbul:v3" not in Config.SARVAM_MODEL:
-                            kwargs["pitch"] = pitch
-                            
-                        await sarvam_ws.configure(**kwargs)
-                        session_state["sarvam_current_language_code"] = detected_lang
-                
-                # Fallback to HTTP POST TTS if WebSocket is not ready
-                if not sarvam_ws or not hasattr(sarvam_ws, "_websocket") or not sarvam_ws._websocket.open or ctx_id != session_state["current_context_id"]:
-                    if ctx_id != session_state["current_context_id"]:
-                        tts_queue.task_done()
-                        continue
-                        
-                    logger.warning("⚠️ Sarvam WebSocket not available. Falling back to HTTP TTS.")
-                    try:
-                        speaker, _ = self._resolve_agent_voice_and_lang(session_state, detected_lang)
-                        kwargs: dict = {
-                            "text": sentence_text,
-                            "target_language_code": detected_lang,
-                            "speaker": speaker,
-                            "model": Config.SARVAM_MODEL,
-                            "output_audio_codec": "linear16",
-                            "speech_sample_rate": 16000
-                        }
-                        pace = getattr(Config, "SARVAM_PACE", 1.15)
-                        if pace is not None:
-                            kwargs["pace"] = pace
-                        pitch = getattr(Config, "SARVAM_PITCH", 0.0)
-                        if pitch is not None and pitch != 0.0 and "bulbul:v3" not in Config.SARVAM_MODEL:
-                            kwargs["pitch"] = pitch
-                            
-                        assert self.sarvam_client is not None
-                        tts_coro = self.sarvam_client.text_to_speech.convert(**kwargs)
-                        tts_task = asyncio.create_task(tts_coro)
-                        session_state["current_tts_task"] = tts_task
-                        
-                        response = await tts_task
-                        
-                        if ctx_id != session_state["current_context_id"]:
-                            logger.info(f"🚫 Context changed during HTTP TTS. Discarding output.")
-                            continue
-                            
-                        if response and response.audios:
-                            base64_audio = response.audios[0]
-                            raw_audio = base64.b64decode(base64_audio)
-                            pcm_audio = apply_audio_gain(raw_audio, getattr(Config, "AUDIO_GAIN", 1.0))
-                            logger.info(f"🗣️ ZARA SPEAKING (HTTP): {sentence_text}")
-                            await self._send_audio_to_client(call_id, pcm_audio)
-                        else:
-                            logger.error(f"❌ Empty response from HTTP TTS for: '{sentence_text}'")
-                    except asyncio.CancelledError:
-                        logger.info(f"🚫 HTTP TTS task cancelled for context: {ctx_id}")
-                    except Exception as e:
-                        logger.error(f"❌ HTTP TTS failed: {e}")
-                    finally:
-                        session_state["current_tts_task"] = None
-                        tts_queue.task_done()
-                    continue
-                
-                # If we get here, WebSocket is available!
+                # Use reliable Sarvam HTTP REST TTS API for synthesis & gain-boosted playback
                 try:
-                    async def run_websocket_tts():
-                        await sarvam_ws.convert(sentence_text)
+                    speaker, resolved_lang = self._resolve_agent_voice_and_lang(session_state, detected_lang)
+                    target_lang_code = resolved_lang if "-" in resolved_lang else f"{resolved_lang}-IN"
+                    
+                    kwargs: dict = {
+                        "text": sentence_text,
+                        "target_language_code": target_lang_code,
+                        "speaker": speaker,
+                        "model": Config.SARVAM_MODEL,
+                        "output_audio_codec": "linear16",
+                        "speech_sample_rate": 16000
+                    }
+                    pace = getattr(Config, "SARVAM_PACE", 1.15)
+                    if pace is not None:
+                        kwargs["pace"] = pace
+                    pitch = getattr(Config, "SARVAM_PITCH", 0.0)
+                    if pitch is not None and pitch != 0.0 and "bulbul:v3" not in Config.SARVAM_MODEL:
+                        kwargs["pitch"] = pitch
                         
-                    tts_task = asyncio.create_task(run_websocket_tts())
+                    assert self.sarvam_client is not None
+                    tts_coro = self.sarvam_client.text_to_speech.convert(**kwargs)
+                    tts_task = asyncio.create_task(tts_coro)
                     session_state["current_tts_task"] = tts_task
                     
-                    await tts_task
+                    response = await tts_task
                     
+                    if ctx_id != session_state["current_context_id"]:
+                        logger.info(f"🚫 Context changed during HTTP TTS. Discarding output for: '{sentence_text[:30]}...'")
+                        continue
+                        
+                    if response and response.audios:
+                        base64_audio = response.audios[0]
+                        raw_audio = base64.b64decode(base64_audio)
+                        pcm_audio = apply_audio_gain(raw_audio, getattr(Config, "AUDIO_GAIN", 1.0))
+                        logger.info(f"🗣️ BOT SPEAKING: '{sentence_text}' (lang: {target_lang_code}, speaker: {speaker})")
+                        await self._send_audio_to_client(call_id, pcm_audio)
+                    else:
+                        logger.error(f"❌ Empty response from HTTP TTS for: '{sentence_text}'")
                 except asyncio.CancelledError:
-                    logger.info(f"🚫 WS TTS task cancelled for context: {ctx_id}")
+                    logger.info(f"🚫 HTTP TTS task cancelled for context: {ctx_id}")
                 except Exception as e:
-                    logger.error(f"❌ WS TTS failed: {e}")
-                    session_state["sarvam_ws"] = None
+                    logger.error(f"❌ HTTP TTS failed: {e}")
                 finally:
                     session_state["current_tts_task"] = None
                     tts_queue.task_done()
