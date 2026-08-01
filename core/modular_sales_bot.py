@@ -595,6 +595,10 @@ class ModularSalesBot:
                     agent_config = await resolve_agent_config(target_id)
                     if not agent_config and session_from_phone:
                         agent_config = await resolve_agent_config(session_from_phone)
+                        
+                    if agent_config:
+                        # Pre-trigger custom agent greeting audio caching in background so audio is ready in RAM
+                        asyncio.create_task(self._get_agent_greeting_audio(agent_config))
                 except Exception as e:
                     logger.error(f"⚠️ Failed to dynamically resolve agent for ID {target_id}: {e}")
         # Ensure Gemini warmup runs if it hasn't completed yet
@@ -838,7 +842,7 @@ class ModularSalesBot:
             raise
 
         # 4. Play greeting AFTER RTP & WebSockets are ready
-        greeting_audio = self.cached_greeting_audio
+        greeting_audio = None
         if is_active_outbound_leg:
             customer_name = outbound_record.get("customer_name", "Customer")
             voice_id = agent_config.get("voiceId", Config.SARVAM_SPEAKER) if agent_config else Config.SARVAM_SPEAKER
@@ -846,9 +850,7 @@ class ModularSalesBot:
             greeting_audio = await self._get_outbound_greeting_audio(customer_name, voice_id, lang, agent_name, agent_config)
         elif agent_config:
             greeting_audio = await self._get_agent_greeting_audio(agent_config)
-            
-        if not greeting_audio:
-            logger.info("⚠️ Custom greeting audio empty. Falling back to cached default greeting audio.")
+        else:
             greeting_audio = self.cached_greeting_audio
             
         if greeting_audio:
@@ -857,12 +859,24 @@ class ModularSalesBot:
             asyncio.create_task(self._send_audio_to_client(call_id, greeting_audio))
 
     async def _connect_websockets(self, call_id: str):
-        """Connect to Deepgram WebSocket"""
+        """Connect to Deepgram WebSocket with language mapped to agent config"""
         session_state = self.connections[call_id]
         
-        # Deepgram Live WS config - boost company and bot name keywords with multilingual support
+        # Determine Deepgram STT language based on agent configuration
+        agent_config = session_state.get("agent_config") or {}
+        agent_lang = agent_config.get("language") or Config.SARVAM_LANGUAGE_CODE
+        if agent_lang and agent_lang.startswith("te"):
+            dg_lang = "te"
+        elif agent_lang and agent_lang.startswith("hi"):
+            dg_lang = "hi"
+        elif agent_lang and agent_lang.startswith("ta"):
+            dg_lang = "ta"
+        elif agent_lang and agent_lang.startswith("en"):
+            dg_lang = "en"
+        else:
+            dg_lang = "multi"
+
         endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
-        dg_lang = getattr(Config, "DEEPGRAM_LANGUAGE", "multi")
         dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&keywords=Chauwk:4.0&keywords={Config.SALES_BOT_NAME}:2.0"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
@@ -874,6 +888,7 @@ class ModularSalesBot:
         else:
             connect_kwargs["extra_headers"] = dg_headers
             
+        logger.info(f"🔌 Connecting to Deepgram WS (language: {dg_lang}) for call: {call_id}")
         dg_ws = await websockets.connect(dg_url, **connect_kwargs)
         session_state["deepgram_ws"] = dg_ws
 
