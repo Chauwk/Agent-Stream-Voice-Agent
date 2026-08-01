@@ -965,7 +965,10 @@ class ModularSalesBot:
             if cleaned:
                 # URL encode the keyword phrase (e.g. spaces become %20)
                 encoded = quote(cleaned)
-                keyword_parts.append(f"keywords={encoded}:{weight}")
+                if dg_model == "nova-3":
+                    keyword_parts.append(f"keyterm={encoded}")
+                else:
+                    keyword_parts.append(f"keywords={encoded}:{weight}")
 
         # 1. Platform name variants (always boost "Chauwk" since it's the platform)
         platform_name = Config.COMPANY_NAME or "Chauwk"
