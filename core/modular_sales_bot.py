@@ -463,40 +463,53 @@ class ModularSalesBot:
         # Check in memory cache
         if not hasattr(self, "_agent_greeting_cache"):
             self._agent_greeting_cache = {}
+        if not hasattr(self, "_agent_greeting_tasks"):
+            self._agent_greeting_tasks = {}
             
         cache_key = f"{agent_id}_{hash(first_msg)}_{voice_id}_{lang}"
         if cache_key in self._agent_greeting_cache:
             return self._agent_greeting_cache[cache_key]
             
-        # Generate on-the-fly and cache
-        sarvam_target_lang = f"{lang}-IN" if (lang and "-" not in lang) else (lang or "en-IN")
-        try:
-            logger.info(f"⏳ Generating custom greeting audio for agent {agent_id} (speaker: {voice_id}, lang: {sarvam_target_lang})...")
-            kwargs: dict = {
-                "text": first_msg,
-                "target_language_code": sarvam_target_lang,
-                "speaker": voice_id,
-                "model": Config.SARVAM_MODEL,
-                "output_audio_codec": "linear16",
-                "speech_sample_rate": 16000
-            }
-            pace = getattr(Config, "SARVAM_PACE", 1.15)
-            if pace is not None:
-                kwargs["pace"] = pace
-            pitch = getattr(Config, "SARVAM_PITCH", 0.0)
-            if pitch is not None and pitch != 0.0 and "bulbul:v3" not in Config.SARVAM_MODEL:
-                kwargs["pitch"] = pitch
-                
-            assert self.sarvam_client is not None
-            response = await self.sarvam_client.text_to_speech.convert(**kwargs)
-            if response and response.audios:
-                base64_audio = response.audios[0]
-                raw_audio = base64.b64decode(base64_audio)
-                audio_with_gain = apply_audio_gain(raw_audio, getattr(Config, "AUDIO_GAIN", 1.0))
-                self._agent_greeting_cache[cache_key] = audio_with_gain
-                return audio_with_gain
-        except Exception as e:
-            logger.error(f"❌ Failed to generate custom greeting for agent {agent_id}: {e}")
+        if cache_key in self._agent_greeting_tasks:
+            return await self._agent_greeting_tasks[cache_key]
+
+        # Generate on-the-fly and cache with task deduplication
+        async def _do_generate():
+            sarvam_target_lang = f"{lang}-IN" if (lang and "-" not in lang) else (lang or "en-IN")
+            try:
+                logger.info(f"⏳ Generating custom greeting audio for agent {agent_id} (speaker: {voice_id}, lang: {sarvam_target_lang})...")
+                kwargs: dict = {
+                    "text": first_msg,
+                    "target_language_code": sarvam_target_lang,
+                    "speaker": voice_id,
+                    "model": Config.SARVAM_MODEL,
+                    "output_audio_codec": "linear16",
+                    "speech_sample_rate": 16000
+                }
+                pace = getattr(Config, "SARVAM_PACE", 1.15)
+                if pace is not None:
+                    kwargs["pace"] = pace
+                pitch = getattr(Config, "SARVAM_PITCH", 0.0)
+                if pitch is not None and pitch != 0.0 and "bulbul:v3" not in Config.SARVAM_MODEL:
+                    kwargs["pitch"] = pitch
+                    
+                assert self.sarvam_client is not None
+                response = await self.sarvam_client.text_to_speech.convert(**kwargs)
+                if response and response.audios:
+                    base64_audio = response.audios[0]
+                    raw_audio = base64.b64decode(base64_audio)
+                    audio_with_gain = apply_audio_gain(raw_audio, getattr(Config, "AUDIO_GAIN", 1.0))
+                    self._agent_greeting_cache[cache_key] = audio_with_gain
+                    return audio_with_gain
+            except Exception as e:
+                logger.error(f"❌ Failed to generate custom greeting for agent {agent_id}: {e}")
+            finally:
+                self._agent_greeting_tasks.pop(cache_key, None)
+            return None
+
+        task = asyncio.create_task(_do_generate())
+        self._agent_greeting_tasks[cache_key] = task
+        return await task
             
     async def _get_outbound_greeting_audio(self, customer_name: str, voice_id: str, lang: str, agent_name: str, agent_config: dict = None) -> bytes | None:
         """Generate outbound greeting audio on the fly using the custom agent_config greeting"""
@@ -895,7 +908,7 @@ class ModularSalesBot:
             
         if greeting_audio:
             logger.info(f"🗣️ Playing greeting audio for call: {call_id}")
-            await asyncio.sleep(0.8)  # Pause 0.8s to ensure Exotel RTP channel completes 3-way SIP ACK handshake
+            await asyncio.sleep(0.1)  # Minimal 0.1s delay to start greeting immediately upon connection
             asyncio.create_task(self._send_audio_to_client(call_id, greeting_audio))
 
     async def _connect_websockets(self, call_id: str):
@@ -903,10 +916,30 @@ class ModularSalesBot:
         session_state = self.connections[call_id]
         
         # Determine Deepgram STT language based on agent configuration
-        # Deepgram Live nova-2 model accepts 'multi' for multilingual Indian speech (te, hi, ta, etc.) or 'en' for English
+        # Map agent language code (e.g. te-IN -> te, hi-IN -> hi, ta-IN -> ta, etc.) for accurate acoustic model selection
         agent_config = session_state.get("agent_config") or {}
-        agent_lang = agent_config.get("language") or Config.SARVAM_LANGUAGE_CODE
-        dg_lang = "en" if (agent_lang and agent_lang.startswith("en")) else "multi"
+        agent_lang = str(agent_config.get("language") or Config.SARVAM_LANGUAGE_CODE or "en").lower().strip()
+        
+        if agent_lang.startswith("te"):
+            dg_lang = "te"
+        elif agent_lang.startswith("hi"):
+            dg_lang = "hi"
+        elif agent_lang.startswith("ta"):
+            dg_lang = "ta"
+        elif agent_lang.startswith("kn"):
+            dg_lang = "kn"
+        elif agent_lang.startswith("ml"):
+            dg_lang = "ml"
+        elif agent_lang.startswith("mr"):
+            dg_lang = "mr"
+        elif agent_lang.startswith("gu"):
+            dg_lang = "gu"
+        elif agent_lang.startswith("pa"):
+            dg_lang = "pa"
+        elif agent_lang.startswith("bn"):
+            dg_lang = "bn"
+        else:
+            dg_lang = "en"
 
         endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
         
