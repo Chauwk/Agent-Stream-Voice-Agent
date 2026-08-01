@@ -717,26 +717,13 @@ class ModularSalesBot:
             if agent_instructions:
                 base_prompt += f"Here are your custom instructions and role behavior:\n{agent_instructions}\n\n"
             
-            # Pre-fetch Knowledge Base context to eliminate RAG latency
-            kb_context = ""
-            if agent_config:
-                try:
-                    from controllers.bot_controller import query_knowledge_base as db_query
-                    initial_kb = await db_query(session_to_phone, "overview products services company pricing faq", top_k=4, agent_config=agent_config)
-                    if initial_kb:
-                        snippets = "\n---\n".join([f"Source: {r['source']}\n{r['chunk']}" for r in initial_kb])
-                        kb_context = f"### AGENT KNOWLEDGE BASE (Use this to answer customer questions accurately):\n{snippets}\n\n"
-                except Exception as kb_err:
-                    logger.warning(f"⚠️ Failed to pre-fetch KB context: {kb_err}")
-            
             system_instruction = (
                 f"{base_prompt}"
-                f"{kb_context}"
                 f"{lang_directive}"
                 "Tone: Clear, concise, professional, friendly, patient, helpful, and empathetic. Avoid technical jargon.\n\n"
                 "### Guardrails & Strict Rules\n"
                 "- Keep responses concise: under 25 words per sentence, and max 60 words total. No markdown/lists.\n"
-                "- Base your responses strictly and exclusively on your system instructions and the knowledge base above. Do not invent products, assume unstated services, or guess information.\n"
+                "- Base your responses strictly and exclusively on your system instructions and the knowledge base context provided with the user query. Do not invent products, assume unstated services, or guess information.\n"
                 "- If the customer asks questions about products, pricing, features, services, or policies not in your context, call the query_knowledge_base tool to search. Do not guess.\n"
                 "- Never make promises or guarantees that cannot be fulfilled. Do not provide financial or legal advice.\n"
                 "- Decline general off-topic queries (coding, math, politics) and steer back to the discussion.\n"
@@ -1117,12 +1104,29 @@ class ModularSalesBot:
                         continue
                 logger.info(f"🧠 Querying Gemini LLM with: '{prompt}'")
                 
+                # Perform fast dynamic per-turn RAG search for top 2 relevant chunks (low token cost + 0ms tool latency)
+                kb_context_addon = ""
+                agent_config = session_state.get("agent_config")
+                if agent_config and len(prompt.strip()) > 3:
+                    try:
+                        from controllers.bot_controller import query_knowledge_base as db_query
+                        session_to_phone = session_state.get("session_to_phone", "default")
+                        rag_res = await db_query(session_to_phone, prompt, top_k=2, agent_config=agent_config)
+                        if rag_res:
+                            snippets = "\n".join([f"- {r['chunk']}" for r in rag_res])
+                            kb_context_addon = f"\n\n[Relevant Knowledge Base Context:\n{snippets}]"
+                            logger.info(f"⚡ Injected {len(rag_res)} relevant KB chunks into turn prompt")
+                    except Exception as rag_err:
+                        logger.warning(f"⚠️ Dynamic RAG lookup skipped: {rag_err}")
+
+                user_prompt_text = f"{prompt}{kb_context_addon}"
+                
                 # Append user prompt to manual history list
                 from google.genai import types
                 history.append(
                     types.Content(
                         role="user",
-                        parts=[types.Part.from_text(text=prompt)]
+                        parts=[types.Part.from_text(text=user_prompt_text)]
                     )
                 )
                 
