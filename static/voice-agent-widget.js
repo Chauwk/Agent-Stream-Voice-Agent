@@ -47,7 +47,7 @@ class VoiceAgentWidget extends HTMLElement {
             }
         } catch (e) {}
 
-        this.serverUrl = this.getAttribute('server-url') || defaultOrigin;
+        this.serverUrl = (this.getAttribute('server-url') || defaultOrigin).replace(/\/+$/, '');
         this.agentName = this.getAttribute('agent-name') || 'AI Voice Assistant';
 
         this.render();
@@ -525,10 +525,13 @@ class VoiceAgentWidget extends HTMLElement {
                 }
             });
 
-            // Prepare WebSocket URL
-            const wsProtocol = this.serverUrl.startsWith('https') ? 'wss:' : 'ws:';
-            const host = this.serverUrl.replace(/^https?:\/\//, '');
-            const wsUrl = `${wsProtocol}//${host}/api/v1/stream/browser?agent_id=${this.agentId}`;
+            // Prepare WebSocket URL with clean host formatting
+            this.agentId = this.getAttribute('agent-id') || this.agentId || 'default';
+            const cleanUrl = (this.getAttribute('server-url') || this.serverUrl || window.location.origin).replace(/\/+$/, '');
+            const wsProtocol = cleanUrl.startsWith('https') ? 'wss:' : 'ws:';
+            const host = cleanUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+            const wsUrl = `${wsProtocol}//${host}/api/v1/stream/browser?agent_id=${encodeURIComponent(this.agentId)}`;
+            console.log('VoiceAgentWidget: Connecting WebSocket to', wsUrl);
 
             this.ws = new WebSocket(wsUrl);
 
