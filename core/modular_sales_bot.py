@@ -1044,9 +1044,13 @@ class ModularSalesBot:
         else:
             connect_kwargs["extra_headers"] = dg_headers
             
-        logger.info(f"🔌 Connecting to Deepgram WS (language: {dg_lang}) for call: {call_id}")
-        dg_ws = await websockets.connect(dg_url, **connect_kwargs)
-        session_state["deepgram_ws"] = dg_ws
+        try:
+            logger.info(f"🔌 Connecting to Deepgram WS (language: {dg_lang}) for call: {call_id}")
+            dg_ws = await websockets.connect(dg_url, **connect_kwargs)
+            session_state["deepgram_ws"] = dg_ws
+        except Exception as dg_err:
+            logger.error(f"❌ Failed to connect to Deepgram WS for {call_id}: {dg_err}")
+            raise Exception(f"Deepgram connection failed ({type(dg_err).__name__}): {dg_err}")
 
     async def send_audio_to_openai(self, call_id: str, audio_chunk: bytes, sample_rate: int = 16000):
         """

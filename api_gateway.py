@@ -352,7 +352,13 @@ async def browser_stream_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         logger.info(f"🔌 [Browser Widget] Connection closed for stream_id='{stream_id}'")
     except Exception as e:
-        logger.error(f"❌ [Browser Widget] Exception during WebSocket session '{stream_id}': {e}", exc_info=True)
+        err_msg = f"Voice Bot connection error: {e}"
+        logger.error(f"❌ [Browser Widget] Exception during WebSocket session '{stream_id}': {err_msg}", exc_info=True)
+        try:
+            await websocket.send_json({"event": "error", "error": err_msg})
+            await websocket.close(code=1011, reason=str(e)[:120])
+        except Exception:
+            pass
     finally:
         if hasattr(sales_bot_engine, "cleanup_connections"):
             await sales_bot_engine.cleanup_connections(stream_id)
