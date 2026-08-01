@@ -47,7 +47,8 @@ class ExotelOutboundAPI:
         self,
         phone_number: str,
         greeting_text: str = None,
-        context: Dict[str, Any] = None
+        context: Dict[str, Any] = None,
+        caller_id: Optional[str] = None
     ) -> Optional[str]:
         """
         Make an outbound call to a customer using form-urlencoded POST
@@ -62,8 +63,20 @@ class ExotelOutboundAPI:
                 clean_number = "0" + clean_number[2:]
             elif len(clean_number) == 10 and clean_number.isdigit():
                 clean_number = "0" + clean_number
-                
-            logger.info(f"📤 Making outbound call from customer={clean_number} to agent={self.exotel_number}")
+
+            # Determine virtual number (CallerId & To) for Exotel Connect API
+            effective_caller_id = self.exotel_number
+            if caller_id and str(caller_id).strip():
+                clean_cid = str(caller_id).strip().replace(" ", "").replace("-", "")
+                if clean_cid.startswith("+91"):
+                    clean_cid = "0" + clean_cid[3:]
+                elif clean_cid.startswith("91") and len(clean_cid) == 12:
+                    clean_cid = "0" + clean_cid[2:]
+                elif len(clean_cid) == 10 and clean_cid.isdigit():
+                    clean_cid = "0" + clean_cid
+                effective_caller_id = clean_cid
+
+            logger.info(f"📤 Making outbound call: Customer={clean_number}, Agent Virtual Number/CallerId={effective_caller_id}")
             
             # Connect Two Numbers endpoint
             url = f"{self.api_base_url}/Accounts/{self.account_sid}/Calls/connect.json"
@@ -71,8 +84,8 @@ class ExotelOutboundAPI:
             # Exotel API parameters for Connect leg
             payload = {
                 "From": clean_number,
-                "To": self.exotel_number,
-                "CallerId": self.exotel_number,
+                "To": effective_caller_id,
+                "CallerId": effective_caller_id,
                 "CallType": "trans"
             }
             

@@ -87,6 +87,22 @@ async def initiate_outbound_call(
             **(context or {})
         }
 
+        # Resolve agent's assigned phone number if agent_id or enterprise_id provided
+        agent_phone = None
+        if agent_id or enterprise_id:
+            try:
+                from core.mongo_manager import mongo_db
+                if mongo_db.client is not None:
+                    db = mongo_db.client.get_default_database()
+                    agents_col = db['agents']
+                    target_query = agent_id if (agent_id and agent_id != "default") else enterprise_id
+                    agent_doc = await agents_col.find_one({"$or": [{"agentId": target_query}, {"_id": target_query}, {"enterprise": target_query}], "status": "active"})
+                    if agent_doc and agent_doc.get("phoneNumber"):
+                        agent_phone = agent_doc.get("phoneNumber")
+                        logger.info(f"🎯 Resolved agent virtual phone number '{agent_phone}' for Agent ID '{agent_id}'")
+            except Exception as ae:
+                logger.warning(f"⚠️ Could not resolve agent phone number from DB: {ae}")
+
         # Initialize the API client
         api = ExotelOutboundAPI()
         
@@ -100,7 +116,8 @@ async def initiate_outbound_call(
             call_sid = await api.make_outbound_call(
                 phone_number=target_phone,
                 greeting_text=greeting,
-                context=merged_context
+                context=merged_context,
+                caller_id=agent_phone
             )
             
             if call_sid:

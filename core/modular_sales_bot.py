@@ -519,8 +519,12 @@ class ModularSalesBot:
             voice_id = sanitize_sarvam_speaker(voice_id)
             if lang and lang.startswith("hi"):
                 default_outbound_fallback = f"नमस्ते! मैं {Config.COMPANY_NAME} से {agent_name} बोल रही हूँ। क्या मेरी बात {{customer_name}} से हो रही है?"
+            elif lang and lang.startswith("te"):
+                default_outbound_fallback = f"నమస్కారం! నేను {Config.COMPANY_NAME} నుండి {agent_name} మాట్లాడుతున్నాను. నేను {{customer_name}} గారితో మాట్లాడుతున్నానా?"
+            elif lang and lang.startswith("ta"):
+                default_outbound_fallback = f"வணக்கம்! நான் {Config.COMPANY_NAME} இலிருந்து {agent_name} பேசுகிறேன். நான் {{customer_name}} அவர்களிடம் பேசுகிறேனா?"
             else:
-                default_outbound_fallback = f"Hello! I'm {agent_name} calling back from {Config.COMPANY_NAME}. How can I help you today?"
+                default_outbound_fallback = f"Hello! I'm {agent_name} calling from {Config.COMPANY_NAME}. Am I speaking with {{customer_name}}?"
 
             greeting_text = (agent_config.get("firstMessageOutbound") if agent_config else None) or (agent_config.get("firstMessage") if agent_config else None) or default_outbound_fallback
             if customer_name:
@@ -793,7 +797,8 @@ class ModularSalesBot:
             )
 
             # Determine whether this is an active outbound call session vs a customer calling in
-            is_active_outbound_leg = bool(outbound_record and outbound_record.get("status") in ["initiated", "ringing", "in_progress"])
+            rec_status = str(outbound_record.get("status") if outbound_record else "").lower().replace("-", "_").strip()
+            is_active_outbound_leg = bool(outbound_record and rec_status not in ["completed", "failed", "no_answer", "busy", "canceled"])
             
             if is_active_outbound_leg:
                 custom_outbound = (agent_config.get("firstMessageOutbound") or agent_config.get("firstMessage") or "").strip() if agent_config else ""
