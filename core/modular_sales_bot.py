@@ -1526,8 +1526,24 @@ class ModularSalesBot:
                 if not agent_default_lang or "-" not in agent_default_lang:
                     agent_default_lang = f"{agent_default_lang}-IN" if agent_default_lang else "en-IN"
                 
-                # Detect script language from sentence; fall back to agent's configured language
+                # Build the allowed languages list from agent config (same logic as system prompt)
+                raw_allowed = agent_config.get("languages") or agent_config.get("allowedLanguages") or [agent_default_lang]
+                if isinstance(raw_allowed, str):
+                    raw_allowed = [l.strip() for l in raw_allowed.split(",") if l.strip()]
+                # Normalize each allowed lang to XX-IN format for consistent comparison
+                def _norm(l): return l if "-" in l else f"{l}-IN"
+                allowed_lang_codes = set(_norm(l) for l in raw_allowed if l)
+                if not allowed_lang_codes:
+                    allowed_lang_codes = {agent_default_lang}
+                
+                # Detect script language from sentence text
                 detected_lang = detect_script_language(sentence_text, fallback_lang=agent_default_lang)
+                
+                # TTS-layer guardrail: if detected language is NOT in the agent's allowed list,
+                # fall back to the agent's primary language so audio never violates the restriction
+                if detected_lang not in allowed_lang_codes:
+                    logger.info(f"🛡️ TTS guardrail: detected lang '{detected_lang}' not in allowed {allowed_lang_codes}. Falling back to '{agent_default_lang}'.")
+                    detected_lang = agent_default_lang
                 
                 # Use reliable Sarvam HTTP REST TTS API for synthesis & gain-boosted playback
                 try:
