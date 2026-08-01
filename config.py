@@ -34,7 +34,7 @@ class Config:
     DB_URL = os.getenv('DB_URL', '')
 
     
-    DEEPGRAM_MODEL = 'nova-2'
+    DEEPGRAM_MODEL = os.getenv('DEEPGRAM_MODEL', 'nova-3')
     DEEPGRAM_LANGUAGE = os.getenv('DEEPGRAM_LANGUAGE', 'multi')
     DEEPGRAM_ENDPOINTING = int(os.getenv('DEEPGRAM_ENDPOINTING', '300'))
     GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')

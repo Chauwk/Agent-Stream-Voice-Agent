@@ -915,31 +915,42 @@ class ModularSalesBot:
         """Connect to Deepgram WebSocket with language mapped to agent config"""
         session_state = self.connections[call_id]
         
-        # Determine Deepgram STT language based on agent configuration
-        # Map agent language code (e.g. te-IN -> te, hi-IN -> hi, ta-IN -> ta, etc.) for accurate acoustic model selection
+        # Determine Deepgram STT model and language based on agent configuration
         agent_config = session_state.get("agent_config") or {}
-        agent_lang = str(agent_config.get("language") or Config.SARVAM_LANGUAGE_CODE or "en").lower().strip()
         
-        if agent_lang.startswith("te"):
-            dg_lang = "te"
-        elif agent_lang.startswith("hi"):
-            dg_lang = "hi"
-        elif agent_lang.startswith("ta"):
-            dg_lang = "ta"
-        elif agent_lang.startswith("kn"):
-            dg_lang = "kn"
-        elif agent_lang.startswith("ml"):
-            dg_lang = "ml"
-        elif agent_lang.startswith("mr"):
-            dg_lang = "mr"
-        elif agent_lang.startswith("gu"):
-            dg_lang = "gu"
-        elif agent_lang.startswith("pa"):
-            dg_lang = "pa"
-        elif agent_lang.startswith("bn"):
-            dg_lang = "bn"
+        # Check allowed languages configured for this agent
+        raw_langs = agent_config.get("languages") or agent_config.get("language")
+        if isinstance(raw_langs, str):
+            allowed_langs = [l.strip() for l in raw_langs.split(",") if l.strip()]
+        elif isinstance(raw_langs, list):
+            allowed_langs = [str(l).strip() for l in raw_langs if l]
         else:
-            dg_lang = "en"
+            allowed_langs = []
+
+        def _map_dg_code(l_str: str) -> str:
+            s = str(l_str).lower().strip()
+            if s.startswith("te"): return "te"
+            if s.startswith("hi"): return "hi"
+            if s.startswith("ta"): return "ta"
+            if s.startswith("kn"): return "kn"
+            if s.startswith("ml"): return "ml"
+            if s.startswith("mr"): return "mr"
+            if s.startswith("gu"): return "gu"
+            if s.startswith("pa"): return "pa"
+            if s.startswith("bn"): return "bn"
+            return "en"
+
+        dg_model = getattr(Config, "DEEPGRAM_MODEL", "nova-3")
+        
+        # If agent explicitly allows multiple languages -> use multi-language mode
+        # If agent has a single language -> lock to that exact language model (e.g. 'te' for Telugu)
+        if len(allowed_langs) > 1:
+            dg_lang = "multi"
+        elif len(allowed_langs) == 1:
+            dg_lang = _map_dg_code(allowed_langs[0])
+        else:
+            primary_lang = agent_config.get("language") or Config.SARVAM_LANGUAGE_CODE or "en"
+            dg_lang = _map_dg_code(primary_lang)
 
         endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
         
@@ -978,9 +989,9 @@ class ModularSalesBot:
         
         keywords_query = "&".join(keyword_parts)
         if keywords_query:
-            dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&{keywords_query}"
+            dg_url = f"wss://api.deepgram.com/v1/listen?model={dg_model}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&{keywords_query}"
         else:
-            dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false"
+            dg_url = f"wss://api.deepgram.com/v1/listen?model={dg_model}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
         import inspect
