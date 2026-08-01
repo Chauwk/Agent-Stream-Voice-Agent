@@ -392,10 +392,13 @@ class ModularSalesBot:
             speaker = sanitize_sarvam_speaker(agent_config.get("voiceId"))
             lang = default_lang or agent_config.get("language") or Config.SARVAM_LANGUAGE_CODE
             # Normalize language code for Sarvam
-            if lang == "en":
-                lang = "en-IN"
+            if lang and "-" not in lang:
+                lang = f"{lang}-IN"
             return speaker, lang
-        return Config.SARVAM_SPEAKER, (default_lang or Config.SARVAM_LANGUAGE_CODE)
+        def_lang = default_lang or Config.SARVAM_LANGUAGE_CODE
+        if def_lang and "-" not in def_lang:
+            def_lang = f"{def_lang}-IN"
+        return Config.SARVAM_SPEAKER, def_lang
 
     async def _get_agent_greeting_audio(self, agent_config: dict) -> bytes | None:
         """Helper to retrieve or generate cached greeting audio for a specific agent config"""
@@ -429,11 +432,12 @@ class ModularSalesBot:
             return self._agent_greeting_cache[cache_key]
             
         # Generate on-the-fly and cache
+        sarvam_target_lang = f"{lang}-IN" if (lang and "-" not in lang) else (lang or "en-IN")
         try:
-            logger.info(f"⏳ Generating custom greeting audio for agent {agent_id} (speaker: {voice_id})...")
+            logger.info(f"⏳ Generating custom greeting audio for agent {agent_id} (speaker: {voice_id}, lang: {sarvam_target_lang})...")
             kwargs: dict = {
                 "text": first_msg,
-                "target_language_code": lang if lang != "en" else "en-IN", # Sarvam expects en-IN
+                "target_language_code": sarvam_target_lang,
                 "speaker": voice_id,
                 "model": Config.SARVAM_MODEL,
                 "output_audio_codec": "linear16",
@@ -863,18 +867,10 @@ class ModularSalesBot:
         session_state = self.connections[call_id]
         
         # Determine Deepgram STT language based on agent configuration
+        # Deepgram Live nova-2 model accepts 'multi' for multilingual Indian speech (te, hi, ta, etc.) or 'en' for English
         agent_config = session_state.get("agent_config") or {}
         agent_lang = agent_config.get("language") or Config.SARVAM_LANGUAGE_CODE
-        if agent_lang and agent_lang.startswith("te"):
-            dg_lang = "te"
-        elif agent_lang and agent_lang.startswith("hi"):
-            dg_lang = "hi"
-        elif agent_lang and agent_lang.startswith("ta"):
-            dg_lang = "ta"
-        elif agent_lang and agent_lang.startswith("en"):
-            dg_lang = "en"
-        else:
-            dg_lang = "multi"
+        dg_lang = "en" if (agent_lang and agent_lang.startswith("en")) else "multi"
 
         endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
         dg_url = f"wss://api.deepgram.com/v1/listen?model={Config.DEEPGRAM_MODEL}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&keywords=Chauwk:4.0&keywords={Config.SALES_BOT_NAME}:2.0"
