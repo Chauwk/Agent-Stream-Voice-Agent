@@ -101,27 +101,34 @@ async def get_company_id_by_phone(phone_number: str) -> str | None:
 
 
 async def query_knowledge_base(phone_number: str, query: str, top_k: int = 3, agent_config: dict = None) -> List[Dict[str, Any]]:
-    """Resolve company from agent config or phone, and perform RAG search with optional knowledgeBaseIds filtering."""
-    company_id = None
+    """Resolve agentId / company / enterprise from agent config or phone, and perform RAG search with optional knowledgeBaseIds filtering."""
     document_ids = None
+    candidates = []
     
     if agent_config:
-        company_id = agent_config.get("enterprise")
+        if agent_config.get("agentId"):
+            candidates.append(agent_config.get("agentId"))
+        if agent_config.get("enterprise"):
+            candidates.append(agent_config.get("enterprise"))
         document_ids = agent_config.get("knowledgeBaseIds")
         
-    if not company_id:
-        company_id = await get_company_id_by_phone(phone_number)
+    phone_company = await get_company_id_by_phone(phone_number)
+    if phone_company and phone_company not in candidates:
+        candidates.append(phone_company)
         
-    if not company_id:
-        logger.warning(f"Company/Enterprise ID not found for phone: {phone_number}")
+    if not candidates:
+        logger.warning(f"Company/Enterprise/Agent ID not found for phone: {phone_number}")
         return []
         
-    try:
-        results = await rag_manager.search(company_id, query, top_k, document_ids=document_ids)
-        return [{"chunk": r["chunk_text"], "source": r["metadata"].get("source")} for r in results]
-    except Exception as e:
-        logger.error(f"Error querying knowledge base for company {company_id}: {e}")
-        return []
+    for company_id in candidates:
+        try:
+            results = await rag_manager.search(company_id, query, top_k, document_ids=document_ids)
+            if results:
+                return [{"chunk": r["chunk_text"], "source": r["metadata"].get("source")} for r in results]
+        except Exception as e:
+            logger.error(f"Error querying knowledge base for {company_id}: {e}")
+            
+    return []
 
 async def get_active_bot_telemetry() -> Dict[str, Any]:
     """
