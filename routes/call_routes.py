@@ -23,15 +23,10 @@ router = APIRouter(
 # === Pydantic Input Schemas for Request Validation ===
 
 class OutboundCallRequest(BaseModel):
-    phone_number: Optional[Union[str, List[str]]] = Field(
-        None, 
+    phone_number: str = Field(
+        ..., 
         example="+919876543210", 
-        description="Target phone number string or list of phone numbers for the customer in E.164 standard formatting."
-    )
-    phone_numbers: Optional[Union[str, List[str]]] = Field(
-        None,
-        example=["+919876543210", "+919876543211"],
-        description="Alternative field to provide multiple target phone numbers for the customer."
+        description="Target phone number string or comma-separated list of phone numbers (e.g. '+919876543210, +919876543211')."
     )
     customer_name: str = Field(
         "Customer", 
@@ -129,11 +124,11 @@ class CampaignsResponse(BaseModel):
 )
 async def trigger_call(payload: OutboundCallRequest):
     """Trigger an outbound call using Exotel gateway REST API."""
-    target_phones = payload.phone_numbers or payload.phone_number
-    if not target_phones:
+    target_phones = payload.phone_number
+    if not target_phones or not str(target_phones).strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="At least one target phone number must be provided in 'phone_number' or 'phone_numbers'."
+            detail="Target phone number must be provided in 'phone_number'."
         )
 
     result = await call_controller.initiate_outbound_call(
