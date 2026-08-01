@@ -408,7 +408,9 @@ class ModularSalesBot:
         voice_id = sanitize_sarvam_speaker(agent_config.get("voiceId"))
         lang = agent_config.get("language", Config.SARVAM_LANGUAGE_CODE)
         
-        if not first_msg:
+        # If greeting is missing or in English while agent language is Telugu/Hindi/Tamil, select native language greeting
+        is_english_greeting = first_msg.lower().startswith("hello") or first_msg.lower().startswith("hi ")
+        if not first_msg or (lang and not lang.startswith("en") and is_english_greeting):
             if lang and lang.startswith("hi"):
                 first_msg = f"नमस्ते! मैं {Config.COMPANY_NAME} से {agent_name} बोल रही हूँ। मैं आज आपकी क्या सहायता कर सकती हूँ?"
             elif lang and lang.startswith("te"):
@@ -1645,6 +1647,12 @@ class ModularSalesBot:
                         except KeyError:
                             pass
                 
+                # Safety check for background line noise: user_speaking is only valid if speech started <1.2s ago or bot is speaking
+                if user_is_speaking:
+                    speaking_dur = time.time() - session_state.get("user_speaking_start_time", time.time())
+                    if speaking_dur > 1.2:
+                        user_is_speaking = False
+
                 if user_is_speaking or self.is_bot_actively_speaking(call_id):
                     session_state["last_activity_time"] = time.time()
                     continue
