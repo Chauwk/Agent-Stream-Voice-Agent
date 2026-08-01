@@ -1128,7 +1128,7 @@ class ModularSalesBot:
                 if agent_config and len(prompt.strip()) > 3:
                     try:
                         from controllers.bot_controller import query_knowledge_base as db_query
-                        session_to_phone = session_state.get("session_to_phone", "default")
+                        session_to_phone = session_state.get("to_phone", "default")
                         rag_res = await db_query(session_to_phone, prompt, top_k=2, agent_config=agent_config)
                         if rag_res:
                             snippets = "\n".join([f"- {r['chunk']}" for r in rag_res])
