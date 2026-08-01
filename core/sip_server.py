@@ -509,11 +509,16 @@ class SIPServer:
             # Hang up call if object was resolved
             if call:
                 try:
+                    if hasattr(self, 'ep'):
+                        try:
+                            self.ep.libRegisterThread("Async_Cleanup")
+                        except:
+                            pass
                     prm = pj.CallOpParam()
                     call.hangup(prm)
                     logger.info(f"📞 SIP call {call_id} hung up")
-                except:
-                    pass
+                except Exception as hangup_err:
+                    logger.debug(f"PJSIP hangup error (session likely already closed): {hangup_err}")
 
             # Clean up media buffers and OpenAI connections
             if call_id in self.sip_calls:
