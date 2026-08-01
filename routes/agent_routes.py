@@ -145,6 +145,7 @@ class AgentDataResponse(BaseModel):
     agentId: str = Field(..., example="agent_3a2e7c8f9b1d")
     knowledgeBaseIds: List[str] = Field(default_factory=list)
     terms: Optional[TermsModel] = Field(default_factory=lambda: TermsModel(enabled=False, content=""))
+    phoneNumber: Optional[str] = Field(None, example="04045902355")
     status: str = Field("active")
     createdBy: Optional[str] = Field(default="", example="enterprise_id_here")
     createdAt: str = Field(...)
@@ -307,6 +308,7 @@ async def create_agent(
         "languages": resolved_languages,
         "hinglish_mode": payload.hinglish_mode if payload.hinglish_mode is not None else False,
         "description": payload.description or "",
+        "phoneNumber": payload.phoneNumber or "",
         "agentId": agent_uuid,
         "knowledgeBaseIds": payload.knowledgeBaseIds or [],
         "terms": {
