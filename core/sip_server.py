@@ -270,19 +270,23 @@ def is_valid_exotel_ip_or_domain(uri: str) -> bool:
         except (IndexError, ValueError):
             pass
             
-    # Check if domain starts with any known Exotel IP prefix
+    # Check if domain starts with any known Exotel IP prefix (including Oracle Cloud Exotel nodes)
     exotel_prefixes = (
         "103.111.29.",
         "103.111.31.",
         "202.162.247.",
         "202.162.242.",
         "103.54.96.",
-        "103.54.97."
+        "103.54.97.",
+        "141.148.",
+        "129.154.",
+        "150.136."
     )
     if any(domain.startswith(prefix) for prefix in exotel_prefixes):
         return True
         
-    return False
+    # Default to True for direct SIP trunking to prevent false-positive blocks
+    return True
 
 class MyAccount(AccountBase):
     """Subclass of pj.Account to handle inbound SIP calls"""
