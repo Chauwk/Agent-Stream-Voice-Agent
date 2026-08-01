@@ -18,30 +18,32 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
         agents_collection = db['agents']
         
         # 1. Search directly by custom agentId
-        agent = await agents_collection.find_one({"agentId": destination_id, "status": "active"})
+        agent = await agents_collection.find_one({"agentId": destination_id})
         if agent:
             logger.info(f"🎯 Dynamic agent resolved by Agent ID: {agent.get('name')} ({agent.get('agentId')})")
             return agent
 
-        # 1.5 Search by assigned phoneNumber in MongoDB (exact match)
-        agent = await agents_collection.find_one({"phoneNumber": destination_id, "status": "active"})
+        # 2. Search by MongoDB _id (string or ObjectId)
+        agent = await agents_collection.find_one({"_id": destination_id})
+        if not agent and ObjectId.is_valid(destination_id):
+            agent = await agents_collection.find_one({"_id": ObjectId(destination_id)})
+        if agent:
+            logger.info(f"🎯 Dynamic agent resolved by MongoDB _id: {agent.get('name')} ({agent.get('agentId')})")
+            return agent
+
+        # 3. Search by assigned phoneNumber in MongoDB (exact match)
+        agent = await agents_collection.find_one({"phoneNumber": destination_id})
         if agent:
             logger.info(f"🎯 Dynamic agent resolved by Phone Number: {agent.get('name')} ({agent.get('agentId')})")
             return agent
 
-        # 1.6 Search by digits of phoneNumber (last 10 digits regex match)
+        # 4. Search by digits of phoneNumber (last 10 digits regex match)
         clean_10 = re.sub(r'\D', '', str(destination_id))[-10:] if destination_id else ""
         if clean_10 and len(clean_10) >= 7:
-            agent = await agents_collection.find_one({"phoneNumber": {"$regex": clean_10}, "status": "active"})
+            agent = await agents_collection.find_one({"phoneNumber": {"$regex": clean_10}})
             if agent:
                 logger.info(f"🎯 Dynamic agent resolved by Phone Number Regex ({clean_10}): {agent.get('name')} ({agent.get('agentId')})")
                 return agent
-            
-        # 2. Search by MongoDB string _id (agents store _id as string, not ObjectId)
-        agent = await agents_collection.find_one({"_id": destination_id, "status": "active"})
-        if agent:
-            logger.info(f"🎯 Dynamic agent resolved by MongoDB _id: {agent.get('name')} ({agent.get('agentId')})")
-            return agent
             
         # 3. Search by phone number mapping (using Company SQL lookup)
         company_id = await get_company_id_by_phone(destination_id)

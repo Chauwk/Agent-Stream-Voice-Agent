@@ -848,7 +848,9 @@ class ModularSalesBot:
             raise
             
         # 2. Establish session state structure
+        existing_ws = self.connections.get(call_id, {}).get("browser_websocket")
         self.connections[call_id] = {
+            "browser_websocket": existing_ws,
             "history": history,
             "system_instruction": system_instruction,
             "safety_settings": safety_settings,

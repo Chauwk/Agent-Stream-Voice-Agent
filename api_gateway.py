@@ -258,10 +258,15 @@ async def browser_stream_endpoint(websocket: WebSocket):
         if type(sales_bot_engine).__name__ == "ModularSalesBot":
             logger.info(f"🌐 [Browser Widget] Connecting to Modular Sales Bot pipeline for {stream_id}")
             
-            # 1. Initialize modular pipeline
+            # 1. Pre-attach WebSocket so greeting audio is delivered to browser without being dropped
+            sales_bot_engine.connections[stream_id] = {
+                "browser_websocket": websocket
+            }
+            
+            # 2. Initialize modular pipeline
             await sales_bot_engine.connect_to_openai_enhanced(stream_id, agent_config)
             
-            # 2. Attach WebSocket to connections state map
+            # Re-verify connection succeeded
             if stream_id in sales_bot_engine.connections:
                 sales_bot_engine.connections[stream_id]["browser_websocket"] = websocket
             else:
