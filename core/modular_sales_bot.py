@@ -28,6 +28,42 @@ def is_hindi(text: str) -> bool:
             return True
     return False
 
+def detect_script_language(text: str, fallback_lang: str = "en-IN") -> str:
+    """
+    Detect the language of a text string by inspecting Unicode script blocks.
+    Returns a Sarvam-compatible language code (e.g. 'hi-IN', 'te-IN', 'en-IN').
+    No external library needed — uses Unicode block ranges only.
+    Falls back to fallback_lang if no Indian script is detected (i.e. Latin/English text).
+    """
+    script_counts: dict = {}
+    for char in text:
+        cp = ord(char)
+        if 0x0900 <= cp <= 0x097F:
+            script_counts["hi-IN"] = script_counts.get("hi-IN", 0) + 1  # Devanagari (Hindi/Marathi)
+        elif 0x0C00 <= cp <= 0x0C7F:
+            script_counts["te-IN"] = script_counts.get("te-IN", 0) + 1  # Telugu
+        elif 0x0B80 <= cp <= 0x0BFF:
+            script_counts["ta-IN"] = script_counts.get("ta-IN", 0) + 1  # Tamil
+        elif 0x0C80 <= cp <= 0x0CFF:
+            script_counts["kn-IN"] = script_counts.get("kn-IN", 0) + 1  # Kannada
+        elif 0x0D00 <= cp <= 0x0D7F:
+            script_counts["ml-IN"] = script_counts.get("ml-IN", 0) + 1  # Malayalam
+        elif 0x0A80 <= cp <= 0x0AFF:
+            script_counts["gu-IN"] = script_counts.get("gu-IN", 0) + 1  # Gujarati
+        elif 0x0A00 <= cp <= 0x0A7F:
+            script_counts["pa-IN"] = script_counts.get("pa-IN", 0) + 1  # Gurmukhi (Punjabi)
+        elif 0x0980 <= cp <= 0x09FF:
+            script_counts["bn-IN"] = script_counts.get("bn-IN", 0) + 1  # Bengali
+        elif 0x0B00 <= cp <= 0x0B7F:
+            script_counts["or-IN"] = script_counts.get("or-IN", 0) + 1  # Odia
+    
+    if not script_counts:
+        # No Indian script characters found — assume English/Latin
+        return "en-IN"
+    
+    # Return the language with the highest character count
+    return max(script_counts, key=lambda k: script_counts[k])
+
 def apply_audio_gain(pcm_data: bytes, gain: float) -> bytes:
     """Apply digital volume gain to raw linear16 PCM audio bytes"""
     if not pcm_data or gain == 1.0:
@@ -1482,9 +1518,16 @@ class ModularSalesBot:
                     tts_queue.task_done()
                     continue
                     
-                # Determine language of sentence text from agent config
+                # Detect language from the actual response text (script-based, zero-dependency)
+                # This enables code-switching: if Gemini responds in Hindi, TTS speaks in Hindi,
+                # even if the agent's default language is Telugu — purely from Unicode script analysis.
                 agent_config = session_state.get("agent_config") or {}
-                detected_lang = agent_config.get("language") or Config.SARVAM_LANGUAGE_CODE
+                agent_default_lang = agent_config.get("language") or Config.SARVAM_LANGUAGE_CODE
+                if not agent_default_lang or "-" not in agent_default_lang:
+                    agent_default_lang = f"{agent_default_lang}-IN" if agent_default_lang else "en-IN"
+                
+                # Detect script language from sentence; fall back to agent's configured language
+                detected_lang = detect_script_language(sentence_text, fallback_lang=agent_default_lang)
                 
                 # Use reliable Sarvam HTTP REST TTS API for synthesis & gain-boosted playback
                 try:
