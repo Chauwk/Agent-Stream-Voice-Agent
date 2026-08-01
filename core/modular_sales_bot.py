@@ -1430,42 +1430,26 @@ class ModularSalesBot:
         
         try:
             while True:
-                context_id, sentence_text = await tts_queue.get()
-                
-                # Check if this context has been cancelled/interrupted
-                if context_id != session_state["current_context_id"]:
+                ctx_id, sentence_text = await tts_queue.get()
+                session_state = self.connections.get(call_id)
+                if not session_state or ctx_id != session_state["current_context_id"]:
+                    logger.info(f"🚫 Context changed or session ended. Discarding stale TTS item.")
                     tts_queue.task_done()
                     continue
+                    
+                # Detect language of sentence text dynamically (Hindi, Telugu, Tamil, or English)
+                detected_lang = self._detect_sentence_language(sentence_text, session_state)
                 
-                if not sentence_text or not sentence_text.strip():
-                    tts_queue.task_done()
-                    continue
-                
-                logger.info(f"🔊 Processing TTS for sentence: '{sentence_text}'")
-                
-                # Detect language of the text to pass correct code to Sarvam
-                detected_lang = "hi-IN" if is_hindi(sentence_text) else "en-IN"
-                
-                # Attempt to get Sarvam WebSocket connection
+                # Check Sarvam WebSocket connection readiness
                 sarvam_ws = session_state.get("sarvam_ws")
-                if not sarvam_ws or not sarvam_ws._websocket.open:
-                    logger.info("⏳ Sarvam WebSocket not ready. Waiting for connection...")
-                    for _ in range(10): # Wait up to 1.0 second
-                        await asyncio.sleep(0.1)
-                        # Check context invalidation during wait
-                        if context_id != session_state["current_context_id"]:
-                            break
-                        sarvam_ws = session_state.get("sarvam_ws")
-                        if sarvam_ws and sarvam_ws._websocket.open:
-                            break
+                current_sarvam_lang = session_state.get("sarvam_current_language_code")
                 
-                # Reconfigure WebSocket dynamically if language changed
-                if sarvam_ws and sarvam_ws._websocket.open and context_id == session_state["current_context_id"]:
-                    last_lang = session_state.get("sarvam_current_language_code")
-                    if last_lang != detected_lang:
-                        logger.info(f"🔄 Reconfiguring Sarvam WebSocket language from '{last_lang}' to '{detected_lang}'")
+                if sarvam_ws and hasattr(sarvam_ws, "_websocket") and sarvam_ws._websocket.open:
+                    if current_sarvam_lang != detected_lang:
+                        logger.info(f"🔊 Re-configuring Sarvam WS for language {detected_lang}...")
                         speaker, _ = self._resolve_agent_voice_and_lang(session_state, detected_lang)
                         kwargs: dict = {
+                            "model": Config.SARVAM_MODEL,
                             "target_language_code": detected_lang,
                             "speaker": speaker,
                             "speech_sample_rate": 16000,
@@ -1482,8 +1466,8 @@ class ModularSalesBot:
                         session_state["sarvam_current_language_code"] = detected_lang
                 
                 # Fallback to HTTP POST TTS if WebSocket is not ready
-                if not sarvam_ws or not sarvam_ws._websocket.open or context_id != session_state["current_context_id"]:
-                    if context_id != session_state["current_context_id"]:
+                if not sarvam_ws or not hasattr(sarvam_ws, "_websocket") or not sarvam_ws._websocket.open or ctx_id != session_state["current_context_id"]:
+                    if ctx_id != session_state["current_context_id"]:
                         tts_queue.task_done()
                         continue
                         
@@ -1512,7 +1496,7 @@ class ModularSalesBot:
                         
                         response = await tts_task
                         
-                        if context_id != session_state["current_context_id"]:
+                        if ctx_id != session_state["current_context_id"]:
                             logger.info(f"🚫 Context changed during HTTP TTS. Discarding output.")
                             continue
                             
@@ -1525,7 +1509,7 @@ class ModularSalesBot:
                         else:
                             logger.error(f"❌ Empty response from HTTP TTS for: '{sentence_text}'")
                     except asyncio.CancelledError:
-                        logger.info(f"🚫 HTTP TTS task cancelled for context: {context_id}")
+                        logger.info(f"🚫 HTTP TTS task cancelled for context: {ctx_id}")
                     except Exception as e:
                         logger.error(f"❌ HTTP TTS failed: {e}")
                     finally:
@@ -1536,41 +1520,17 @@ class ModularSalesBot:
                 # If we get here, WebSocket is available!
                 try:
                     async def run_websocket_tts():
-                        # Send text chunks
                         await sarvam_ws.convert(sentence_text)
-                        await sarvam_ws.flush()
                         
-                        # Receive and stream back audio chunks
-                        logger.info(f"🗣️ ZARA SPEAKING (WS Streaming): {sentence_text}")
-                        while True:
-                            response = await sarvam_ws.recv()
-                            
-                            # Verify context hasn't changed
-                            if context_id != session_state["current_context_id"]:
-                                break
-                                
-                            if response.type == 'audio':
-                                base64_audio = response.data.audio
-                                raw_audio = base64.b64decode(base64_audio)
-                                pcm_audio = apply_audio_gain(raw_audio, getattr(Config, "AUDIO_GAIN", 1.0))
-                                await self._send_audio_to_client(call_id, pcm_audio)
-                            elif response.type == 'event':
-                                if getattr(response.data, 'event_type', None) == 'final':
-                                    break
-                            elif response.type == 'error':
-                                logger.error(f"❌ Error response from Sarvam WS: {response.data}")
-                                break
-                                
                     tts_task = asyncio.create_task(run_websocket_tts())
                     session_state["current_tts_task"] = tts_task
                     
                     await tts_task
                     
                 except asyncio.CancelledError:
-                    logger.info(f"🚫 WS TTS task cancelled for context: {context_id}")
+                    logger.info(f"🚫 WS TTS task cancelled for context: {ctx_id}")
                 except Exception as e:
                     logger.error(f"❌ WS TTS failed: {e}")
-                    # Invalidate WS so next turn reconnects
                     session_state["sarvam_ws"] = None
                 finally:
                     session_state["current_tts_task"] = None
@@ -1585,17 +1545,14 @@ class ModularSalesBot:
         if not session_state:
             return False
             
-        # 1. Check if TTS synthesis task is active
         active_tts = session_state.get("current_tts_task")
         if active_tts and not active_tts.done():
             return True
             
-        # 2. Check if TTS queue has items pending
         tts_q = session_state.get("tts_queue")
         if tts_q and not tts_q.empty():
             return True
             
-        # 3. Check if SIP playout buffer has active audio playing
         if self.sip_server:
             call_state = self.sip_server.sip_calls.get(call_id)
             if call_state and hasattr(call_state, "playback_buffer") and len(call_state.playback_buffer) > 0:
@@ -1610,39 +1567,31 @@ class ModularSalesBot:
             return
             
         logger.info(f"⚡ INTERRUPTING BOT for call {call_id}")
-        
-        # 1. Invalidate current context
         session_state["current_context_id"] = None
         session_state["is_bot_speaking"] = False
         
-        # 2. Cancel active LLM task immediately
         active_llm = session_state.get("current_llm_task")
         if active_llm and not active_llm.done():
             active_llm.cancel()
             logger.info(f"🚫 Active LLM task cancelled for call {call_id}")
             
-        # 3. Cancel active TTS task immediately
         active_tts = session_state.get("current_tts_task")
         if active_tts and not active_tts.done():
             active_tts.cancel()
             logger.info(f"🚫 Active TTS task cancelled for call {call_id}")
             
-        # 4. Close active Sarvam WebSocket to discard server-buffered audio
         sarvam_ws = session_state.get("sarvam_ws")
         if sarvam_ws and hasattr(sarvam_ws, "_websocket") and sarvam_ws._websocket.open:
             try:
-                # Run the close asynchronously in a non-blocking way
                 asyncio.create_task(sarvam_ws._websocket.close())
                 logger.info(f"🔇 Active Sarvam WebSocket closed on interruption for call {call_id}")
             except Exception as e:
                 logger.debug(f"Error closing Sarvam WS on interruption: {e}")
                 
-        # Trigger instant reconnection of the manager loop
         reconnect_event = session_state.get("reconnect_event")
         if reconnect_event:
             reconnect_event.set()
         
-        # 5. Flush PJSIP playout buffer
         if self.sip_server:
             call_state = self.sip_server.sip_calls.get(call_id)
             if call_state:
@@ -1650,7 +1599,6 @@ class ModularSalesBot:
                 call_state.is_playing = False
                 logger.info(f"🔇 SIP playout buffer cleared for call {call_id}")
                 
-        # 6. Clear pending TTS queue
         while not session_state["tts_queue"].empty():
             try:
                 session_state["tts_queue"].get_nowait()
@@ -1659,13 +1607,14 @@ class ModularSalesBot:
                 break
 
     async def _silence_monitor_loop(self, call_id: str):
-        """Monitors caller silence and injects follow-up prompts if inactive for 10 seconds"""
+        """Monitors caller silence and injects follow-up prompts up to 3 intimations before disconnecting"""
         session_state = self.connections.get(call_id)
         if not session_state:
             return
             
         logger.info(f"⏱️ Starting silence monitor loop for call {call_id}")
         session_state["last_activity_time"] = time.time()
+        session_state["silence_prompts_count"] = 0
         
         try:
             while True:
@@ -1675,11 +1624,8 @@ class ModularSalesBot:
                 if not session_state:
                     break
                     
-                # Update last activity if user is speaking or bot is speaking/synthesizing
                 user_is_speaking = session_state.get("user_speaking")
                 
-                # Safety timeout: if user_speaking has been True for more than 4.0 seconds without any words transcribed,
-                # force reset it to prevent silence monitor from getting stuck due to missed SpeechEnded events or line noise.
                 if user_is_speaking:
                     if "user_speaking_start_time" not in session_state:
                         session_state["user_speaking_start_time"] = time.time()
@@ -1703,27 +1649,29 @@ class ModularSalesBot:
                     session_state["last_activity_time"] = time.time()
                     continue
                     
-                # Check idle duration
+                # Check idle duration (wait 15 seconds of silence per intimation)
                 idle_time = time.time() - session_state.get("last_activity_time", time.time())
-                if idle_time >= 8.0:
-                    # Reset timer to prevent rapid repeated follow-ups
+                if idle_time >= 15.0:
                     session_state["last_activity_time"] = time.time()
                     
-                    silence_count = session_state.get("silence_prompts_count", 0)
-                    if silence_count >= 2:
-                        logger.info(f"⏱️ Maximum silence limit (2) reached for call {call_id}. Hanging up.")
-                        ctx_id = session_state.get("current_context_id") or f"ctx_{int(time.time()*1000)}"
-                        await session_state["tts_queue"].put((ctx_id, "Since I haven't heard from you, I'll go ahead and disconnect. Goodbye!"))
-                        asyncio.create_task(self.delayed_hangup(call_id))
-                        break
-                        
-                    session_state["silence_prompts_count"] = silence_count + 1
-                    logger.info(f"⏱️ Silence detected for 8 seconds on call {call_id} (count: {silence_count + 1}/2). Injecting follow-up prompt.")
+                    silence_count = session_state.get("silence_prompts_count", 0) + 1
+                    session_state["silence_prompts_count"] = silence_count
                     
                     llm_queue = session_state.get("llm_queue")
-                    if llm_queue:
-                        # Feed a system directive into the LLM processor queue
-                        await llm_queue.put("System: The customer has been silent for 8 seconds. Please prompt them to see if they are still there or need help.")
+                    if silence_count == 1:
+                        logger.info(f"⏱️ Silence Intimation 1/3 for call {call_id}. Prompting customer.")
+                        if llm_queue:
+                            await llm_queue.put("System: The customer has been silent for 15 seconds (Intimation 1/3). Please politely prompt them in their language to see if they are still on the line.")
+                    elif silence_count == 2:
+                        logger.info(f"⏱️ Silence Intimation 2/3 for call {call_id}. Prompting customer again.")
+                        if llm_queue:
+                            await llm_queue.put("System: The customer is still silent (Intimation 2/3). Please ask in their language if they are still there or need assistance.")
+                    elif silence_count >= 3:
+                        logger.info(f"⏱️ Final Silence Intimation 3/3 reached for call {call_id}. Hanging up after warning.")
+                        if llm_queue:
+                            await llm_queue.put("System: The customer has remained silent after 3 intimations. Please state politely in their language that since there is no response, you are hanging up now. Goodbye.")
+                        asyncio.create_task(self.delayed_hangup(call_id, delay_seconds=4.0))
+                        break
                         
         except asyncio.CancelledError:
             pass
