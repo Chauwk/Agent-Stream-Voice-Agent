@@ -940,7 +940,11 @@ class ModularSalesBot:
             if s.startswith("bn"): return "bn"
             return "en"
 
-        dg_model = getattr(Config, "DEEPGRAM_MODEL", "nova-3")
+        configured_model = getattr(Config, "DEEPGRAM_MODEL", "nova-3")
+        if not configured_model or "nova-2" in configured_model:
+            dg_model = "nova-3"
+        else:
+            dg_model = configured_model
         
         # If agent explicitly allows multiple languages -> use multi-language mode
         # If agent has a single language -> lock to that exact language model (e.g. 'te' for Telugu)
@@ -955,7 +959,7 @@ class ModularSalesBot:
         endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
         
         # Build dynamic keyword boosts from agent config with proper URL encoding
-        # Deepgram 'keywords' param: repeat param per keyword with optional boost weight (default 1.0, max ~10.0)
+        # Deepgram 'keyterm' param for nova-3 / 'keywords' for legacy models
         keyword_parts = []
         
         def _add_kw(kw: str, weight: float):
@@ -965,7 +969,7 @@ class ModularSalesBot:
             if cleaned:
                 # URL encode the keyword phrase (e.g. spaces become %20)
                 encoded = quote(cleaned)
-                if dg_model == "nova-3":
+                if "nova-3" in dg_model:
                     keyword_parts.append(f"keyterm={encoded}")
                 else:
                     keyword_parts.append(f"keywords={encoded}:{weight}")
