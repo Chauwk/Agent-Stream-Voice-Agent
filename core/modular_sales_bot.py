@@ -847,9 +847,13 @@ class ModularSalesBot:
         elif agent_config:
             greeting_audio = await self._get_agent_greeting_audio(agent_config)
             
+        if not greeting_audio:
+            logger.info("⚠️ Custom greeting audio empty. Falling back to cached default greeting audio.")
+            greeting_audio = self.cached_greeting_audio
+            
         if greeting_audio:
-            logger.info(f"🗣️ Playing greeting for call: {call_id}")
-            await asyncio.sleep(0.15)  # Brief pause to ensure RTP socket is open
+            logger.info(f"🗣️ Playing greeting audio for call: {call_id}")
+            await asyncio.sleep(0.8)  # Pause 0.8s to ensure Exotel RTP channel completes 3-way SIP ACK handshake
             asyncio.create_task(self._send_audio_to_client(call_id, greeting_audio))
 
     async def _connect_websockets(self, call_id: str):
@@ -1657,9 +1661,9 @@ class ModularSalesBot:
                     session_state["last_activity_time"] = time.time()
                     continue
                     
-                # Check idle duration (wait 15 seconds of silence per intimation)
+                # Check idle duration (wait 8 seconds of silence per intimation)
                 idle_time = time.time() - session_state.get("last_activity_time", time.time())
-                if idle_time >= 15.0:
+                if idle_time >= 8.0:
                     session_state["last_activity_time"] = time.time()
                     
                     silence_count = session_state.get("silence_prompts_count", 0) + 1
@@ -1669,7 +1673,7 @@ class ModularSalesBot:
                     if silence_count == 1:
                         logger.info(f"⏱️ Silence Intimation 1/3 for call {call_id}. Prompting customer.")
                         if llm_queue:
-                            await llm_queue.put("System: The customer has been silent for 15 seconds (Intimation 1/3). Please politely prompt them in the allowed agent language(s) to see if they are still on the line.")
+                            await llm_queue.put("System: The customer has been silent for 8 seconds (Intimation 1/3). Please politely prompt them in the allowed agent language(s) to see if they are still on the line.")
                     elif silence_count == 2:
                         logger.info(f"⏱️ Silence Intimation 2/3 for call {call_id}. Prompting customer again.")
                         if llm_queue:
