@@ -1453,8 +1453,9 @@ class ModularSalesBot:
                     tts_queue.task_done()
                     continue
                     
-                # Detect language of sentence text dynamically (Hindi, Telugu, Tamil, or English)
-                detected_lang = self._detect_sentence_language(sentence_text, session_state)
+                # Determine language of sentence text from agent config
+                agent_config = session_state.get("agent_config") or {}
+                detected_lang = agent_config.get("language") or Config.SARVAM_LANGUAGE_CODE
                 
                 # Use reliable Sarvam HTTP REST TTS API for synthesis & gain-boosted playback
                 try:
