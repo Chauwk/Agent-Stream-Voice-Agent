@@ -13,7 +13,14 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.encoders import ENCODERS_BY_TYPE
+from bson import ObjectId
+import datetime
 from config import Config
+
+# GLOBAL BEST PRACTICE: Teach FastAPI how to serialize MongoDB BSON types automatically
+ENCODERS_BY_TYPE[ObjectId] = str
+ENCODERS_BY_TYPE[datetime.datetime] = lambda dt: dt.isoformat() + "Z" if dt.tzinfo is None else dt.isoformat()
 
 # Import routes
 from routes.call_routes import router as call_router

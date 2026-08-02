@@ -387,8 +387,8 @@ async def list_agents(x_enterprise_id: Optional[str] = Header(None, alias="x-ent
         })
         agents_list = []
         async for doc in cursor:
-            doc["_id"] = str(doc["_id"]) if doc.get("_id") else ""
-            agents_list.append(doc)
+            safe_doc = bson_safe(dict(doc))
+            agents_list.append(safe_doc)
         return agents_list
 
     agents = []
@@ -513,10 +513,10 @@ async def get_agent_details(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"success": False, "message": "Agent not found"}
         )
-    agent["_id"] = str(agent["_id"])
+    safe_agent = bson_safe(dict(agent))
     return {
         "success": True,
-        "data": agent
+        "data": safe_agent
     }
 
 @router.get(
@@ -608,11 +608,11 @@ async def update_agent(
             update_data["language"] = resolved_languages[0]
 
     if not update_data:
-        agent["_id"] = str(agent["_id"])
+        safe_agent = bson_safe(dict(agent))
         return {
             "success": True,
             "message": "No fields to update",
-            "data": agent
+            "data": safe_agent
         }
 
     update_data["updatedAt"] = datetime.datetime.utcnow().isoformat() + "Z"
@@ -635,11 +635,11 @@ async def update_agent(
             logger.error(f"Failed to update agent in MongoDB: {e}")
             agent.update(update_data)
 
-    agent["_id"] = str(agent["_id"])
+    safe_agent = bson_safe(dict(agent))
     return {
         "success": True,
         "message": "Agent updated successfully",
-        "data": agent
+        "data": safe_agent
     }
 
 @router.delete(
