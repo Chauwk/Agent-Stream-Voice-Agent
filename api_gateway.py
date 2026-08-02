@@ -366,8 +366,37 @@ async def browser_stream_endpoint(websocket: WebSocket):
 
 
 # ==============================================================================
-# Beautiful Glassmorphic Interactive Home Dashboard
+# Standalone Widget Iframe Endpoint & Dashboard
 # ==============================================================================
+
+@app.get("/widget", response_class=HTMLResponse, include_in_schema=False)
+async def standalone_widget_page(agentId: Optional[str] = None, agent_id: Optional[str] = None):
+    """Renders a standalone view of the voice agent widget for iframe embeddings."""
+    target_id = agentId or agent_id or "default"
+    base_url = Config.SERVER_BASE_URL.rstrip("/")
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Voice Agent Widget</title>
+    <style>
+        html, body {{
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+        }}
+    </style>
+</head>
+<body>
+    <agent-stream-voice agent-id="{target_id}" server-url="{base_url}" auto-open="true"></agent-stream-voice>
+    <script src="{base_url}/static/voice-agent-widget.js" async></script>
+</body>
+</html>"""
+    return HTMLResponse(content=html_content)
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def home_dashboard():

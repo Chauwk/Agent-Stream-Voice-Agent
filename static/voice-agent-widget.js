@@ -53,6 +53,13 @@ class VoiceAgentWidget extends HTMLElement {
         this.render();
         this.setupEventListeners();
         this.fetchAgentDetails();
+
+        if (this.hasAttribute('auto-open') || this.getAttribute('mode') === 'iframe') {
+            setTimeout(() => {
+                const card = this.shadowRoot.getElementById('widget-card');
+                if (card) card.classList.add('open');
+            }, 100);
+        }
     }
 
     disconnectedCallback() {
@@ -88,10 +95,11 @@ class VoiceAgentWidget extends HTMLElement {
                 --danger: #ef4444;
                 --success: #10b981;
                 font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                position: fixed;
-                bottom: 24px;
-                right: 24px;
-                z-index: 999999;
+                display: block !important;
+                position: fixed !important;
+                bottom: 24px !important;
+                right: 24px !important;
+                z-index: 2147483647 !important;
                 box-sizing: border-box;
             }
 
@@ -841,3 +849,32 @@ class VoiceAgentWidget extends HTMLElement {
 if (!customElements.get('agent-stream-voice')) {
     customElements.define('agent-stream-voice', VoiceAgentWidget);
 }
+
+// Auto-inject widget element if not already present on page
+(function autoInjectWidget() {
+    function init() {
+        if (document.querySelector('agent-stream-voice')) return;
+        const scripts = document.querySelectorAll('script');
+        let agentId = null;
+        let serverUrl = null;
+        for (let s of scripts) {
+            if (s.src && s.src.includes('voice-agent-widget.js')) {
+                agentId = s.getAttribute('data-agent-id') || s.getAttribute('agent-id');
+                serverUrl = s.getAttribute('data-server-url') || s.getAttribute('server-url');
+                if (agentId) break;
+            }
+        }
+        if (agentId) {
+            const el = document.createElement('agent-stream-voice');
+            el.setAttribute('agent-id', agentId);
+            if (serverUrl) el.setAttribute('server-url', serverUrl);
+            document.body.appendChild(el);
+            console.log('VoiceAgentWidget: Auto-injected widget for agent_id:', agentId);
+        }
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();
