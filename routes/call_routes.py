@@ -208,6 +208,99 @@ from fastapi import UploadFile, File
 logger = logging.getLogger(__name__)
 
 @router.get(
+    "/logs",
+    summary="Get Filtered Call Logs",
+    description="Retrieve historical call logs filtered by enterprise_id, agent_id, phone_number, and direction."
+)
+async def get_call_logs(
+    enterprise_id: Optional[str] = Query(None, description="Enterprise ID to filter call logs"),
+    agent_id: Optional[str] = Query(None, description="Agent ID (or Mongo _id) to filter call logs"),
+    phone_number: Optional[str] = Query(None, description="Customer or Virtual Phone Number to filter logs"),
+    direction: Optional[str] = Query(None, description="Call direction filter ('inbound' or 'outbound')"),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(50, ge=1, le=500, description="Records per page"),
+    x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")
+):
+    ent_id = (enterprise_id or x_enterprise_id or "").strip()
+    try:
+        from core.mongo_manager import mongo_db
+        from bson import ObjectId
+        import re
+        
+        if mongo_db.client is None:
+            return {"success": True, "total": 0, "page": page, "limit": limit, "logs": []}
+            
+        db = mongo_db.client.get_default_database()
+        calls_coll = db['Agent_Stream_CallsLogs']
+        
+        query_clauses = []
+        
+        if ent_id:
+            query_clauses.append({
+                "$or": [
+                    {"enterprise_id": ent_id},
+                    {"enterprise": ent_id},
+                    {"company_id": ent_id},
+                    {"createdBy": ent_id}
+                ]
+            })
+            
+        if agent_id and agent_id.strip():
+            target_agent = agent_id.strip()
+            agent_or = [
+                {"agentId": target_agent},
+                {"agent_id": target_agent}
+            ]
+            if ObjectId.is_valid(target_agent):
+                agent_or.append({"_id": ObjectId(target_agent)})
+            query_clauses.append({"$or": agent_or})
+            
+        if phone_number and phone_number.strip():
+            clean_digits = re.sub(r'\D', '', str(phone_number))[-10:]
+            if clean_digits:
+                rgx = {"$regex": clean_digits}
+                query_clauses.append({
+                    "$or": [
+                        {"phone_number": rgx},
+                        {"phoneNumber": rgx},
+                        {"to_number": rgx},
+                        {"from_number": rgx}
+                    ]
+                })
+                
+        if direction and direction.strip().lower() in ["inbound", "outbound"]:
+            query_clauses.append({"direction": direction.strip().lower()})
+            
+        final_filter = {}
+        if len(query_clauses) == 1:
+            final_filter = query_clauses[0]
+        elif len(query_clauses) > 1:
+            final_filter = {"$and": query_clauses}
+            
+        skip = (page - 1) * limit
+        total_count = await calls_coll.count_documents(final_filter)
+        cursor = calls_coll.find(final_filter).sort("timestamp", -1).skip(skip).limit(limit)
+        
+        logs = []
+        async for doc in cursor:
+            doc["_id"] = str(doc["_id"])
+            logs.append(doc)
+            
+        return {
+            "success": True,
+            "total": total_count,
+            "page": page,
+            "limit": limit,
+            "logs": logs
+        }
+    except Exception as e:
+        logger.error(f"Error querying call logs: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal Server Error: {str(e)}"
+        )
+
+@router.get(
     "/outbound",
     summary="Get Outbound Call List",
     description="Retrieves a list of all outbound calls from MongoDB to display their status (initiated, ringing, completed, failed) in the admin panel."
