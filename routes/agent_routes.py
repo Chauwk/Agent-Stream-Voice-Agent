@@ -227,10 +227,9 @@ def build_enterprise_or_conditions(ent_id: Optional[str]) -> List[dict]:
     return conds
 
 async def find_agent_by_id_and_enterprise(agent_id_or_mongo_id: str, enterprise_id: str):
-    """Find voice agent by agentId or MongoDB ObjectId supporting string/ObjectId enterprise values."""
+    """Find voice agent by agentId or MongoDB ObjectId supporting string/ObjectId enterprise values across all collections."""
     async def run_find():
         db = mongo_db.client.get_default_database()
-        agents_collection = db['agents']
         
         ent_conds = build_enterprise_or_conditions(enterprise_id)
         id_conds = [
@@ -249,7 +248,12 @@ async def find_agent_by_id_and_enterprise(agent_id_or_mongo_id: str, enterprise_
                 ]
             }
             
-        return await agents_collection.find_one(query)
+        for coll_name in ["agents", "exotel_agents"]:
+            if coll_name in await db.list_collection_names():
+                agent = await db[coll_name].find_one(query)
+                if agent:
+                    return agent
+        return None
 
     try:
         return await safe_mongo_op(run_find)
@@ -412,20 +416,24 @@ async def list_agents(
         
     async def run_query():
         db = mongo_db.client.get_default_database()
-        agents_collection = db['agents']
         
         filter_q = {}
         conds = build_enterprise_or_conditions(ent_id)
         if conds:
             filter_q = {"$or": conds}
             
-        cursor = agents_collection.find(filter_q).sort("createdAt", -1)
-        agents_list = []
-        async for doc in cursor:
-            safe_doc = bson_safe(dict(doc))
-            safe_doc["_id"] = str(safe_doc["_id"])
-            agents_list.append(safe_doc)
-        return agents_list
+        agents_map = {}
+        for coll_name in ["agents", "exotel_agents"]:
+            if coll_name not in await db.list_collection_names():
+                continue
+            cursor = db[coll_name].find(filter_q).sort("createdAt", -1)
+            async for doc in cursor:
+                doc_id = str(doc["_id"])
+                if doc_id not in agents_map:
+                    safe_doc = bson_safe(dict(doc))
+                    safe_doc["_id"] = doc_id
+                    agents_map[doc_id] = safe_doc
+        return list(agents_map.values())
 
     agents = []
     try:
@@ -458,23 +466,32 @@ async def get_agent_stats(
         
     async def run_query():
         db = mongo_db.client.get_default_database()
-        agents_collection = db['agents']
         
         filter_q = {}
         conds = build_enterprise_or_conditions(ent_id)
         if conds:
             filter_q = {"$or": conds}
             
-        cursor = agents_collection.find(filter_q)
         total_agents = 0
         active_agents = 0
         languages = {}
-        async for doc in cursor:
-            total_agents += 1
-            if doc.get("status") == "active":
-                active_agents += 1
-            lang = doc.get("language", "en")
-            languages[lang] = languages.get(lang, 0) + 1
+        seen_ids = set()
+        for coll_name in ["agents", "exotel_agents"]:
+            if coll_name not in await db.list_collection_names():
+                continue
+            cursor = db[coll_name].find(filter_q)
+            async for doc in cursor:
+                doc_id = str(doc["_id"])
+                if doc_id in seen_ids:
+                    continue
+                seen_ids.add(doc_id)
+                total_agents += 1
+                if doc.get("status") == "active":
+                    active_agents += 1
+                lang = doc.get("language", "en")
+                if isinstance(lang, list) and lang:
+                    lang = lang[0]
+                languages[str(lang)] = languages.get(str(lang), 0) + 1
         return total_agents, active_agents, languages
 
     total_agents, active_agents, languages = 0, 0, {}
