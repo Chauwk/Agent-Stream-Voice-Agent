@@ -423,16 +423,18 @@ async def list_agents(
             filter_q = {"$or": conds}
             
         agents_map = {}
-        for coll_name in ["agents", "exotel_agents"]:
-            if coll_name not in await db.list_collection_names():
-                continue
-            cursor = db[coll_name].find(filter_q).sort("createdAt", -1)
-            async for doc in cursor:
-                doc_id = str(doc["_id"])
-                if doc_id not in agents_map:
-                    safe_doc = bson_safe(dict(doc))
-                    safe_doc["_id"] = doc_id
-                    agents_map[doc_id] = safe_doc
+        target_colls = ["agents", "exotel_agents", "modernexotelaiagents", "modernaiagents"]
+        for coll_name in target_colls:
+            try:
+                cursor = db[coll_name].find(filter_q).sort("createdAt", -1)
+                async for doc in cursor:
+                    doc_id = str(doc["_id"])
+                    if doc_id not in agents_map:
+                        safe_doc = bson_safe(dict(doc))
+                        safe_doc["_id"] = doc_id
+                        agents_map[doc_id] = safe_doc
+            except Exception as ex:
+                logger.warning(f"Error querying collection '{coll_name}': {ex}")
         return list(agents_map.values())
 
     agents = []
@@ -476,22 +478,24 @@ async def get_agent_stats(
         active_agents = 0
         languages = {}
         seen_ids = set()
-        for coll_name in ["agents", "exotel_agents"]:
-            if coll_name not in await db.list_collection_names():
-                continue
-            cursor = db[coll_name].find(filter_q)
-            async for doc in cursor:
-                doc_id = str(doc["_id"])
-                if doc_id in seen_ids:
-                    continue
-                seen_ids.add(doc_id)
-                total_agents += 1
-                if doc.get("status") == "active":
-                    active_agents += 1
-                lang = doc.get("language", "en")
-                if isinstance(lang, list) and lang:
-                    lang = lang[0]
-                languages[str(lang)] = languages.get(str(lang), 0) + 1
+        target_colls = ["agents", "exotel_agents", "modernexotelaiagents", "modernaiagents"]
+        for coll_name in target_colls:
+            try:
+                cursor = db[coll_name].find(filter_q)
+                async for doc in cursor:
+                    doc_id = str(doc["_id"])
+                    if doc_id in seen_ids:
+                        continue
+                    seen_ids.add(doc_id)
+                    total_agents += 1
+                    if doc.get("status") == "active":
+                        active_agents += 1
+                    lang = doc.get("language", "en")
+                    if isinstance(lang, list) and lang:
+                        lang = lang[0]
+                    languages[str(lang)] = languages.get(str(lang), 0) + 1
+            except Exception as ex:
+                logger.warning(f"Error querying collection '{coll_name}': {ex}")
         return total_agents, active_agents, languages
 
     total_agents, active_agents, languages = 0, 0, {}
