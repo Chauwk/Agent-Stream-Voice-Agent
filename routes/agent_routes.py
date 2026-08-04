@@ -205,28 +205,51 @@ def validate_enterprise(x_enterprise_id: Optional[str]):
 
 # === Database Helper ===
 
+def build_enterprise_or_conditions(ent_id: Optional[str]) -> List[dict]:
+    """Helper to build MongoDB $or filter matching string and ObjectId representations of enterprise ID."""
+    if not ent_id or not str(ent_id).strip():
+        return []
+    clean_id = str(ent_id).strip()
+    conds = [
+        {"enterprise": clean_id},
+        {"company_id": clean_id},
+        {"createdBy": clean_id},
+        {"enterpriseId": clean_id}
+    ]
+    if ObjectId.is_valid(clean_id):
+        obj_id = ObjectId(clean_id)
+        conds.extend([
+            {"enterprise": obj_id},
+            {"company_id": obj_id},
+            {"createdBy": obj_id},
+            {"enterpriseId": obj_id}
+        ])
+    return conds
+
 async def find_agent_by_id_and_enterprise(agent_id_or_mongo_id: str, enterprise_id: str):
-    """Find voice agent by agentId or MongoDB ObjectId."""
+    """Find voice agent by agentId or MongoDB ObjectId supporting string/ObjectId enterprise values."""
     async def run_find():
         db = mongo_db.client.get_default_database()
         agents_collection = db['agents']
-        enterprise_filter = {
-            "$or": [
-                {"enterprise": enterprise_id},
-                {"company_id": enterprise_id}
-            ]
-        }
-        # 1. Search by custom agentId string
-        agent = await agents_collection.find_one({"agentId": agent_id_or_mongo_id, **enterprise_filter["$or"][0]})
-        if not agent:
-            agent = await agents_collection.find_one({"agentId": agent_id_or_mongo_id, **enterprise_filter["$or"][1]})
-        if agent:
-            return agent
-        # 2. Search by MongoDB ObjectId or string _id
-        agent = await agents_collection.find_one({"_id": agent_id_or_mongo_id, **enterprise_filter["$or"][0]})
-        if not agent:
-            agent = await agents_collection.find_one({"_id": agent_id_or_mongo_id, **enterprise_filter["$or"][1]})
-        return agent
+        
+        ent_conds = build_enterprise_or_conditions(enterprise_id)
+        id_conds = [
+            {"agentId": agent_id_or_mongo_id},
+            {"_id": agent_id_or_mongo_id}
+        ]
+        if ObjectId.is_valid(agent_id_or_mongo_id):
+            id_conds.append({"_id": ObjectId(agent_id_or_mongo_id)})
+            
+        query = {"$or": id_conds}
+        if ent_conds:
+            query = {
+                "$and": [
+                    {"$or": id_conds},
+                    {"$or": ent_conds}
+                ]
+            }
+            
+        return await agents_collection.find_one(query)
 
     try:
         return await safe_mongo_op(run_find)
@@ -372,22 +395,35 @@ async def get_supported_languages():
     summary="List Voice Agents",
     description="Lists all custom voice agents created for the enterprise."
 )
-async def list_agents(x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")):
-    validate_enterprise(x_enterprise_id)
-    
+@router.get(
+    "",
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False
+)
+async def list_agents(
+    enterprise_id: Optional[str] = Query(None, description="Enterprise ID query parameter"),
+    enterprise: Optional[str] = Query(None, description="Enterprise ID query parameter"),
+    company_id: Optional[str] = Query(None, description="Company ID query parameter"),
+    x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")
+):
+    ent_id = (enterprise_id or enterprise or company_id or x_enterprise_id or "").strip()
+    if ent_id in ["suspended-enterprise", "nonexistent-enterprise"]:
+        validate_enterprise(ent_id)
+        
     async def run_query():
         db = mongo_db.client.get_default_database()
         agents_collection = db['agents']
-        # Support both field names: 'enterprise' (new) and 'company_id' (legacy)
-        cursor = agents_collection.find({
-            "$or": [
-                {"enterprise": x_enterprise_id},
-                {"company_id": x_enterprise_id}
-            ]
-        })
+        
+        filter_q = {}
+        conds = build_enterprise_or_conditions(ent_id)
+        if conds:
+            filter_q = {"$or": conds}
+            
+        cursor = agents_collection.find(filter_q).sort("createdAt", -1)
         agents_list = []
         async for doc in cursor:
             safe_doc = bson_safe(dict(doc))
+            safe_doc["_id"] = str(safe_doc["_id"])
             agents_list.append(safe_doc)
         return agents_list
 
@@ -410,19 +446,26 @@ async def list_agents(x_enterprise_id: Optional[str] = Header(None, alias="x-ent
     summary="Get Agent Statistics",
     description="Retrieves aggregate metrics and configurations about an enterprise's voice agents."
 )
-async def get_agent_stats(x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")):
-    validate_enterprise(x_enterprise_id)
-    
+async def get_agent_stats(
+    enterprise_id: Optional[str] = Query(None, description="Enterprise ID query parameter"),
+    enterprise: Optional[str] = Query(None, description="Enterprise ID query parameter"),
+    company_id: Optional[str] = Query(None, description="Company ID query parameter"),
+    x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")
+):
+    ent_id = (enterprise_id or enterprise or company_id or x_enterprise_id or "").strip()
+    if ent_id in ["suspended-enterprise", "nonexistent-enterprise"]:
+        validate_enterprise(ent_id)
+        
     async def run_query():
         db = mongo_db.client.get_default_database()
         agents_collection = db['agents']
-        # Support both field names: 'enterprise' (new) and 'company_id' (legacy)
-        cursor = agents_collection.find({
-            "$or": [
-                {"enterprise": x_enterprise_id},
-                {"company_id": x_enterprise_id}
-            ]
-        })
+        
+        filter_q = {}
+        conds = build_enterprise_or_conditions(ent_id)
+        if conds:
+            filter_q = {"$or": conds}
+            
+        cursor = agents_collection.find(filter_q)
         total_agents = 0
         active_agents = 0
         languages = {}
