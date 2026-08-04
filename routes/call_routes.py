@@ -5,7 +5,7 @@ Exposes REST endpoints for triggering calls, fetching status, and receiving call
 Generates comprehensive OpenAPI Swagger schemas.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Query, Header, UploadFile, File
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional, Union, List
 from controllers import call_controller
