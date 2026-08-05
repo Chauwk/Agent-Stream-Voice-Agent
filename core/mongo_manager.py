@@ -30,6 +30,36 @@ class MongoManager:
         try:
             await self.call_logs_collection.insert_one(call_data)
             logger.info(f"✅ Call log {call_data.get('call_id')} successfully saved to MongoDB")
+            
+            # Also update matching outbound_calls document from 'initiated' to completed/failed status
+            raw_cid = str(call_data.get("call_id") or "").strip()
+            clean_cid = raw_cid.split("@")[0].strip()
+            if clean_cid:
+                status_str = call_data.get("status", "completed")
+                duration_val = call_data.get("duration_seconds") or call_data.get("duration") or 0
+                summary_text = call_data.get("call_summary") or call_data.get("summary") or ""
+                transcript_list = call_data.get("transcript") or call_data.get("messages") or []
+                
+                update_fields = {
+                    "status": status_str,
+                    "duration": duration_val,
+                    "durationSeconds": duration_val,
+                    "transcript": transcript_list,
+                    "call_summary": summary_text,
+                    "summary": summary_text
+                }
+                
+                res = await self.db['outbound_calls'].update_many(
+                    {"$or": [
+                        {"call_sid": clean_cid},
+                        {"call_id": clean_cid},
+                        {"call_sid": raw_cid},
+                        {"call_id": raw_cid}
+                    ]},
+                    {"$set": update_fields}
+                )
+                if res.modified_count > 0:
+                    logger.info(f"✅ Updated {res.modified_count} outbound_calls records for Call SID {clean_cid} to status '{status_str}'")
         except Exception as e:
             logger.error(f"❌ Failed to save call log to MongoDB: {e}")
 
