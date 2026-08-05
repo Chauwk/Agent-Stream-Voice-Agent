@@ -113,6 +113,11 @@ class AgentUpdateRequest(BaseModel):
     hinglish_mode: Optional[bool] = Field(None)
     phoneNumber: Optional[str] = Field(None, example="04040377112", description="Exotel virtual number to bind to this agent.")
 
+class AssignVirtualNumberRequest(BaseModel):
+    enterprise_id: str = Field(..., json_schema_extra={"example": "enterprise_id_here"}, description="Enterprise ID")
+    agent_id: str = Field(..., json_schema_extra={"example": "agent_3a2e7c8f9b1d"}, description="Agent ID or MongoDB ObjectId of the agent")
+    virtual_number: str = Field(..., json_schema_extra={"example": "04040377112"}, description="The virtual phone number to assign to this agent")
+
 class SimulateRequest(BaseModel):
     message: str = Field(..., example="Hello, does this support refunds?")
     session_id: Optional[str] = Field(None, example="session_123")
@@ -375,6 +380,82 @@ async def create_agent(
         "message": "Agent created successfully",
         "data": agent_data
     }
+
+@router.post(
+    "/assign-virtual-number",
+    status_code=status.HTTP_200_OK,
+    summary="Assign Virtual Number to Agent",
+    description="Assigns or attaches a virtual phone number (DID) to an existing voice agent."
+)
+async def assign_virtual_number(payload: AssignVirtualNumberRequest):
+    if not payload.enterprise_id or not payload.agent_id or not payload.virtual_number:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"success": False, "message": "enterprise_id, agent_id, and virtual_number are required fields."}
+        )
+
+    if mongo_db.client is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"success": False, "message": "Database connection is not available"}
+        )
+
+    async def run_assign():
+        db = mongo_db.client.get_default_database()
+        ent_conds = build_enterprise_or_conditions(payload.enterprise_id)
+        id_conds = [
+            {"agentId": payload.agent_id},
+            {"_id": payload.agent_id}
+        ]
+        if ObjectId.is_valid(payload.agent_id):
+            id_conds.append({"_id": ObjectId(payload.agent_id)})
+            
+        query = {"$or": id_conds}
+        if ent_conds:
+            query = {
+                "$and": [
+                    {"$or": id_conds},
+                    {"$or": ent_conds}
+                ]
+            }
+        
+        for coll_name in ["exotel_agents", "agents", "modernexotelaiagents", "modernaiagents"]:
+            if coll_name in await db.list_collection_names():
+                doc = await db[coll_name].find_one(query)
+                if doc:
+                    await db[coll_name].update_one(
+                        {"_id": doc["_id"]},
+                        {"$set": {
+                            "phoneNumber": payload.virtual_number,
+                            "updatedAt": datetime.datetime.utcnow().isoformat() + "Z"
+                        }}
+                    )
+                    updated_doc = await db[coll_name].find_one({"_id": doc["_id"]})
+                    return updated_doc
+        return None
+
+    try:
+        updated_agent = await safe_mongo_op(run_assign)
+        if not updated_agent:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"success": False, "message": "Agent not found for the specified enterprise and ID."}
+            )
+        
+        safe_agent = bson_safe(dict(updated_agent))
+        return {
+            "success": True,
+            "message": f"Virtual number {payload.virtual_number} assigned successfully.",
+            "data": safe_agent
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error assigning virtual number to agent: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"success": False, "message": f"Internal server error: {str(e)}"}
+        )
 
 
 @router.get(
