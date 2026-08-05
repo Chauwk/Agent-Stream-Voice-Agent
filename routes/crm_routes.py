@@ -133,6 +133,7 @@ async def get_crm_agent_leads(
                 summary = doc.get("call_summary") or doc.get("summary") or ""
                 meeting_consent = doc.get("caller_meeting_consent") or doc.get("meeting_consent") or False
                 business_interest = doc.get("business_interest") or doc.get("car_model") or ""
+                transcript = doc.get("transcript") or doc.get("messages") or doc.get("conversation") or []
                 raw_call_id = str(doc.get("call_id") or doc.get("call_sid") or doc_id).strip()
                 call_key = raw_call_id.split("@")[0].strip()
                 status_str = doc.get("status", "completed")
