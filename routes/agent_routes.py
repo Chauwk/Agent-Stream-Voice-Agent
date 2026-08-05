@@ -97,7 +97,7 @@ class AgentCreateRequest(BaseModel):
     terms: Optional[TermsModel] = Field(default_factory=lambda: TermsModel(enabled=False, content=""))
     platformAgreement: Optional[Union[str, bool]] = Field(None, json_schema_extra={"example": True})
     hinglish_mode: Optional[bool] = Field(False, json_schema_extra={"example": False})
-    phoneNumber: Optional[str] = Field(None, json_schema_extra={"example": "04040377112"}, description="Exotel virtual number to bind to this agent.")
+    virtualNumber: Optional[str] = Field(None, json_schema_extra={"example": "04040377112"}, description="Exotel virtual number bound to this agent.")
 
 class AgentUpdateRequest(BaseModel):
     name: Optional[str] = Field(None, json_schema_extra={"example": "Updated Support Assistant"})
@@ -111,7 +111,7 @@ class AgentUpdateRequest(BaseModel):
     knowledgeBaseIds: Optional[List[str]] = Field(None)
     terms: Optional[TermsModel] = Field(None)
     hinglish_mode: Optional[bool] = Field(None)
-    phoneNumber: Optional[str] = Field(None, example="04040377112", description="Exotel virtual number to bind to this agent.")
+    virtualNumber: Optional[str] = Field(None, example="04040377112", description="Exotel virtual number bound to this agent.")
 
 class AssignVirtualNumberRequest(BaseModel):
     enterprise_id: str = Field(..., json_schema_extra={"example": "enterprise_id_here"}, description="Enterprise ID")
@@ -155,7 +155,7 @@ class AgentDataResponse(BaseModel):
     agentId: str = Field(..., example="agent_3a2e7c8f9b1d")
     knowledgeBaseIds: List[str] = Field(default_factory=list)
     terms: Optional[TermsModel] = Field(default_factory=lambda: TermsModel(enabled=False, content=""))
-    phoneNumber: Optional[str] = Field(None, example="04045902355")
+    virtualNumber: Optional[str] = Field(None, example="04045902355")
     status: str = Field("active")
     createdBy: Optional[str] = Field(default="", example="enterprise_id_here")
     createdAt: str = Field(...)
@@ -347,8 +347,7 @@ async def create_agent(
         "languages": resolved_languages,
         "hinglish_mode": payload.hinglish_mode if payload.hinglish_mode is not None else False,
         "description": payload.description or "",
-        "phoneNumber": payload.phoneNumber or "",
-        "virtualNumber": payload.phoneNumber or "",
+        "virtualNumber": (payload.virtualNumber if hasattr(payload, 'virtualNumber') and payload.virtualNumber else "") or "",
         "agentId": agent_uuid,
         "knowledgeBaseIds": payload.knowledgeBaseIds or [],
         "terms": {
@@ -433,8 +432,10 @@ async def assign_virtual_number(payload: AssignVirtualNumberRequest):
                         {"_id": doc["_id"]},
                         {"$set": {
                             "virtualNumber": payload.virtual_number,
-                            "phoneNumber": payload.virtual_number,
                             "updatedAt": datetime.datetime.utcnow().isoformat() + "Z"
+                        },
+                        "$unset": {
+                            "phoneNumber": ""
                         }}
                     )
                     updated_doc = await db[coll_name].find_one({"_id": doc["_id"]})
@@ -791,7 +792,7 @@ async def get_agent_stats(
     "/admin/all",
     status_code=status.HTTP_200_OK,
     summary="[Admin] List ALL Agents",
-    description="Lists every agent across all enterprises stored in MongoDB. Shows agentId, name, enterprise, language, phoneNumber, knowledgeBaseIds, and status."
+    description="Lists every agent across all enterprises stored in MongoDB. Shows agentId, name, enterprise, language, virtualNumber, knowledgeBaseIds, and status."
 )
 async def list_all_agents_admin():
     """Admin-only: returns all agents in the DB. Safe against BSON types."""
@@ -906,7 +907,7 @@ async def get_filtered_call_logs(
                 query_clauses.append({
                     "$or": [
                         {"phone_number": rgx},
-                        {"phoneNumber": rgx},
+                        {"virtualNumber": rgx},
                         {"to_number": rgx},
                         {"from_number": rgx}
                     ]
@@ -1065,9 +1066,8 @@ async def update_agent(
             "enabled": payload.terms.enabled,
             "content": payload.terms.content
         }
-    if payload.phoneNumber is not None:
-        update_data["phoneNumber"] = payload.phoneNumber
-        update_data["virtualNumber"] = payload.phoneNumber
+    if hasattr(payload, 'virtualNumber') and payload.virtualNumber is not None:
+        update_data["virtualNumber"] = payload.virtualNumber
     if payload.languages is not None or payload.language is not None:
         raw_langs = payload.languages or payload.language
         resolved_languages = []

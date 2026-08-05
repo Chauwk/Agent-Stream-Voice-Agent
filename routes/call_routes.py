@@ -277,7 +277,7 @@ async def get_call_logs(
                 query_clauses.append({
                     "$or": [
                         {"phone_number": rgx},
-                        {"phoneNumber": rgx},
+                        {"virtualNumber": rgx},
                         {"to_number": rgx},
                         {"from_number": rgx}
                     ]

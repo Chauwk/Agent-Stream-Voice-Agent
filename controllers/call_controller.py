@@ -122,7 +122,7 @@ async def initiate_outbound_call(
                         if coll_name in await db.list_collection_names():
                             agent_doc = await db[coll_name].find_one(query)
                             if agent_doc:
-                                resolved_num = agent_doc.get("virtualNumber") or agent_doc.get("phoneNumber")
+                                resolved_num = agent_doc.get("virtualNumber")
                                 if resolved_num and str(resolved_num).strip():
                                     agent_phone = str(resolved_num).strip()
                                     logger.info(f"🎯 Resolved agent virtual phone number '{agent_phone}' from collection '{coll_name}' for Agent ID '{id_to_search}'")

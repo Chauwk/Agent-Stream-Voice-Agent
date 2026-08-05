@@ -127,7 +127,7 @@ async def get_crm_agent_leads(
                 if end_ts is not None and ts_val > end_ts:
                     continue
                     
-                phone = doc.get("phone_number") or doc.get("phoneNumber") or doc.get("caller_phone_no") or doc.get("lead_phone_no") or doc.get("to_number") or doc.get("from_number") or ""
+                phone = doc.get("virtualNumber") or doc.get("phone_number") or doc.get("caller_phone_no") or doc.get("lead_phone_no") or doc.get("to_number") or doc.get("from_number") or ""
                 name = doc.get("customer_name") or doc.get("name") or doc.get("lead_name") or "Customer"
                 email = doc.get("email") or doc.get("lead_email") or ""
                 summary = doc.get("call_summary") or doc.get("summary") or ""

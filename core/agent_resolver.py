@@ -43,28 +43,18 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
                 logger.info(f"🎯 Dynamic agent resolved by MongoDB _id in {coll_name}: {agent.get('name')} ({agent.get('agentId')})")
                 return _sanitize_agent_doc(agent)
     
-            # 3. Search by assigned virtualNumber or phoneNumber in MongoDB (exact match)
-            agent = await agents_collection.find_one({
-                "$or": [
-                    {"virtualNumber": destination_id},
-                    {"phoneNumber": destination_id}
-                ]
-            })
+            # 3. Search by assigned virtualNumber in MongoDB (exact match)
+            agent = await agents_collection.find_one({"virtualNumber": destination_id})
             if agent:
-                logger.info(f"🎯 Dynamic agent resolved by Virtual/Phone Number in {coll_name}: {agent.get('name')} ({agent.get('agentId')})")
+                logger.info(f"🎯 Dynamic agent resolved by Virtual Number in {coll_name}: {agent.get('name')} ({agent.get('agentId')})")
                 return _sanitize_agent_doc(agent)
     
-            # 4. Search by digits of virtualNumber or phoneNumber (last 10 digits regex match)
+            # 4. Search by digits of virtualNumber (last 10 digits regex match)
             clean_10 = re.sub(r'\D', '', str(destination_id))[-10:] if destination_id else ""
             if clean_10 and len(clean_10) >= 7:
-                agent = await agents_collection.find_one({
-                    "$or": [
-                        {"virtualNumber": {"$regex": clean_10}},
-                        {"phoneNumber": {"$regex": clean_10}}
-                    ]
-                })
+                agent = await agents_collection.find_one({"virtualNumber": {"$regex": clean_10}})
                 if agent:
-                    logger.info(f"🎯 Dynamic agent resolved by Virtual/Phone Number Regex ({clean_10}) in {coll_name}: {agent.get('name')} ({agent.get('agentId')})")
+                    logger.info(f"🎯 Dynamic agent resolved by Virtual Number Regex ({clean_10}) in {coll_name}: {agent.get('name')} ({agent.get('agentId')})")
                     return _sanitize_agent_doc(agent)
                 
             # 5. Search by phone number mapping (using Company SQL lookup)
@@ -74,10 +64,7 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
                 if clean_10:
                     agent = await agents_collection.find_one({
                         "$and": [
-                            {"$or": [
-                                {"virtualNumber": {"$regex": clean_10}},
-                                {"phoneNumber": {"$regex": clean_10}}
-                            ]},
+                            {"virtualNumber": {"$regex": clean_10}},
                             {"$or": [
                                 {"enterprise": company_id},
                                 {"company_id": company_id}
