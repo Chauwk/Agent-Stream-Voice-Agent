@@ -135,6 +135,8 @@ app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 app.include_router(call_router)
 app.include_router(bot_router)
 app.include_router(agent_router)
+from routes.crm_routes import router as crm_router
+app.include_router(crm_router)
 
 from fastapi import APIRouter
 calls_log_router = APIRouter(prefix="/api/v1/calls", tags=["Call Logs"])
