@@ -211,6 +211,7 @@ def build_enterprise_or_conditions(ent_id: Optional[str]) -> List[dict]:
         return []
     clean_id = str(ent_id).strip()
     conds = [
+        {"enterprise_id": clean_id},
         {"enterprise": clean_id},
         {"company_id": clean_id},
         {"createdBy": clean_id},
@@ -219,6 +220,7 @@ def build_enterprise_or_conditions(ent_id: Optional[str]) -> List[dict]:
     if ObjectId.is_valid(clean_id):
         obj_id = ObjectId(clean_id)
         conds.extend([
+            {"enterprise_id": obj_id},
             {"enterprise": obj_id},
             {"company_id": obj_id},
             {"createdBy": obj_id},
