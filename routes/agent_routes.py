@@ -594,6 +594,76 @@ async def get_supported_languages():
     }
 
 @router.get(
+    "/supported-voices-and-languages",
+    status_code=status.HTTP_200_OK,
+    summary="Get Supported Voices and Languages",
+    description="Returns a list of all available voice IDs and language codes for configuring voice agents."
+)
+async def get_supported_voices_and_languages():
+    return {
+        "success": True,
+        "voices": [
+            {"id": "shubh", "gender": "male", "model": "bulbul:v3", "description": "Hindi / Code-mixed Indian Male Voice (Default)"},
+            {"id": "aditya", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "ritu", "gender": "female", "model": "bulbul:v3", "description": "Indian Female Voice"},
+            {"id": "priya", "gender": "female", "model": "bulbul:v3", "description": "Indian Female Voice"},
+            {"id": "neha", "gender": "female", "model": "bulbul:v3", "description": "Indian Female Voice"},
+            {"id": "rahul", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "pooja", "gender": "female", "model": "bulbul:v3", "description": "Indian Female Voice"},
+            {"id": "rohan", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "simran", "gender": "female", "model": "bulbul:v3", "description": "Indian Female Voice"},
+            {"id": "kavya", "gender": "female", "model": "bulbul:v3", "description": "Indian Female Voice"},
+            {"id": "amit", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "dev", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "ishita", "gender": "female", "model": "bulbul:v3", "description": "Indian Female Voice"},
+            {"id": "shreya", "gender": "female", "model": "bulbul:v3", "description": "Indian Female Voice"},
+            {"id": "ratan", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "varun", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "manan", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "sumit", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "roopa", "gender": "female", "model": "bulbul:v3", "description": "Indian Female Voice"},
+            {"id": "kabir", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "aayan", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "ashutosh", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "advait", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "anand", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "tanya", "gender": "female", "model": "bulbul:v3", "description": "Indian Female Voice"},
+            {"id": "tarun", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "sunny", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "mani", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "gokul", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "vijay", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "shruti", "gender": "female", "model": "bulbul:v3", "description": "Indian Female Voice"},
+            {"id": "suhani", "gender": "female", "model": "bulbul:v3", "description": "Indian Female Voice"},
+            {"id": "mohit", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "kavitha", "gender": "female", "model": "bulbul:v3", "description": "Indian Female Voice"},
+            {"id": "rehan", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "soham", "gender": "male", "model": "bulbul:v3", "description": "Indian Male Voice"},
+            {"id": "rupali", "gender": "female", "model": "bulbul:v3", "description": "Indian Female Voice"},
+            {"id": "anushka", "gender": "female", "model": "bulbul:v2", "description": "Legacy Indian Female Voice"},
+            {"id": "manisha", "gender": "female", "model": "bulbul:v2", "description": "Legacy Indian Female Voice"},
+            {"id": "vidya", "gender": "female", "model": "bulbul:v2", "description": "Legacy Indian Female Voice"},
+            {"id": "arya", "gender": "female", "model": "bulbul:v2", "description": "Legacy Indian Female Voice"},
+            {"id": "abhilash", "gender": "male", "model": "bulbul:v2", "description": "Legacy Indian Male Voice"},
+            {"id": "karun", "gender": "male", "model": "bulbul:v2", "description": "Legacy Indian Male Voice"},
+            {"id": "hitesh", "gender": "male", "model": "bulbul:v2", "description": "Legacy Indian Male Voice"}
+        ],
+        "languages": [
+            {"code": "en-IN", "name": "English (Indian)"},
+            {"code": "hi-IN", "name": "Hindi (हिन्दी)"},
+            {"code": "te-IN", "name": "Telugu (తెలుగు)"},
+            {"code": "ta-IN", "name": "Tamil (தமிழ்)"},
+            {"code": "kn-IN", "name": "Kannada (ಕನ್ನಡ)"},
+            {"code": "ml-IN", "name": "Malayalam (മലയാളం)"},
+            {"code": "mr-IN", "name": "Marathi (मराठी)"},
+            {"code": "bn-IN", "name": "Bengali (বাংলা)"},
+            {"code": "gu-IN", "name": "Gujarati (ગુજરાતી)"},
+            {"code": "pa-IN", "name": "Punjabi (ਪੰਜਾਬੀ)"},
+            {"code": "od-IN", "name": "Odia (ଓଡ଼ିଆ)"}
+        ]
+    }
+
+@router.get(
     "/list",
     status_code=status.HTTP_200_OK,
     summary="List Voice Agents",
