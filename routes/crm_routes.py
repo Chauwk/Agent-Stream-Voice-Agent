@@ -73,6 +73,11 @@ async def get_crm_agent_leads(
     
     target_ids = [agentId]
     resolved_agent = await find_agent_by_id_and_enterprise(agentId, ent_id) if ent_id else await resolve_agent_config(agentId)
+    if ent_id and not resolved_agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"success": False, "message": f"Agent '{agentId}' not found for enterprise '{ent_id}'"}
+        )
     if resolved_agent:
         if resolved_agent.get("agentId"):
             target_ids.append(resolved_agent.get("agentId"))
@@ -86,22 +91,13 @@ async def get_crm_agent_leads(
     for tid in set(target_ids):
         agent_clauses.extend([
             {"agentId": tid},
-            {"agent_id": tid}
+            {"agent_id": tid},
+            {"agent": tid}
         ])
         if ObjectId.is_valid(tid):
             agent_clauses.append({"_id": ObjectId(tid)})
             
     filt = {"$or": agent_clauses}
-    
-    if ent_id:
-        ent_conds = build_enterprise_or_conditions(ent_id)
-        if ent_conds:
-            filt = {
-                "$and": [
-                    {"$or": agent_clauses},
-                    {"$or": ent_conds}
-                ]
-            }
 
     leads_map = {}
     target_collections = ["Agent_Stream_CallsLogs", "outbound_calls", "aiagentcallreports"]
@@ -131,11 +127,11 @@ async def get_crm_agent_leads(
                 if end_ts is not None and ts_val > end_ts:
                     continue
                     
-                phone = doc.get("phone_number") or doc.get("phoneNumber") or doc.get("to_number") or doc.get("from_number") or doc.get("lead_phone") or ""
+                phone = doc.get("phone_number") or doc.get("phoneNumber") or doc.get("caller_phone_no") or doc.get("lead_phone_no") or doc.get("to_number") or doc.get("from_number") or ""
                 name = doc.get("customer_name") or doc.get("name") or doc.get("lead_name") or "Customer"
                 email = doc.get("email") or doc.get("lead_email") or ""
-                summary = doc.get("summary") or doc.get("call_summary") or ""
-                meeting_consent = doc.get("meeting_consent") or doc.get("caller_meeting_consent") or False
+                summary = doc.get("call_summary") or doc.get("summary") or ""
+                meeting_consent = doc.get("caller_meeting_consent") or doc.get("meeting_consent") or False
                 business_interest = doc.get("business_interest") or doc.get("car_model") or ""
                 transcript = doc.get("transcript") or []
                 call_id = doc.get("call_id") or doc.get("call_sid") or doc_id
@@ -260,6 +256,11 @@ async def get_crm_agent_metrics(
     
     target_ids = [agentId]
     resolved_agent = await find_agent_by_id_and_enterprise(agentId, ent_id) if ent_id else await resolve_agent_config(agentId)
+    if ent_id and not resolved_agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"success": False, "message": f"Agent '{agentId}' not found for enterprise '{ent_id}'"}
+        )
     if resolved_agent:
         if resolved_agent.get("agentId"):
             target_ids.append(resolved_agent.get("agentId"))
@@ -273,21 +274,13 @@ async def get_crm_agent_metrics(
     for tid in set(target_ids):
         agent_clauses.extend([
             {"agentId": tid},
-            {"agent_id": tid}
+            {"agent_id": tid},
+            {"agent": tid}
         ])
         if ObjectId.is_valid(tid):
             agent_clauses.append({"_id": ObjectId(tid)})
             
     filt = {"$or": agent_clauses}
-    if ent_id:
-        ent_conds = build_enterprise_or_conditions(ent_id)
-        if ent_conds:
-            filt = {
-                "$and": [
-                    {"$or": agent_clauses},
-                    {"$or": ent_conds}
-                ]
-            }
 
     seen_ids = set()
     total_calls = 0
