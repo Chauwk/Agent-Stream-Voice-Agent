@@ -95,7 +95,7 @@ async def initiate_outbound_call(
             try:
                 from core.mongo_manager import mongo_db
                 from bson import ObjectId
-                from core.agent_resolver import build_enterprise_or_conditions
+                from routes.agent_routes import build_enterprise_or_conditions
                 if mongo_db.client is not None:
                     db = mongo_db.client.get_default_database()
                     id_to_search = target_agent_id or enterprise_id
