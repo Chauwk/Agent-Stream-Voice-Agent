@@ -107,8 +107,6 @@ async def get_crm_agent_leads(
     target_collections = ["Agent_Stream_CallsLogs", "outbound_calls", "aiagentcallreports"]
     
     for coll_name in target_collections:
-        if coll_name not in await db.list_collection_names():
-            continue
         try:
             cursor = db[coll_name].find(filt)
             async for doc in cursor:
@@ -220,7 +218,7 @@ async def get_crm_call_transcript(
     
     target_collections = ["Agent_Stream_CallsLogs", "outbound_calls", "aiagentcallreports"]
     for coll_name in target_collections:
-        if coll_name in await db.list_collection_names():
+        try:
             doc = await db[coll_name].find_one(query)
             if doc:
                 safe_doc = bson_safe(dict(doc))
@@ -231,6 +229,8 @@ async def get_crm_call_transcript(
                     "transcript": safe_doc.get("transcript", []),
                     "call_details": safe_doc
                 }
+        except Exception as ex:
+            logger.warning(f"Error querying collection '{coll_name}' for transcript: {ex}")
                 
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -299,8 +299,6 @@ async def get_crm_agent_metrics(
 
     target_collections = ["Agent_Stream_CallsLogs", "outbound_calls", "aiagentcallreports"]
     for coll_name in target_collections:
-        if coll_name not in await db.list_collection_names():
-            continue
         try:
             cursor = db[coll_name].find(filt)
             async for doc in cursor:
