@@ -649,21 +649,44 @@ async def get_filtered_call_logs(
         elif len(query_clauses) > 1:
             final_filter = {"$and": query_clauses}
             
-        skip = (page - 1) * limit
-        total_count = await calls_coll.count_documents(final_filter)
-        cursor = calls_coll.find(final_filter).sort("timestamp", -1).skip(skip).limit(limit)
+        logs_map = {}
+        target_colls = ["Agent_Stream_CallsLogs", "outbound_calls"]
+        for coll_name in target_colls:
+            try:
+                cursor = db[coll_name].find(final_filter)
+                async for doc in cursor:
+                    doc_id = str(doc["_id"])
+                    if doc_id not in logs_map:
+                        safe_doc = bson_safe(dict(doc))
+                        safe_doc["_id"] = doc_id
+                        logs_map[doc_id] = safe_doc
+            except Exception as ex:
+                logger.warning(f"Error querying call logs collection '{coll_name}': {ex}")
+
+        all_logs = list(logs_map.values())
         
-        logs = []
-        async for doc in cursor:
-            doc["_id"] = str(doc["_id"])
-            logs.append(doc)
+        def parse_ts(item):
+            ts = item.get("timestamp") or item.get("createdAt") or 0
+            if isinstance(ts, (int, float)):
+                return float(ts)
+            if isinstance(ts, str):
+                try:
+                    return datetime.datetime.fromisoformat(ts).timestamp()
+                except Exception:
+                    return 0.0
+            return 0.0
             
+        all_logs.sort(key=parse_ts, reverse=True)
+        total_count = len(all_logs)
+        skip = (page - 1) * limit
+        paginated_logs = all_logs[skip : skip + limit]
+        
         return {
             "success": True,
             "total": total_count,
             "page": page,
             "limit": limit,
-            "logs": logs
+            "logs": paginated_logs
         }
     except Exception as e:
         logger.error(f"Error querying call logs: {e}")
