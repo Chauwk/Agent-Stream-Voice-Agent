@@ -258,7 +258,7 @@ class ModularSalesBot:
                 logger.info(f"⏳ Pre-generating and caching startup greeting audio ({Config.SARVAM_LANGUAGE_CODE})...")
                 kwargs: dict = {
                     "text": self.cached_greeting_text,
-                    "target_language_code": Config.SARVAM_LANGUAGE_CODE,
+                    "language_code": Config.SARVAM_LANGUAGE_CODE,
                     "speaker": Config.SARVAM_SPEAKER,
                     "model": Config.SARVAM_MODEL,
                     "output_audio_codec": "linear16",
@@ -393,7 +393,7 @@ class ModularSalesBot:
             try:
                 kwargs: dict = {
                     "text": current_text,
-                    "target_language_code": Config.SARVAM_LANGUAGE_CODE,
+                    "language_code": Config.SARVAM_LANGUAGE_CODE,
                     "speaker": Config.SARVAM_SPEAKER,
                     "model": Config.SARVAM_MODEL,
                     "output_audio_codec": "linear16",
@@ -480,7 +480,7 @@ class ModularSalesBot:
                 logger.info(f"⏳ Generating custom greeting audio for agent {agent_id} (speaker: {voice_id}, lang: {sarvam_target_lang})...")
                 kwargs: dict = {
                     "text": first_msg,
-                    "target_language_code": sarvam_target_lang,
+                    "language_code": sarvam_target_lang,
                     "speaker": voice_id,
                     "model": Config.SARVAM_MODEL,
                     "output_audio_codec": "linear16",
@@ -537,7 +537,7 @@ class ModularSalesBot:
             logger.info(f"⏳ Generating custom outbound greeting audio ({lang}): '{greeting_text}'")
             kwargs: dict = {
                 "text": greeting_text,
-                "target_language_code": lang,
+                "language_code": lang,
                 "speaker": voice_id,
                 "model": Config.SARVAM_MODEL,
                 "output_audio_codec": "linear16",
@@ -1655,7 +1655,7 @@ class ModularSalesBot:
                     
                     kwargs: dict = {
                         "text": sentence_text,
-                        "target_language_code": target_lang_code,
+                        "language_code": target_lang_code,
                         "speaker": speaker,
                         "model": Config.SARVAM_MODEL,
                         "output_audio_codec": "linear16",
