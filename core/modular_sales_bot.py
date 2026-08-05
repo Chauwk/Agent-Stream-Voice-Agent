@@ -798,10 +798,18 @@ class ModularSalesBot:
             allowed_names = list(dict.fromkeys([LANG_NAMES.get(l, l) for l in agent_languages]))
             
             if len(allowed_names) == 1:
-                lang_directive = f"STRICT LANGUAGE RESTRICTION: You MUST speak and respond EXCLUSIVELY in {allowed_names[0]}. Do not speak or respond in any other language.\n"
+                lang_directive = (
+                    f"STRICT LANGUAGE RESTRICTION: You MUST speak and respond EXCLUSIVELY in {allowed_names[0]}. "
+                    f"Do not speak or respond in any other language. "
+                    f"If the customer asks to speak in a language other than {allowed_names[0]}, refuse to switch and respond back strictly in {allowed_names[0]}.\n"
+                )
             else:
                 langs_str = ", ".join(allowed_names)
-                lang_directive = f"STRICT LANGUAGE RESTRICTION: You are allowed to speak ONLY in the following selected languages: {langs_str}. Do not respond in any language outside of this allowed list. Adapt dynamically to whichever of these allowed languages the customer speaks.\n"
+                lang_directive = (
+                    f"STRICT LANGUAGE RESTRICTION: You are allowed to speak ONLY in the following selected languages: {langs_str}. "
+                    f"Do not respond in any language outside of this allowed list. Adapt dynamically to whichever of these allowed languages the customer speaks. "
+                    f"If the customer asks to speak in an unallowed language outside of ({langs_str}), DO NOT switch to that language; instead, respond back politely in the currently active allowed language stating that you can only assist in {langs_str}.\n"
+                )
             
             is_hindi_primary = primary_lang.startswith("hi")
             default_greeting_inbound = f"नमस्ते! मैं {Config.COMPANY_NAME} से {agent_name} बोल रही हूँ। मैं आज आपकी क्या सहायता कर सकती हूँ?" if is_hindi_primary else f"Hello! I'm {agent_name} calling back from {Config.COMPANY_NAME}. How can I help you today?"

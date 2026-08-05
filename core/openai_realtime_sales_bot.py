@@ -200,10 +200,18 @@ class OpenAIRealtimeSalesBot:
             allowed_names = list(dict.fromkeys([LANG_NAMES.get(l, l) for l in agent_languages]))
             
             if len(allowed_names) == 1:
-                lang_prompt = f"STRICT LANGUAGE RESTRICTION: You MUST speak and respond EXCLUSIVELY in {allowed_names[0]}. Do not speak or respond in any other language."
+                lang_prompt = (
+                    f"STRICT LANGUAGE RESTRICTION: You MUST speak and respond EXCLUSIVELY in {allowed_names[0]}. "
+                    f"Do not speak or respond in any other language. "
+                    f"If the customer asks to speak in a language other than {allowed_names[0]}, refuse to switch and respond back strictly in {allowed_names[0]}."
+                )
             else:
                 langs_str = ", ".join(allowed_names)
-                lang_prompt = f"STRICT LANGUAGE RESTRICTION: You are allowed to speak ONLY in the following selected languages: {langs_str}. Do not respond in any language outside of this allowed list. Adapt dynamically to whichever of these allowed languages the customer speaks."
+                lang_prompt = (
+                    f"STRICT LANGUAGE RESTRICTION: You are allowed to speak ONLY in the following selected languages: {langs_str}. "
+                    f"Do not respond in any language outside of this allowed list. Adapt dynamically to whichever of these allowed languages the customer speaks. "
+                    f"If the customer asks to speak in an unallowed language outside of ({langs_str}), DO NOT switch to that language; instead, respond back politely in the currently active allowed language stating that you can only assist in {langs_str}."
+                )
 
             # Unify system instructions to be identical for both inbound and outbound calls
             instructions = (
