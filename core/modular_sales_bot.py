@@ -1025,7 +1025,7 @@ class ModularSalesBot:
                 _add_kw(variant, 10.0)
         
         # 2. Bot / agent name (from agent config if available, else global config)
-        agent_name_kw = agent_config.get("name") or Config.SALES_BOT_NAME
+        agent_name_kw = str(agent_config.get("name") or Config.SALES_BOT_NAME or "")
         if agent_name_kw:
             _add_kw(agent_name_kw, 5.0)
             _add_kw(agent_name_kw.lower(), 5.0)

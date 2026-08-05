@@ -169,7 +169,7 @@ class OpenAIRealtimeSalesBot:
                 agent_instructions = agent_config.get("instructions", "")
                 
                 # Check if voiceId is a valid OpenAI voice
-                candidate_voice = agent_config.get("voiceId", "").lower()
+                candidate_voice = str(agent_config.get("voiceId") or "").lower()
                 if candidate_voice in ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]:
                     voice = candidate_voice
             else:

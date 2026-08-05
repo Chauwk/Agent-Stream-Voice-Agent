@@ -6,6 +6,15 @@ from controllers.bot_controller import get_company_id_by_phone
 
 logger = logging.getLogger(__name__)
 
+def _sanitize_agent_doc(agent: dict | None) -> dict | None:
+    if not agent:
+        return None
+    cleaned = dict(agent)
+    for k, v in list(cleaned.items()):
+        if isinstance(v, ObjectId):
+            cleaned[k] = str(v)
+    return cleaned
+
 async def resolve_agent_config(destination_id: str) -> dict | None:
     """
     Resolves the voice agent configuration based on the incoming SIP destination ID or phone number.
@@ -24,7 +33,7 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
             agent = await agents_collection.find_one({"agentId": destination_id, "status": "active"})
             if agent:
                 logger.info(f"🎯 Dynamic agent resolved by Agent ID in {coll_name}: {agent.get('name')} ({agent.get('agentId')})")
-                return agent
+                return _sanitize_agent_doc(agent)
     
             # 2. Search by MongoDB _id (string or ObjectId)
             agent = await agents_collection.find_one({"_id": destination_id, "status": "active"})
@@ -32,13 +41,13 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
                 agent = await agents_collection.find_one({"_id": ObjectId(destination_id), "status": "active"})
             if agent:
                 logger.info(f"🎯 Dynamic agent resolved by MongoDB _id in {coll_name}: {agent.get('name')} ({agent.get('agentId')})")
-                return agent
+                return _sanitize_agent_doc(agent)
     
             # 3. Search by assigned phoneNumber in MongoDB (exact match)
             agent = await agents_collection.find_one({"phoneNumber": destination_id})
             if agent:
                 logger.info(f"🎯 Dynamic agent resolved by Phone Number in {coll_name}: {agent.get('name')} ({agent.get('agentId')})")
-                return agent
+                return _sanitize_agent_doc(agent)
     
             # 4. Search by digits of phoneNumber (last 10 digits regex match)
             clean_10 = re.sub(r'\D', '', str(destination_id))[-10:] if destination_id else ""
@@ -46,7 +55,7 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
                 agent = await agents_collection.find_one({"phoneNumber": {"$regex": clean_10}})
                 if agent:
                     logger.info(f"🎯 Dynamic agent resolved by Phone Number Regex ({clean_10}) in {coll_name}: {agent.get('name')} ({agent.get('agentId')})")
-                    return agent
+                    return _sanitize_agent_doc(agent)
                 
             # 5. Search by phone number mapping (using Company SQL lookup)
             company_id = await get_company_id_by_phone(destination_id)
@@ -68,7 +77,7 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
                     )
                 if agent:
                     logger.info(f"🎯 Dynamic agent resolved for company {company_id} via phone {destination_id} in {coll_name}: {agent.get('name')}")
-                    return agent
+                    return _sanitize_agent_doc(agent)
                 
     except Exception as e:
         logger.error(f"❌ Failed to resolve agent config: {e}")
