@@ -85,11 +85,10 @@ class TermsModel(BaseModel):
 class AgentCreateRequest(BaseModel):
     name: str = Field(..., json_schema_extra={"example": "Support Assistant"}, description="The name of the AI agent.")
     instructions: Optional[str] = Field("", json_schema_extra={"example": "You are a helpful customer support agent..."}, description="Prompt or core instructions.")
-    firstMessage: Optional[str] = Field(None, json_schema_extra={"example": "Hello! How can I help you today?"}, description="Optional custom greeting message for inbound calls. Default greeting spoken if omitted.")
-    firstMessageOutbound: Optional[str] = Field(None, json_schema_extra={"example": "Hello! I'm Zara calling back from Chauwk. How can I help you today?"}, description="Optional custom greeting message for outbound calls. Default greeting spoken if omitted.")
+    firstMessage: Optional[str] = Field(None, json_schema_extra={"example": "Hello! How can I help you today?"}, description="Optional custom greeting message for calls. Default greeting spoken if omitted.")
     voiceId: Optional[str] = Field("default", json_schema_extra={"example": "meera"}, description="The ID of the voice to be used.")
-    language: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": "en-IN"}, description="Primary language code. Default is 'en-IN' (English) if omitted.")
-    languages: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": ["en-IN", "hi-IN"]}, description="List of allowed languages for multi-lingual restriction. Default is ['en-IN'] if omitted.")
+    language: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": "en-IN"}, description="Primary language code (e.g. 'te-IN'). Default is 'en-IN' if omitted.")
+    languages: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": ["en-IN", "hi-IN"]}, description="List of supported languages (e.g. ['te-IN', 'hi-IN']). Default is [language] or ['en-IN'].")
     
     # Optional Fields
     description: Optional[str] = Field("", json_schema_extra={"example": "Handles general customer inquiries."})
@@ -103,7 +102,6 @@ class AgentUpdateRequest(BaseModel):
     name: Optional[str] = Field(None, json_schema_extra={"example": "Updated Support Assistant"})
     instructions: Optional[str] = Field(None, json_schema_extra={"example": "You are a polite customer support agent..."})
     firstMessage: Optional[str] = Field(None, json_schema_extra={"example": "Hello, how can I help you today?"})
-    firstMessageOutbound: Optional[str] = Field(None, json_schema_extra={"example": "Hello! I'm Zara calling back from Chauwk. How can I help you today?"})
     voiceId: Optional[str] = Field(None, json_schema_extra={"example": "meera"})
     language: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": "en-IN"})
     languages: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": ["en-IN", "hi-IN"]})
@@ -146,7 +144,6 @@ class AgentDataResponse(BaseModel):
     name: str = Field(..., example="Support Assistant")
     instructions: Optional[str] = Field("", example="You are a helpful customer support agent...")
     firstMessage: Optional[str] = Field(default="", example="Hello! How can I help you today?")
-    firstMessageOutbound: Optional[str] = Field(default="", example="Hello! I'm Zara calling back from Chauwk. How can I help you today?")
     voiceId: Optional[str] = Field(default="default", example="meera")
     language: Optional[str] = Field(default="en-IN", example="en-IN")
     languages: Optional[List[str]] = Field(default_factory=lambda: ["en-IN"], example=["en-IN", "hi-IN"])
@@ -290,18 +287,31 @@ async def create_agent(
     validate_enterprise(x_enterprise_id)
     enterprise_id = x_enterprise_id
         
-    # 2. Resolve languages and primary language field (default is English 'en-IN' if omitted)
-    raw_langs = payload.languages or payload.language
-    resolved_languages = []
-    if isinstance(raw_langs, list):
-        resolved_languages = [str(l).strip() for l in raw_langs if l]
+    # 2. Resolve language (primary string) and languages (list of supported language codes)
+    raw_lang = payload.language
+    raw_langs = payload.languages
+    
+    primary_language = "en-IN"
+    if isinstance(raw_lang, str) and raw_lang.strip():
+        primary_language = raw_lang.strip()
+    elif isinstance(raw_lang, list) and raw_lang:
+        primary_language = str(raw_lang[0]).strip()
+    elif isinstance(raw_langs, list) and raw_langs:
+        primary_language = str(raw_langs[0]).strip()
     elif isinstance(raw_langs, str) and raw_langs.strip():
-        resolved_languages = [l.strip() for l in raw_langs.split(",") if l.strip()]
+        primary_language = raw_langs.split(",")[0].strip()
         
-    if not resolved_languages:
-        resolved_languages = ["en-IN"]
-        
-    primary_language = resolved_languages[0]
+    resolved_languages = [primary_language]
+    if isinstance(raw_langs, list):
+        for l in raw_langs:
+            s_l = str(l).strip()
+            if s_l and s_l not in resolved_languages:
+                resolved_languages.append(s_l)
+    elif isinstance(raw_langs, str) and raw_langs.strip():
+        for l in raw_langs.split(","):
+            s_l = l.strip()
+            if s_l and s_l not in resolved_languages:
+                resolved_languages.append(s_l)
 
     # 3. Duplicate check: reject if an agent with the same name already exists for this enterprise
     if mongo_db.client is not None:
@@ -341,7 +351,6 @@ async def create_agent(
         "name": payload.name,
         "instructions": payload.instructions or "",
         "firstMessage": payload.firstMessage or "",
-        "firstMessageOutbound": payload.firstMessageOutbound or "",
         "voiceId": payload.voiceId or "default",
         "language": primary_language,
         "languages": resolved_languages,
@@ -1051,8 +1060,6 @@ async def update_agent(
         update_data["instructions"] = payload.instructions
     if payload.firstMessage is not None:
         update_data["firstMessage"] = payload.firstMessage
-    if payload.firstMessageOutbound is not None:
-        update_data["firstMessageOutbound"] = payload.firstMessageOutbound
     if payload.voiceId is not None:
         update_data["voiceId"] = payload.voiceId
     if payload.description is not None:

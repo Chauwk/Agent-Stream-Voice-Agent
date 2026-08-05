@@ -227,7 +227,7 @@ class OpenAIRealtimeSalesBot:
             is_active_outbound_leg = bool(outbound_record and outbound_record.get("status") in ["initiated", "ringing", "in_progress"])
             
             if is_active_outbound_leg:
-                custom_outbound = (agent_config.get("firstMessageOutbound") or agent_config.get("firstMessage") or "").strip() if agent_config else ""
+                custom_outbound = (agent_config.get("firstMessage") or "").strip() if agent_config else ""
                 first_message = custom_outbound or outbound_fallback
                 customer_name = outbound_record.get("customer_name", "")
                 if customer_name:

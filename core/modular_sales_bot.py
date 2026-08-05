@@ -531,7 +531,7 @@ class ModularSalesBot:
             else:
                 default_outbound_fallback = f"Hello! I'm {agent_name} calling from {Config.COMPANY_NAME}. Am I speaking with {{customer_name}}?"
 
-            greeting_text = (agent_config.get("firstMessageOutbound") if agent_config else None) or (agent_config.get("firstMessage") if agent_config else None) or default_outbound_fallback
+            greeting_text = (agent_config.get("firstMessage") if agent_config else None) or default_outbound_fallback
             if customer_name:
                 greeting_text = greeting_text.replace("{customer_name}", customer_name).replace("{name}", customer_name)
             logger.info(f"⏳ Generating custom outbound greeting audio ({lang}): '{greeting_text}'")
@@ -832,7 +832,7 @@ class ModularSalesBot:
             is_active_outbound_leg = bool(outbound_record and rec_status not in ["completed", "failed", "no_answer", "busy", "canceled"])
             
             if is_active_outbound_leg:
-                custom_outbound = (agent_config.get("firstMessageOutbound") or agent_config.get("firstMessage") or "").strip() if agent_config else ""
+                custom_outbound = (agent_config.get("firstMessage") or "").strip() if agent_config else ""
                 greeting_text = custom_outbound or default_greeting_outbound
                 customer_name = outbound_record.get("customer_name", "")
                 if customer_name:
