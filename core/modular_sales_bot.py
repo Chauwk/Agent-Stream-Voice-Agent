@@ -686,6 +686,10 @@ class ModularSalesBot:
                         asyncio.create_task(self._get_agent_greeting_audio(agent_config))
                 except Exception as e:
                     logger.error(f"⚠️ Failed to dynamically resolve agent for ID {target_id}: {e}")
+            
+            if agent_config is None:
+                logger.warning(f"🚫 Call {call_id} rejected: No custom agent resolved (default agent fallback disabled).")
+                raise Exception("No active custom agent configuration found.")
         # Ensure Gemini warmup runs if it hasn't completed yet
         if not getattr(self, "gemini_warmed_up", False) and self.gemini_client:
             asyncio.create_task(self._warmup_gemini())
@@ -1028,9 +1032,11 @@ class ModularSalesBot:
         
         # 3. Agent's own company / enterprise name (from agent_config)
         agent_company = agent_config.get("companyName") or agent_config.get("enterprise")
-        if agent_company and agent_company.lower() != platform_name.lower():
-            _add_kw(agent_company, 8.0)
-            _add_kw(agent_company.lower(), 8.0)
+        if agent_company:
+            agent_company_str = str(agent_company)
+            if agent_company_str.lower() != platform_name.lower():
+                _add_kw(agent_company_str, 8.0)
+                _add_kw(agent_company_str.lower(), 8.0)
         
         keywords_query = "&".join(keyword_parts)
         if keywords_query:
