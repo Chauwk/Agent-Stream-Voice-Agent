@@ -87,29 +87,60 @@ async def initiate_outbound_call(
             **(context or {})
         }
 
-        # Resolve agent's assigned phone number if agent_id or enterprise_id provided
+        # Resolve agent's assigned virtual phone number across all collections
         agent_phone = None
-        if agent_id or enterprise_id:
+        target_agent_id = agent_id if (agent_id and agent_id != "default") else None
+
+        if target_agent_id or enterprise_id:
             try:
                 from core.mongo_manager import mongo_db
                 from bson import ObjectId
+                from core.agent_resolver import build_enterprise_or_conditions
                 if mongo_db.client is not None:
                     db = mongo_db.client.get_default_database()
-                    agents_col = db['agents']
-                    target_query = agent_id if (agent_id and agent_id != "default") else enterprise_id
-                    or_conditions = [
-                        {"agentId": target_query},
-                        {"_id": target_query},
-                        {"enterprise": target_query}
+                    id_to_search = target_agent_id or enterprise_id
+                    id_conds = [
+                        {"agentId": id_to_search},
+                        {"_id": id_to_search}
                     ]
-                    if target_query and ObjectId.is_valid(target_query):
-                        or_conditions.append({"_id": ObjectId(target_query)})
-                    agent_doc = await agents_col.find_one({"$or": or_conditions, "status": "active"})
-                    if agent_doc and agent_doc.get("phoneNumber"):
-                        agent_phone = agent_doc.get("phoneNumber")
-                        logger.info(f"🎯 Resolved agent virtual phone number '{agent_phone}' for Agent ID '{agent_id}'")
+                    if ObjectId.is_valid(id_to_search):
+                        id_conds.append({"_id": ObjectId(id_to_search)})
+                        
+                    query = {"$or": id_conds, "status": "active"}
+                    if enterprise_id:
+                        ent_conds = build_enterprise_or_conditions(enterprise_id)
+                        if ent_conds:
+                            query = {
+                                "$and": [
+                                    {"$or": id_conds},
+                                    {"$or": ent_conds},
+                                    {"status": "active"}
+                                ]
+                            }
+
+                    for coll_name in ["exotel_agents", "agents", "modernexotelaiagents", "modernaiagents"]:
+                        if coll_name in await db.list_collection_names():
+                            agent_doc = await db[coll_name].find_one(query)
+                            if agent_doc:
+                                resolved_num = agent_doc.get("virtualNumber") or agent_doc.get("phoneNumber")
+                                if resolved_num and str(resolved_num).strip():
+                                    agent_phone = str(resolved_num).strip()
+                                    logger.info(f"🎯 Resolved agent virtual phone number '{agent_phone}' from collection '{coll_name}' for Agent ID '{id_to_search}'")
+                                    break
             except Exception as ae:
                 logger.warning(f"⚠️ Could not resolve agent phone number from DB: {ae}")
+
+        # STRICT RULE ENFORCEMENT:
+        # If an agent_id is provided, the call MUST originate from that agent's attached virtual number.
+        if target_agent_id and not agent_phone:
+            logger.error(f"❌ Strict Rule Rejection: Agent '{target_agent_id}' does not have an attached virtual number.")
+            return {
+                "success": False,
+                "error": f"Agent '{target_agent_id}' does not have an attached virtual number (virtualNumber). Outbound calls require a valid virtual number assigned to the agent.",
+                "enterprise_id": enterprise_id,
+                "agent_id": agent_id,
+                "campaign_id": campaign_id
+            }
 
         # Initialize the API client
         api = ExotelOutboundAPI()
