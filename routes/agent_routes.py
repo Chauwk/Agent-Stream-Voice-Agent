@@ -348,6 +348,7 @@ async def create_agent(
         "hinglish_mode": payload.hinglish_mode if payload.hinglish_mode is not None else False,
         "description": payload.description or "",
         "phoneNumber": payload.phoneNumber or "",
+        "virtualNumber": payload.phoneNumber or "",
         "agentId": agent_uuid,
         "knowledgeBaseIds": payload.knowledgeBaseIds or [],
         "terms": {
@@ -431,6 +432,7 @@ async def assign_virtual_number(payload: AssignVirtualNumberRequest):
                     await db[coll_name].update_one(
                         {"_id": doc["_id"]},
                         {"$set": {
+                            "virtualNumber": payload.virtual_number,
                             "phoneNumber": payload.virtual_number,
                             "updatedAt": datetime.datetime.utcnow().isoformat() + "Z"
                         }}
@@ -1065,6 +1067,7 @@ async def update_agent(
         }
     if payload.phoneNumber is not None:
         update_data["phoneNumber"] = payload.phoneNumber
+        update_data["virtualNumber"] = payload.phoneNumber
     if payload.languages is not None or payload.language is not None:
         raw_langs = payload.languages or payload.language
         resolved_languages = []
