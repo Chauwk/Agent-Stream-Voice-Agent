@@ -991,6 +991,13 @@ async def get_filtered_call_logs(
     summary="Get Agent Details",
     description="Retrieves detailed settings and parameters for a specific agent."
 )
+@router.get(
+    "/get/{id}",
+    status_code=status.HTTP_200_OK,
+    summary="Get Agent Details (Alias)",
+    description="Retrieves detailed settings and parameters for a specific agent.",
+    include_in_schema=True
+)
 async def get_agent_details(
     id: str,
     x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")
