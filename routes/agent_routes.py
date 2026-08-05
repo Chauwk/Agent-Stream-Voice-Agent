@@ -118,6 +118,11 @@ class AssignVirtualNumberRequest(BaseModel):
     agent_id: str = Field(..., json_schema_extra={"example": "agent_3a2e7c8f9b1d"}, description="Agent ID or MongoDB ObjectId of the agent")
     virtual_number: str = Field(..., json_schema_extra={"example": "04040377112"}, description="The virtual phone number to assign to this agent")
 
+class AddVoiceIdRequest(BaseModel):
+    enterprise_id: str = Field(..., json_schema_extra={"example": "enterprise_id_here"}, description="Enterprise ID")
+    agent_id: str = Field(..., json_schema_extra={"example": "agent_3a2e7c8f9b1d"}, description="Agent ID or MongoDB ObjectId of the agent")
+    voice_id: Optional[str] = Field(None, json_schema_extra={"example": "neha"}, description="The voice ID to assign to this agent. Leave empty to list available voices.")
+
 class SimulateRequest(BaseModel):
     message: str = Field(..., example="Hello, does this support refunds?")
     session_id: Optional[str] = Field(None, example="session_123")
@@ -452,6 +457,118 @@ async def assign_virtual_number(payload: AssignVirtualNumberRequest):
         raise
     except Exception as e:
         logger.error(f"Error assigning virtual number to agent: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"success": False, "message": f"Internal server error: {str(e)}"}
+        )
+
+SARVAM_VOICES = [
+    # bulbul:v3 voices
+    "shubh", "aditya", "ritu", "priya", "neha", "rahul", "pooja", "rohan", "simran", "kavya", 
+    "amit", "dev", "ishita", "shreya", "ratan", "varun", "manan", "sumit", "roopa", "kabir", 
+    "aayan", "ashutosh", "advait", "anand", "tanya", "tarun", "sunny", "mani", "gokul", "vijay", 
+    "shruti", "suhani", "mohit", "kavitha", "rehan", "soham", "rupali",
+    # bulbul:v2 voices
+    "anushka", "manisha", "vidya", "arya", "abhilash", "karun", "hitesh"
+]
+
+@router.post(
+    "/add-voice-id-to-agent",
+    status_code=status.HTTP_200_OK,
+    summary="Add Voice ID to Agent",
+    description="Assigns a Sarvam voice ID to an existing voice agent, or lists available voices if voice_id is omitted."
+)
+async def add_voice_id_to_agent(payload: AddVoiceIdRequest):
+    if not payload.enterprise_id or not payload.agent_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"success": False, "message": "enterprise_id and agent_id are required fields."}
+        )
+
+    if mongo_db.client is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"success": False, "message": "Database connection is not available"}
+        )
+
+    async def run_query_and_update():
+        db = mongo_db.client.get_default_database()
+        ent_conds = build_enterprise_or_conditions(payload.enterprise_id)
+        id_conds = [
+            {"agentId": payload.agent_id},
+            {"_id": payload.agent_id}
+        ]
+        if ObjectId.is_valid(payload.agent_id):
+            id_conds.append({"_id": ObjectId(payload.agent_id)})
+            
+        query = {"$or": id_conds}
+        if ent_conds:
+            query = {
+                "$and": [
+                    {"$or": id_conds},
+                    {"$or": ent_conds}
+                ]
+            }
+        
+        for coll_name in ["exotel_agents", "agents", "modernexotelaiagents", "modernaiagents"]:
+            if coll_name in await db.list_collection_names():
+                doc = await db[coll_name].find_one(query)
+                if doc:
+                    if not payload.voice_id:
+                        # Just return the document to fetch name, and show available voices
+                        return doc, False
+                    
+                    # Validate the provided voice ID
+                    requested_voice = str(payload.voice_id).strip().lower()
+                    if requested_voice not in SARVAM_VOICES:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={
+                                "success": False, 
+                                "message": f"Invalid voice_id '{payload.voice_id}'.",
+                                "available_voices": SARVAM_VOICES
+                            }
+                        )
+                        
+                    await db[coll_name].update_one(
+                        {"_id": doc["_id"]},
+                        {"$set": {
+                            "voiceId": requested_voice,
+                            "updatedAt": datetime.datetime.utcnow().isoformat() + "Z"
+                        }}
+                    )
+                    updated_doc = await db[coll_name].find_one({"_id": doc["_id"]})
+                    return updated_doc, True
+        return None, False
+
+    try:
+        res, is_updated = await safe_mongo_op(run_query_and_update)
+        if not res:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"success": False, "message": "Agent not found for the specified enterprise and ID."}
+            )
+        
+        agent_name = res.get("name", "Unknown Agent")
+        
+        if is_updated:
+            return {
+                "success": True,
+                "message": f"voice id \"{payload.voice_id}\" added successfully to agent \"{agent_name}\" successfully",
+                "data": bson_safe(dict(res))
+            }
+        else:
+            return {
+                "success": True,
+                "message": "Please select a voice_id from the available list to assign it to the agent.",
+                "agent_name": agent_name,
+                "available_voices": SARVAM_VOICES
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding voice ID to agent: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"success": False, "message": f"Internal server error: {str(e)}"}
