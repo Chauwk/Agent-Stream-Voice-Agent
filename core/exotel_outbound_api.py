@@ -65,7 +65,7 @@ class ExotelOutboundAPI:
                 clean_number = "0" + clean_number
 
             # Determine virtual number (CallerId & To) for Exotel Connect API
-            effective_caller_id = self.exotel_number
+            effective_caller_id = None
             if caller_id and str(caller_id).strip():
                 clean_cid = str(caller_id).strip().replace(" ", "").replace("-", "")
                 if clean_cid.startswith("+91"):
@@ -75,6 +75,10 @@ class ExotelOutboundAPI:
                 elif len(clean_cid) == 10 and clean_cid.isdigit():
                     clean_cid = "0" + clean_cid
                 effective_caller_id = clean_cid
+
+            if not effective_caller_id:
+                logger.error("❌ Outbound call aborted: No agent virtual number (caller_id) provided. Default virtual number fallback is disabled.")
+                return None
 
             logger.info(f"📤 Making outbound call: Customer={clean_number}, Agent Virtual Number/CallerId={effective_caller_id}")
             

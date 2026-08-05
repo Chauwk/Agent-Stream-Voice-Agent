@@ -79,7 +79,7 @@ class Config:
     EXOTEL_API_KEY = os.getenv('EXOTEL_API_KEY', '')  # Your API Key (username)
     EXOTEL_API_TOKEN = os.getenv('EXOTEL_API_TOKEN', '')  # Your API Token (password)
     EXOTEL_ACCOUNT_SID = os.getenv('EXOTEL_ACCOUNT_SID', '')  # Your Account SID
-    EXOTEL_FROM_NUMBER = os.getenv('EXOTEL_FROM_NUMBER', '')  # Your virtual number
+    EXOTEL_FROM_NUMBER = ''  # Default virtual number fallback disabled per strict outbound policy
     EXOTEL_SUBDOMAIN = os.getenv('EXOTEL_SUBDOMAIN', 'api.in.exotel.com')  # e.g., api.in.exotel.com for Mumbai
     
     # ===== SMTP EMAIL CONFIGURATION =====
