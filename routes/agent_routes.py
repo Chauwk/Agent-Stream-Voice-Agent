@@ -295,7 +295,7 @@ async def create_agent(
     if mongo_db.client is not None:
         async def check_duplicate():
             db = mongo_db.client.get_default_database()
-            agents_collection = db['agents']
+            agents_collection = db['exotel_agents']
             return await agents_collection.find_one(
                 {"enterprise": enterprise_id, "name": payload.name}
             )
@@ -352,7 +352,7 @@ async def create_agent(
     # 6. Save in MongoDB agents collection if connection is active
     async def run_insert():
         db = mongo_db.client.get_default_database()
-        agents_collection = db['agents']
+        agents_collection = db['exotel_agents']
         await agents_collection.insert_one(agent_data.copy())
 
     saved_in_db = False
@@ -533,7 +533,7 @@ async def list_all_agents_admin():
 
     async def run_query():
         db = mongo_db.client.get_default_database()
-        agents_collection = db['agents']
+        agents_collection = db['exotel_agents']
         cursor = agents_collection.find({})
         agents_list = []
         async for doc in cursor:
@@ -704,7 +704,7 @@ async def get_agent_details(
 async def get_public_agent_details(id: str):
     async def run_find():
         db = mongo_db.client.get_default_database()
-        agents_collection = db['agents']
+        agents_collection = db['exotel_agents']
         agent = await agents_collection.find_one({"agentId": id})
         if not agent:
             agent = await agents_collection.find_one({"_id": id})
@@ -795,7 +795,7 @@ async def update_agent(
 
     async def run_update():
         db = mongo_db.client.get_default_database()
-        agents_collection = db['agents']
+        agents_collection = db['exotel_agents']
         await agents_collection.update_one(
             {"_id": agent["_id"]},
             {"$set": update_data}
@@ -838,7 +838,7 @@ async def delete_agent(
     
     async def run_delete():
         db = mongo_db.client.get_default_database()
-        agents_collection = db['agents']
+        agents_collection = db['exotel_agents']
         await agents_collection.delete_one({"_id": agent["_id"]})
         return True
 
