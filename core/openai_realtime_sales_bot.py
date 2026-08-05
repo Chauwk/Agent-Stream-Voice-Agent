@@ -1201,7 +1201,11 @@ class OpenAIRealtimeSalesBot:
                     browser_audio_b64 = base64.b64encode(browser_audio).decode('utf-8')
                     await browser_ws.send_json({
                         "event": "audio",
+                        "type": "audio",
                         "audio": browser_audio_b64,
+                        "audio_event": {
+                            "audio_base_64": browser_audio_b64
+                        },
                         "sample_rate": browser_sample_rate
                     })
                     logger.debug(f"🔊 OPENAI AUDIO → BROWSER: {len(browser_audio)} bytes PCM16 @ {browser_sample_rate}Hz")

@@ -566,14 +566,18 @@ class ModularSalesBot:
         if not session_state:
             return
             
-        # 1. If this is a browser widget connection, send via WebSocket
+        # 1. If this is a browser/mobile WebSocket connection, send via WebSocket
         browser_ws = session_state.get("browser_websocket")
         if browser_ws:
             try:
                 base64_audio = base64.b64encode(pcm_audio).decode('utf-8')
                 await browser_ws.send_json({
                     "event": "audio",
+                    "type": "audio",
                     "audio": base64_audio,
+                    "audio_event": {
+                        "audio_base_64": base64_audio
+                    },
                     "sample_rate": 16000  # Sarvam TTS outputs PCM16 at 16kHz
                 })
                 return

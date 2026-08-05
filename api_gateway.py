@@ -283,16 +283,17 @@ async def browser_stream_endpoint(websocket: WebSocket):
                 await websocket.close(code=1011)
                 return
 
-            # 3. Main Loop: Receive microphone audio from Browser Widget and send to Deepgram
+            # 3. Main Loop: Receive microphone audio from Browser / Mobile App (supports both Chauwk & ElevenLabs format)
             while True:
                 data_str = await websocket.receive_text()
                 try:
                     msg = json.loads(data_str)
-                    if msg.get("event") == "media":
-                        media_data = msg.get("media", {})
-                        payload_b64 = media_data.get("payload", "")
-                        # Read actual mic sample rate sent by widget (44100 or 48000 typical)
-                        mic_sample_rate = int(media_data.get("sample_rate", 44100))
+                    evt = msg.get("event") or msg.get("type")
+                    if evt == "media" or "user_audio_chunk" in msg or "payload" in msg:
+                        media_data = msg.get("media", {}) if isinstance(msg.get("media"), dict) else {}
+                        payload_b64 = media_data.get("payload") or msg.get("payload") or msg.get("user_audio_chunk") or ""
+                        # Default to 16000Hz (standard mobile record rate) if omitted
+                        mic_sample_rate = int(media_data.get("sample_rate") or msg.get("sample_rate") or 16000)
                         if payload_b64:
                             pcm_bytes = base64.b64decode(payload_b64)
                             await sales_bot_engine.send_audio_to_openai(stream_id, pcm_bytes, sample_rate=mic_sample_rate)
@@ -336,16 +337,17 @@ async def browser_stream_endpoint(websocket: WebSocket):
             # 4. Trigger initial greeting
             await sales_bot_engine.send_initial_greeting_enhanced(stream_id, agent_config)
 
-            # 5. Main Loop: Receive microphone audio from Browser Widget
+            # 5. Main Loop: Receive microphone audio from Browser / Mobile App
             while True:
                 data_str = await websocket.receive_text()
                 try:
                     msg = json.loads(data_str)
-                    if msg.get("event") == "media":
-                        media_data = msg.get("media", {})
-                        payload_b64 = media_data.get("payload", "")
-                        # Use sample_rate sent by widget (defaults to 44100 or 48000 on most browsers)
-                        mic_sample_rate = int(media_data.get("sample_rate", 44100))
+                    evt = msg.get("event") or msg.get("type")
+                    if evt == "media" or "user_audio_chunk" in msg or "payload" in msg:
+                        media_data = msg.get("media", {}) if isinstance(msg.get("media"), dict) else {}
+                        payload_b64 = media_data.get("payload") or msg.get("payload") or msg.get("user_audio_chunk") or ""
+                        # Default to 16000Hz (standard mobile record rate) if omitted
+                        mic_sample_rate = int(media_data.get("sample_rate") or msg.get("sample_rate") or 16000)
                         if payload_b64:
                             pcm_bytes = base64.b64decode(payload_b64)
                             await sales_bot_engine.send_audio_to_openai(stream_id, pcm_bytes, sample_rate=mic_sample_rate)
