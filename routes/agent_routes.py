@@ -99,17 +99,25 @@ class AgentCreateRequest(BaseModel):
     virtualNumber: Optional[str] = Field(None, json_schema_extra={"example": "04040377112"}, description="Exotel virtual number bound to this agent.")
 
 class AgentUpdateRequest(BaseModel):
-    name: Optional[str] = Field(None, json_schema_extra={"example": "Updated Support Assistant"})
-    instructions: Optional[str] = Field(None, json_schema_extra={"example": "You are a polite customer support agent..."})
-    firstMessage: Optional[str] = Field(None, json_schema_extra={"example": "Hello, how can I help you today?"})
-    voiceId: Optional[str] = Field(None, json_schema_extra={"example": "meera"})
-    language: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": "en-IN"})
-    languages: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": ["en-IN", "hi-IN"]})
-    description: Optional[str] = Field(None, json_schema_extra={"example": "Handles general inquiries"})
-    knowledgeBaseIds: Optional[List[str]] = Field(None)
-    terms: Optional[TermsModel] = Field(None)
-    hinglish_mode: Optional[bool] = Field(None)
-    virtualNumber: Optional[str] = Field(None, example="04040377112", description="Exotel virtual number bound to this agent.")
+    name: Optional[str] = Field(None, description="Updated name of the AI agent.")
+    instructions: Optional[str] = Field(None, description="Updated system prompt or core instructions.")
+    firstMessage: Optional[str] = Field(None, description="Updated greeting message for calls.")
+    voiceId: Optional[str] = Field(None, description="Updated voice ID.")
+    language: Optional[Union[str, List[str]]] = Field(None, description="Updated primary language code (e.g. 'te-IN').")
+    languages: Optional[Union[str, List[str]]] = Field(None, description="Updated list of supported language codes (e.g. ['te-IN', 'hi-IN']).")
+    description: Optional[str] = Field(None, description="Updated description.")
+    knowledgeBaseIds: Optional[List[str]] = Field(None, description="Updated list of knowledge base document IDs.")
+    terms: Optional[TermsModel] = Field(None, description="Updated terms settings.")
+    hinglish_mode: Optional[bool] = Field(None, description="Updated hinglish mode toggle.")
+    virtualNumber: Optional[str] = Field(None, description="Updated virtual number bound to this agent.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "instructions": "You are a polite customer support agent..."
+            }
+        }
+    }
 
 class AssignVirtualNumberRequest(BaseModel):
     enterprise_id: str = Field(..., json_schema_extra={"example": "enterprise_id_here"}, description="Enterprise ID")
@@ -1053,38 +1061,50 @@ async def update_agent(
             detail={"success": False, "message": "Agent not found"}
         )
     
+    # Extract only fields that were explicitly sent in the request JSON
+    raw_dict = payload.model_dump(exclude_unset=True)
     update_data = {}
-    if payload.name is not None:
-        update_data["name"] = payload.name
-    if payload.instructions is not None:
-        update_data["instructions"] = payload.instructions
-    if payload.firstMessage is not None:
-        update_data["firstMessage"] = payload.firstMessage
-    if payload.voiceId is not None:
-        update_data["voiceId"] = payload.voiceId
-    if payload.description is not None:
-        update_data["description"] = payload.description
-    if payload.knowledgeBaseIds is not None:
-        update_data["knowledgeBaseIds"] = payload.knowledgeBaseIds
-    if payload.hinglish_mode is not None:
-        update_data["hinglish_mode"] = payload.hinglish_mode
-    if payload.terms is not None:
-        update_data["terms"] = {
-            "enabled": payload.terms.enabled,
-            "content": payload.terms.content
-        }
-    if hasattr(payload, 'virtualNumber') and payload.virtualNumber is not None:
-        update_data["virtualNumber"] = payload.virtualNumber
-    if payload.languages is not None or payload.language is not None:
-        raw_langs = payload.languages or payload.language
-        resolved_languages = []
-        if isinstance(raw_langs, list):
-            resolved_languages = [str(l).strip() for l in raw_langs if l]
+    
+    for key, val in raw_dict.items():
+        if key == "terms" and isinstance(val, dict):
+            update_data["terms"] = {
+                "enabled": val.get("enabled", False),
+                "content": val.get("content", "")
+            }
+        elif key in ["language", "languages"]:
+            continue  # Handled below
+        else:
+            update_data[key] = val
+
+    # Handle language / languages updates if explicitly sent
+    if "languages" in raw_dict or "language" in raw_dict:
+        raw_lang = raw_dict.get("language")
+        raw_langs = raw_dict.get("languages")
+        
+        primary_lang = None
+        if isinstance(raw_lang, str) and raw_lang.strip():
+            primary_lang = raw_lang.strip()
+        elif isinstance(raw_lang, list) and raw_lang:
+            primary_lang = str(raw_lang[0]).strip()
+        elif isinstance(raw_langs, list) and raw_langs:
+            primary_lang = str(raw_langs[0]).strip()
         elif isinstance(raw_langs, str) and raw_langs.strip():
-            resolved_languages = [l.strip() for l in raw_langs.split(",") if l.strip()]
-        if resolved_languages:
+            primary_lang = raw_langs.split(",")[0].strip()
+            
+        if primary_lang:
+            update_data["language"] = primary_lang
+            resolved_languages = [primary_lang]
+            if isinstance(raw_langs, list):
+                for l in raw_langs:
+                    s_l = str(l).strip()
+                    if s_l and s_l not in resolved_languages:
+                        resolved_languages.append(s_l)
+            elif isinstance(raw_langs, str) and raw_langs.strip():
+                for l in raw_langs.split(","):
+                    s_l = l.strip()
+                    if s_l and s_l not in resolved_languages:
+                        resolved_languages.append(s_l)
             update_data["languages"] = resolved_languages
-            update_data["language"] = resolved_languages[0]
 
     if not update_data:
         safe_agent = bson_safe(dict(agent))
@@ -1472,135 +1492,7 @@ async def get_simulation_history(
         )
 
 
-@router.get(
-    "/{id}/conversation-history-duration",
-    status_code=status.HTTP_200_OK,
-    summary="Get Conversation History Duration",
-    description="Aggregates and retrieves total conversation minutes call logs for the agent."
-)
-async def get_conversation_history_duration(
-    id: str,
-    x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")
-):
-    validate_enterprise(x_enterprise_id)
-    agent = await find_agent_by_id_and_enterprise(id, x_enterprise_id)
-    if not agent:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"success": False, "message": "Agent not found"}
-        )
-    
-    agent_id = agent.get("agentId")
-    
-    async def run_history():
-        db = mongo_db.client.get_default_database()
-        cursor = db['Agent_Stream_CallsLogs'].find({
-            "$or": [{"agentId": agent_id}, {"agent_id": agent_id}]
-        })
-        total_calls = 0
-        total_duration = 0.0
-        async for doc in cursor:
-            total_calls += 1
-            total_duration += float(doc.get("duration", 0) or doc.get("call_duration", 0) or 0)
-        return total_calls, total_duration
 
-    total_calls, total_duration = 0, 0.0
-    try:
-        res = await safe_mongo_op(run_history)
-        if res:
-            total_calls, total_duration = res
-    except Exception as e:
-        logger.error(f"Error querying conversation history: {e}")
-
-    return {
-        "success": True,
-        "agentId": agent_id,
-        "totalCalls": total_calls,
-        "totalDurationMinutes": round(total_duration / 60.0, 2)
-    }
-
-@router.get(
-    "/agents/{agentId}/conversations",
-    status_code=status.HTTP_200_OK,
-    summary="List Agent Conversations",
-    description="Retrieves a list of all historical call logs and chats for a specific agent."
-)
-async def list_agent_conversations(
-    agentId: str,
-    x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")
-):
-    validate_enterprise(x_enterprise_id)
-    
-    async def run_list_convs():
-        db = mongo_db.client.get_default_database()
-        cursor = db['Agent_Stream_CallsLogs'].find({
-            "$or": [{"agentId": agentId}, {"agent_id": agentId}]
-        })
-        conversations_list = []
-        async for doc in cursor:
-            doc["_id"] = str(doc["_id"])
-            if "timestamp" in doc and doc["timestamp"]:
-                if isinstance(doc["timestamp"], datetime.datetime):
-                    doc["timestamp"] = doc["timestamp"].isoformat()
-            conversations_list.append(doc)
-        return conversations_list
-
-    conversations = []
-    try:
-        res = await safe_mongo_op(run_list_convs)
-        if res:
-            conversations = res
-    except Exception as e:
-        logger.error(f"Failed to list agent conversations: {e}")
-
-    return {
-        "success": True,
-        "conversations": conversations
-    }
-
-
-@router.get(
-    "/conversations/{conversationId}",
-    status_code=status.HTTP_200_OK,
-    summary="Get Detailed Conversation Information",
-    description="Fetches full telemetry logs and message transcripts for a single call session."
-)
-async def get_conversation_details(
-    conversationId: str,
-    x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")
-):
-    validate_enterprise(x_enterprise_id)
-    
-    async def run_get_details():
-        db = mongo_db.client.get_default_database()
-        query = {"$or": [{"call_id": conversationId}, {"callId": conversationId}]}
-        if ObjectId.is_valid(conversationId):
-            query["$or"].append({"_id": ObjectId(conversationId)})
-        
-        conversation_doc = await db['Agent_Stream_CallsLogs'].find_one(query)
-        if conversation_doc:
-            conversation_doc["_id"] = str(conversation_doc["_id"])
-            if "timestamp" in conversation_doc and conversation_doc["timestamp"]:
-                if isinstance(conversation_doc["timestamp"], datetime.datetime):
-                    conversation_doc["timestamp"] = conversation_doc["timestamp"].isoformat()
-        return conversation_doc
-
-    conversation = None
-    try:
-        conversation = await safe_mongo_op(run_get_details)
-    except Exception as e:
-        logger.error(f"Failed to fetch conversation details: {e}")
-
-    if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"success": False, "message": "Conversation log not found"}
-        )
-
-    return {
-        "success": True,
-        "conversation": conversation
-    }
 
 @router.post(
     "/{id}/create-kb-text",

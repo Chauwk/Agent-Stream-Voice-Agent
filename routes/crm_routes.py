@@ -133,14 +133,14 @@ async def get_crm_agent_leads(
                 summary = doc.get("call_summary") or doc.get("summary") or ""
                 meeting_consent = doc.get("caller_meeting_consent") or doc.get("meeting_consent") or False
                 business_interest = doc.get("business_interest") or doc.get("car_model") or ""
-                transcript = doc.get("transcript") or []
-                call_id = doc.get("call_id") or doc.get("call_sid") or doc_id
+                transcript = doc.get("transcript") or doc.get("messages") or doc.get("conversation") or []
+                call_key = str(doc.get("call_id") or doc.get("call_sid") or doc_id).strip()
                 status_str = doc.get("status", "completed")
                 duration = doc.get("duration") or doc.get("duration_seconds") or 0
                 
                 lead_entry = {
                     "id": doc_id,
-                    "conversationId": call_id,
+                    "conversationId": call_key,
                     "agentId": agentId,
                     "enterpriseId": ent_id or doc.get("enterprise_id") or doc.get("enterprise"),
                     "name": name,
@@ -154,7 +154,21 @@ async def get_crm_agent_leads(
                     "timestamp": ts,
                     "transcript": transcript
                 }
-                leads_map[doc_id] = lead_entry
+                
+                if call_key in leads_map:
+                    existing = leads_map[call_key]
+                    if not existing.get("transcript") and transcript:
+                        existing["transcript"] = transcript
+                    if not existing.get("summary") and summary:
+                        existing["summary"] = summary
+                    if existing.get("status") in ["initiated", "queued"] and status_str not in ["initiated", "queued"]:
+                        existing["status"] = status_str
+                    if not existing.get("durationSeconds") and duration:
+                        existing["durationSeconds"] = duration
+                    if not existing.get("phone") and phone:
+                        existing["phone"] = phone
+                else:
+                    leads_map[call_key] = lead_entry
         except Exception as ex:
             logger.warning(f"Error querying collection '{coll_name}' for leads: {ex}")
             
