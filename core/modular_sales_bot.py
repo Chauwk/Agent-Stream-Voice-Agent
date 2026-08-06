@@ -1791,10 +1791,15 @@ class ModularSalesBot:
                 active_llm.cancel()
                 logger.info(f"🚫 Active LLM task cancelled for call {call_id}")
             
-        active_tts = session_state.get("current_tts_task")
-        if active_tts and not active_tts.done():
-            active_tts.cancel()
-            logger.info(f"🚫 Active TTS task cancelled for call {call_id}")
+        # Clear pending TTS audio items from queue (keep background _tts_processing_loop worker alive)
+        tts_queue = session_state.get("tts_queue")
+        if tts_queue:
+            while not tts_queue.empty():
+                try:
+                    tts_queue.get_nowait()
+                    tts_queue.task_done()
+                except Exception:
+                    break
             
         sarvam_ws = session_state.get("sarvam_ws")
         if sarvam_ws and hasattr(sarvam_ws, "_websocket") and sarvam_ws._websocket.open:
