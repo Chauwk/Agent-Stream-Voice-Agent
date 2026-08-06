@@ -1019,15 +1019,9 @@ class ModularSalesBot:
         else:
             dg_model = configured_model
         
-        # Use multi-language mode for nova-3 so Deepgram transcribes unallowed/foreign languages (e.g. French, Telugu)
-        # allowing Gemini LLM to receive the customer's text and respond back politely in the allowed agent language!
-        if dg_model == "nova-3" or len(allowed_langs) > 1:
-            dg_lang = "multi"
-        elif len(allowed_langs) == 1:
-            dg_lang = _map_dg_code(allowed_langs[0])
-        else:
-            primary_lang = agent_config.get("language") or Config.SARVAM_LANGUAGE_CODE or "en"
-            dg_lang = _map_dg_code(primary_lang)
+        # Always set dg_lang = "multi" for ALL agents so Deepgram STT transcribes any spoken language (French, Telugu, Hindi, Spanish, English, etc.)
+        # allowing Gemini LLM to receive the customer's text and respond back strictly in the allowed agent language(s)!
+        dg_lang = "multi"
 
         endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
         
