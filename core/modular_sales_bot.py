@@ -1221,23 +1221,12 @@ class ModularSalesBot:
                 speech_ended = (data.get("type") == "SpeechEnded")
                 
                 if speech_started:
-                    logger.info(f"🎤 DEEPGRAM VAD: SpeechStarted for call {call_id}")
+                    logger.debug(f"🎤 DEEPGRAM VAD: SpeechStarted for call {call_id}")
                     session_state["user_speaking"] = True
                     session_state["user_speaking_start_time"] = time.time()
                     
-                    # Instant Barge-In: If customer starts speaking while bot is playing audio, cut off bot speech immediately!
-                    bot_is_playing_audio = False
-                    if self.sip_server:
-                        call_state = self.sip_server.sip_calls.get(call_id)
-                        if call_state and (call_state.is_playing or len(call_state.playback_buffer) > 0):
-                            bot_is_playing_audio = True
-
-                    if bot_is_playing_audio:
-                        logger.info(f"⚡ INSTANT BARGE-IN: Customer started speaking while bot was playing audio for call {call_id}")
-                        await self._handle_customer_interruption(call_id, cancel_llm=False)
-                    
                 if speech_ended:
-                    logger.info(f"🎤 DEEPGRAM VAD: SpeechEnded for call {call_id}")
+                    logger.debug(f"🎤 DEEPGRAM VAD: SpeechEnded for call {call_id}")
                     session_state["user_speaking"] = False
                     if "user_speaking_start_time" in session_state:
                         try:
@@ -1254,8 +1243,18 @@ class ModularSalesBot:
                         if transcript.strip() and is_final:
                             logger.info(f"🎤 CUSTOMER SAID: {transcript}")
                             
-                            # Clear previous audio playout buffers and cancel old TTS tasks (keep new LLM turn active)
-                            await self._handle_customer_interruption(call_id, cancel_llm=False)
+                            # Check if bot is actively playing audio out loud to trigger word-based barge-in
+                            bot_is_playing_audio = False
+                            if self.sip_server:
+                                call_state = self.sip_server.sip_calls.get(call_id)
+                                if call_state and (call_state.is_playing or len(call_state.playback_buffer) > 0):
+                                    bot_is_playing_audio = True
+
+                            if bot_is_playing_audio:
+                                logger.info(f"⚡ WORD BARGE-IN: Customer spoke real words ('{transcript}') while bot was playing audio. Cutting off bot playout!")
+                                await self._handle_customer_interruption(call_id, cancel_llm=True)
+                            else:
+                                await self._handle_customer_interruption(call_id, cancel_llm=False)
                             
                             session_state["user_speaking"] = False
                             if "user_speaking_start_time" in session_state:

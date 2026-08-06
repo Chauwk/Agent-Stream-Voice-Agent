@@ -44,6 +44,7 @@ class Config:
     SARVAM_PACE = float(os.getenv('SARVAM_PACE', '1.15'))  # 1.15x speed for dynamic conversational pace
     SARVAM_PITCH = float(os.getenv('SARVAM_PITCH', '0.0'))
     AUDIO_GAIN = float(os.getenv('AUDIO_GAIN', '1.5'))  # 1.5x digital gain to boost quiet voice bot playback
+    VAD_RMS_THRESHOLD = float(os.getenv('VAD_RMS_THRESHOLD', '4500.0'))  # High noise gate (4500 RMS) to ignore PSTN static
     
     
     # ===== SERVER SETTINGS =====
