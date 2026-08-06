@@ -197,31 +197,52 @@ class OpenAIRealtimeSalesBot:
                 "bn": "Bengali", "bn-IN": "Bengali",
                 "gu": "Gujarati", "gu-IN": "Gujarati"
             }
-            allowed_names = list(dict.fromkeys([LANG_NAMES.get(l, l) for l in agent_languages]))
+            # Sanitize custom agent instructions to remove conflicting or ambiguous language phrases
+            sanitized_instructions = (agent_instructions or "").strip()
+            if sanitized_instructions:
+                sanitized_instructions = sanitized_instructions.replace(
+                    "adjust your language accordingly",
+                    "adjust your explanation complexity and technical depth accordingly (while remaining strictly within allowed languages)"
+                ).replace(
+                    "adjust your language",
+                    "adjust your explanation style"
+                )
+                if len(allowed_names) == 1:
+                    sanitized_instructions = sanitized_instructions.replace(
+                        "You can switch to any configured language at any time, including back to a previously used one",
+                        f"You must speak and respond EXCLUSIVELY in {allowed_names[0]}"
+                    ).replace(
+                        "You can switch to any configured language at any time",
+                        f"You must speak and respond EXCLUSIVELY in {allowed_names[0]}"
+                    )
             
             if len(allowed_names) == 1:
-                lang_prompt = (
-                    f"STRICT LANGUAGE RESTRICTION: You MUST speak and respond EXCLUSIVELY in {allowed_names[0]}. "
-                    f"Do not speak or respond in any other language. "
-                    f"If the customer asks to speak in a language other than {allowed_names[0]}, refuse to switch and respond back strictly in {allowed_names[0]}."
+                final_language_mandate = (
+                    f"\n\n🚨 CRITICAL MANDATE (STRICT LANGUAGE RESTRICTION):\n"
+                    f"Your allowed language is EXCLUSIVELY: {allowed_names[0]}.\n"
+                    f"Under NO circumstances are you allowed to generate, translate, or output responses in any other language (such as French, Hindi, Telugu, Spanish, German, etc.).\n"
+                    f"Even if the customer speaks to you in an unallowed language or explicitly asks you to switch languages, YOU MUST REJECT THE REQUEST AND RESPOND 100% EXCLUSIVELY IN {allowed_names[0]}.\n"
+                    f'Say politely in {allowed_names[0]}: "I apologize, but I am configured to speak and assist only in {allowed_names[0]}. How can I help you today?"'
                 )
             else:
                 langs_str = ", ".join(allowed_names)
-                lang_prompt = (
-                    f"STRICT LANGUAGE RESTRICTION: You are allowed to speak ONLY in the following selected languages: {langs_str}. "
-                    f"Do not respond in any language outside of this allowed list. Adapt dynamically to whichever of these allowed languages the customer speaks. "
-                    f"If the customer asks to speak in an unallowed language outside of ({langs_str}), DO NOT switch to that language; instead, respond back politely in the currently active allowed language stating that you can only assist in {langs_str}."
+                final_language_mandate = (
+                    f"\n\n🚨 CRITICAL MANDATE (STRICT LANGUAGE RESTRICTION):\n"
+                    f"Your allowed languages are STRICTLY & EXCLUSIVELY limited to: {langs_str}.\n"
+                    f"Under NO circumstances are you allowed to generate, translate, or output responses in any language outside of this allowed list (such as French, Spanish, German, Tamil, etc.).\n"
+                    f"Adapt dynamically to whichever of these allowed languages ({langs_str}) the customer speaks.\n"
+                    f"If the customer speaks or requests any language outside of ({langs_str}), YOU MUST REJECT THE REQUEST and respond back politely in the currently active allowed language stating that you can only assist in {langs_str}."
                 )
 
             # Unify system instructions to be identical for both inbound and outbound calls
             instructions = (
                 f"You are a professional representative named {agent_name}. Here are your custom instructions:\n"
-                f"{agent_instructions}\n\n"
+                f"{sanitized_instructions}\n\n"
                 "Base your responses strictly and exclusively on your custom instructions and the knowledge base. "
                 "If asked about products, services, pricing, or policies not in your instructions, call the query_knowledge_base tool to search. Do not invent products or guess information. "
-                f"{lang_prompt} "
                 "Keep responses very concise, short, and natural (1-2 sentences). "
                 "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
+                f"{final_language_mandate}"
             )
 
             # Resolve greeting based on call type (inbound vs outbound) and language
