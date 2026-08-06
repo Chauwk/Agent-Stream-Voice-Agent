@@ -800,15 +800,15 @@ class ModularSalesBot:
             if len(allowed_names) == 1:
                 lang_directive = (
                     f"STRICT LANGUAGE RESTRICTION: You MUST speak and respond EXCLUSIVELY in {allowed_names[0]}. "
-                    f"Do not speak or respond in any other language. "
-                    f"If the customer asks to speak in a language other than {allowed_names[0]}, refuse to switch and respond back strictly in {allowed_names[0]}.\n"
+                    f"Do not speak or respond in any other language under any circumstances. "
+                    f"If the customer speaks in any unallowed/foreign language (e.g. French, Telugu, Hindi, Spanish, etc.) or asks to switch to an unallowed language, DO NOT switch languages; you MUST ALWAYS respond back politely in {allowed_names[0]} stating that you can only speak and assist in {allowed_names[0]}.\n"
                 )
             else:
                 langs_str = ", ".join(allowed_names)
                 lang_directive = (
                     f"STRICT LANGUAGE RESTRICTION: You are allowed to speak ONLY in the following selected languages: {langs_str}. "
                     f"Do not respond in any language outside of this allowed list. Adapt dynamically to whichever of these allowed languages the customer speaks. "
-                    f"If the customer asks to speak in an unallowed language outside of ({langs_str}), DO NOT switch to that language; instead, respond back politely in the currently active allowed language stating that you can only assist in {langs_str}.\n"
+                    f"If the customer speaks in any unallowed language outside of ({langs_str}) or asks to switch to an unallowed language, DO NOT switch to that language; instead, respond back politely in the currently active allowed language stating that you can only assist in {langs_str}.\n"
                 )
             
             is_hindi_primary = primary_lang.startswith("hi")
@@ -996,9 +996,9 @@ class ModularSalesBot:
         else:
             dg_model = configured_model
         
-        # If agent explicitly allows multiple languages -> use multi-language mode
-        # If agent has a single language -> lock to that exact language model (e.g. 'te' for Telugu)
-        if len(allowed_langs) > 1:
+        # Use multi-language mode for nova-3 so Deepgram transcribes unallowed/foreign languages (e.g. French, Telugu)
+        # allowing Gemini LLM to receive the customer's text and respond back politely in the allowed agent language!
+        if dg_model == "nova-3" or len(allowed_langs) > 1:
             dg_lang = "multi"
         elif len(allowed_langs) == 1:
             dg_lang = _map_dg_code(allowed_langs[0])
