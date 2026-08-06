@@ -1376,6 +1376,7 @@ class ModularSalesBot:
                 
                 # Inner function to stream Gemini response and parse sentences
                 async def run_gemini():
+                    import re
                     nonlocal generated_text
                     while True:
                         try:
