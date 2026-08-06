@@ -1234,7 +1234,7 @@ class ModularSalesBot:
 
                     if bot_is_playing_audio:
                         logger.info(f"⚡ INSTANT BARGE-IN: Customer started speaking while bot was playing audio for call {call_id}")
-                        await self._handle_customer_interruption(call_id)
+                        await self._handle_customer_interruption(call_id, cancel_llm=False)
                     
                 if speech_ended:
                     logger.info(f"🎤 DEEPGRAM VAD: SpeechEnded for call {call_id}")
