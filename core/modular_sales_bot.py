@@ -915,6 +915,7 @@ class ModularSalesBot:
             "browser_websocket": existing_ws,
             "history": history,
             "system_instruction": system_instruction,
+            "allowed_names": allowed_names,
             "safety_settings": safety_settings,
             "end_call_tool": end_call,
             "query_knowledge_base_tool": query_knowledge_base,
@@ -1510,7 +1511,8 @@ class ModularSalesBot:
                                         
                                         if sentence_to_send:
                                             # Runtime Language Script Guardrail for Single-Language English agents
-                                            if len(allowed_names) == 1 and str(allowed_names[0]).lower() in ["english", "en"]:
+                                            allowed_names_list = session_state.get("allowed_names", [])
+                                            if len(allowed_names_list) == 1 and str(allowed_names_list[0]).lower() in ["english", "en"]:
                                                 import re
                                                 if bool(re.search(r'[\u0900-\u097F\u0C00-\u0C7F\u0B80-\u0BFF\u0A80-\u0AFF\u0980-\u09FF\u0A00-\u0A7F\u0D00-\u0D7F]', sentence_to_send)):
                                                     logger.warning(f"🚨 UNALLOWED LANGUAGE SCRIPT INTERCEPTED: '{sentence_to_send}'. Overriding with English refusal.")
@@ -1520,7 +1522,8 @@ class ModularSalesBot:
                                             
                             if current_sentence.strip():
                                 final_sentence = current_sentence.strip()
-                                if len(allowed_names) == 1 and str(allowed_names[0]).lower() in ["english", "en"]:
+                                allowed_names_list = session_state.get("allowed_names", [])
+                                if len(allowed_names_list) == 1 and str(allowed_names_list[0]).lower() in ["english", "en"]:
                                     import re
                                     if bool(re.search(r'[\u0900-\u097F\u0C00-\u0C7F\u0B80-\u0BFF\u0A80-\u0AFF\u0980-\u09FF\u0A00-\u0A7F\u0D00-\u0D7F]', final_sentence)):
                                         logger.warning(f"🚨 UNALLOWED LANGUAGE SCRIPT INTERCEPTED: '{final_sentence}'. Overriding with English refusal.")
