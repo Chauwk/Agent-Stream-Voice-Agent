@@ -1146,9 +1146,10 @@ class ModularSalesBot:
                     logger.info(f"🎤 LOCAL VAD: CUSTOMER STARTED SPEAKING (Interruption - IGNORED local VAD to prevent self-interruption/echo) for call {call_id} (RMS={rms:.1f})")
                     # Rely on Deepgram word transcription for precise barge-in while playing audio
                 else:
-                    logger.info(f"🎤 LOCAL VAD: CUSTOMER STARTED SPEAKING for call {call_id} (RMS={rms:.1f})")
-                    # If we are not playing audio, update speaking state but do NOT cancel active LLM task
-                    await self._handle_customer_interruption(call_id, cancel_llm=False)
+                    logger.info(f"🎤 LOCAL VAD: CUSTOMER STARTED SPEAKING (bot silent) for call {call_id} (RMS={rms:.1f})")
+                    # Bot is already silent — just update speaking state. Do NOT call _handle_customer_interruption
+                    # (it would close the Sarvam WS and kill TTS audio for the coming Gemini response turn)
+                    session_state["user_speaking"] = True
         else:
             session_state["consecutive_silence_frames"] += 1
             session_state["consecutive_speech_frames"] = 0
