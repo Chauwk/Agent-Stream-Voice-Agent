@@ -1243,7 +1243,7 @@ class ModularSalesBot:
                         if transcript.strip() and is_final:
                             logger.info(f"🎤 CUSTOMER SAID: {transcript}")
                             
-                            # Check if bot is actively playing audio out loud to trigger word-based barge-in
+                            # Word-based barge-in: only interrupt if bot is actively playing audio
                             bot_is_playing_audio = False
                             if self.sip_server:
                                 call_state = self.sip_server.sip_calls.get(call_id)
@@ -1251,11 +1251,15 @@ class ModularSalesBot:
                                     bot_is_playing_audio = True
 
                             if bot_is_playing_audio:
-                                logger.info(f"⚡ WORD BARGE-IN: Customer spoke real words ('{transcript}') while bot was playing audio. Cutting off bot playout!")
+                                logger.info(f"⚡ WORD BARGE-IN: Customer spoke ('{transcript}') while bot was playing. Cutting off playout!")
                                 call_state.playback_buffer = b""
                                 await self._handle_customer_interruption(call_id, cancel_llm=True)
-                            else:
-                                await self._handle_customer_interruption(call_id, cancel_llm=False)
+                            # else: bot is already silent — do NOT call _handle_customer_interruption
+                            # (calling it would close the Sarvam WS and kill audio for the coming turn)
+                            
+                            # Reset silence monitor so intimations don't fire during this new turn
+                            session_state["silence_prompts_count"] = 0
+                            session_state["last_activity_time"] = time.time()
                             
                             session_state["user_speaking"] = False
                             if "user_speaking_start_time" in session_state:
@@ -1331,6 +1335,9 @@ class ModularSalesBot:
                         continue
                 logger.info(f"🧠 Querying Gemini LLM with: '{prompt}'")
                 session_state["is_llm_generating"] = True
+                # Reset silence counter on real user queries so intimations restart cleanly after each response
+                if not prompt.startswith("System:"):
+                    session_state["silence_prompts_count"] = 0
                 
                 # Perform fast dynamic per-turn RAG search for top 2 relevant chunks (low token cost + 0ms tool latency)
                 kb_context_addon = ""
@@ -1784,13 +1791,9 @@ class ModularSalesBot:
             return
             
         logger.info(f"⚡ INTERRUPTING BOT for call {call_id} (cancel_llm={cancel_llm})")
-        if cancel_llm:
+        if self.is_bot_actively_speaking(call_id):
             session_state["current_context_id"] = None
             session_state["is_bot_speaking"] = False
-            if self.sip_server:
-                call_state = self.sip_server.sip_calls.get(call_id)
-                if call_state and hasattr(call_state, "playback_buffer"):
-                    call_state.playback_buffer = b""  # Zero out speaker buffer instantly
         
         if cancel_llm:
             active_llm = session_state.get("current_llm_task")
