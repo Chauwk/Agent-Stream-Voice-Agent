@@ -1876,9 +1876,9 @@ class ModularSalesBot:
                     session_state["last_activity_time"] = time.time()
                     continue
                     
-                # Check idle duration (wait 8 seconds of silence per intimation)
+                # Check idle duration (wait 4.5 seconds of silence per intimation step so all intimations finish within 13.5s)
                 idle_time = time.time() - session_state.get("last_activity_time", time.time())
-                if idle_time >= 8.0:
+                if idle_time >= 4.5:
                     session_state["last_activity_time"] = time.time()
                     
                     silence_count = session_state.get("silence_prompts_count", 0) + 1
@@ -1888,7 +1888,7 @@ class ModularSalesBot:
                     if silence_count == 1:
                         logger.info(f"⏱️ Silence Intimation 1/3 for call {call_id}. Prompting customer.")
                         if llm_queue:
-                            await llm_queue.put("System: The customer has been silent for 8 seconds (Intimation 1/3). Please politely prompt them in the allowed agent language(s) to see if they are still on the line.")
+                            await llm_queue.put("System: The customer has been silent for 4 seconds (Intimation 1/3). Please politely prompt them in the allowed agent language(s) to see if they are still on the line.")
                     elif silence_count == 2:
                         logger.info(f"⏱️ Silence Intimation 2/3 for call {call_id}. Prompting customer again.")
                         if llm_queue:
