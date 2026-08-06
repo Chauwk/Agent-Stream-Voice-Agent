@@ -1916,7 +1916,7 @@ class ModularSalesBot:
                     if silence_count == 1:
                         logger.info(f"⏱️ Silence Intimation 1/3 for call {call_id}. Prompting customer.")
                         if llm_queue:
-                            await llm_queue.put("System: The customer has been silent for 4 seconds (Intimation 1/3). Please politely prompt them in the allowed agent language(s) to see if they are still on the line.")
+                            await llm_queue.put("System: The customer has been silent for 8 seconds (Intimation 1/3). Please politely ask them in the allowed agent language(s) if they are still on the line.")
                     elif silence_count == 2:
                         logger.info(f"⏱️ Silence Intimation 2/3 for call {call_id}. Prompting customer again.")
                         if llm_queue:
@@ -2045,20 +2045,21 @@ class ModularSalesBot:
 
             session_state = self.connections.get(call_id)
             if session_state:
-                # 1. Wait for LLM queue to be empty and active LLM task to finish
+                # 1. Wait for LLM queue to be empty and active LLM task to finish (max 8s)
                 start_time = time.time()
-                while time.time() - start_time < 30.0:  # 30s safety timeout
+                while time.time() - start_time < 8.0:
                     llm_q_empty = session_state.get("llm_queue") is None or session_state["llm_queue"].empty()
                     llm_task = session_state.get("current_llm_task")
                     llm_task_done = llm_task is None or llm_task.done()
-                    if llm_q_empty and llm_task_done:
+                    is_generating = bool(session_state.get("is_llm_generating"))
+                    if llm_q_empty and llm_task_done and not is_generating:
                         break
                     logger.info(f"⏳ Waiting for LLM processing to complete for call {call_id}...")
                     await asyncio.sleep(0.5)
                     
-                # 2. Wait for TTS queue to be empty and active TTS task to finish
+                # 2. Wait for TTS queue to be empty and active TTS task to finish (max 8s)
                 start_time = time.time()
-                while time.time() - start_time < 30.0:
+                while time.time() - start_time < 8.0:
                     tts_q_empty = session_state.get("tts_queue") is None or session_state["tts_queue"].empty()
                     tts_task = session_state.get("current_tts_task")
                     tts_task_done = tts_task is None or tts_task.done()
@@ -2067,9 +2068,9 @@ class ModularSalesBot:
                     logger.info(f"⏳ Waiting for TTS synthesis to complete for call {call_id}...")
                     await asyncio.sleep(0.5)
                     
-            # 3. Wait for PJSIP playback buffer to empty AND bot actively speaking state to clear
+            # 3. Wait for PJSIP playback buffer to empty AND bot actively speaking state to clear (max 8s)
             start_time = time.time()
-            while time.time() - start_time < 30.0:
+            while time.time() - start_time < 8.0:
                 is_speaking = self.is_bot_actively_speaking(call_id)
                 buf_len = 0
                 if self.sip_server:
