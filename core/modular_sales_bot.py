@@ -1019,9 +1019,15 @@ class ModularSalesBot:
         else:
             dg_model = configured_model
         
-        # Always set dg_lang = "multi" for ALL agents so Deepgram STT transcribes any spoken language (French, Telugu, Hindi, Spanish, English, etc.)
-        # allowing Gemini LLM to receive the customer's text and respond back strictly in the allowed agent language(s)!
-        dg_lang = "multi"
+        # Fast STT Selection: Use target language STT for single-language agents (~150ms latency)
+        # and multi-language mode for multi-language agents.
+        if len(allowed_langs) > 1:
+            dg_lang = "multi"
+        elif len(allowed_langs) == 1:
+            dg_lang = _map_dg_code(allowed_langs[0])
+        else:
+            primary_lang = agent_config.get("language") or Config.SARVAM_LANGUAGE_CODE or "en"
+            dg_lang = _map_dg_code(primary_lang)
 
         endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
         
@@ -1253,8 +1259,8 @@ class ModularSalesBot:
                         if transcript.strip() and is_final:
                             logger.info(f"🎤 CUSTOMER SAID: {transcript}")
                             
-                            # Invalidate and cancel previous speaking/thinking tasks
-                            await self._handle_customer_interruption(call_id)
+                            # Clear previous audio playout buffers and cancel old TTS tasks (keep new LLM turn active)
+                            await self._handle_customer_interruption(call_id, cancel_llm=False)
                             
                             session_state["user_speaking"] = False
                             if "user_speaking_start_time" in session_state:
@@ -1772,20 +1778,21 @@ class ModularSalesBot:
                 
         return False
 
-    async def _handle_customer_interruption(self, call_id: str):
+    async def _handle_customer_interruption(self, call_id: str, cancel_llm: bool = True):
         """Immediately stops bot speaking and cancels active Gemini/TTS requests on customer interruption"""
         session_state = self.connections.get(call_id)
         if not session_state:
             return
             
-        logger.info(f"⚡ INTERRUPTING BOT for call {call_id}")
+        logger.info(f"⚡ INTERRUPTING BOT for call {call_id} (cancel_llm={cancel_llm})")
         session_state["current_context_id"] = None
         session_state["is_bot_speaking"] = False
         
-        active_llm = session_state.get("current_llm_task")
-        if active_llm and not active_llm.done():
-            active_llm.cancel()
-            logger.info(f"🚫 Active LLM task cancelled for call {call_id}")
+        if cancel_llm:
+            active_llm = session_state.get("current_llm_task")
+            if active_llm and not active_llm.done():
+                active_llm.cancel()
+                logger.info(f"🚫 Active LLM task cancelled for call {call_id}")
             
         active_tts = session_state.get("current_tts_task")
         if active_tts and not active_tts.done():
