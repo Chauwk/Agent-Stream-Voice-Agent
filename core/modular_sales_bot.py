@@ -819,10 +819,10 @@ class ModularSalesBot:
             if len(allowed_names) == 1:
                 final_language_mandate = (
                     f"\n\n🚨 CRITICAL MANDATE (STRICT LANGUAGE RESTRICTION):\n"
-                    f"Your allowed language is EXCLUSIVELY: {allowed_names[0]}.\n"
-                    f"Under NO circumstances are you allowed to generate, translate, or output responses in any other language (such as French, Hindi, Telugu, Spanish, German, etc.).\n"
-                    f"Even if the customer speaks to you in an unallowed language or explicitly asks you to switch languages, YOU MUST REJECT THE REQUEST AND RESPOND 100% EXCLUSIVELY IN {allowed_names[0]}.\n"
-                    f'Say politely in {allowed_names[0]}: "I apologize, but I am configured to speak and assist only in {allowed_names[0]}. How can I help you today?"'
+                    f"Your output language MUST BE 100% EXCLUSIVELY: {allowed_names[0]}.\n"
+                    f"Under NO circumstances are you allowed to generate, translate, or output responses in any other language or script (such as French, Hindi, Telugu, Spanish, German, etc.).\n"
+                    f"Even if the user speaks to you in a foreign/unallowed language or asks you to speak in another language, YOU MUST NOT REPLY IN THAT LANGUAGE. YOU MUST RESPOND 100% EXCLUSIVELY IN {allowed_names[0]}.\n"
+                    f'Refusal response in {allowed_names[0]}: "I apologize, but I am configured to speak and assist only in {allowed_names[0]}. How can I help you today?"'
                 )
             else:
                 langs_str = ", ".join(allowed_names)
@@ -1509,10 +1509,23 @@ class ModularSalesBot:
                                         current_sentence = current_sentence[idx+1:]
                                         
                                         if sentence_to_send:
+                                            # Runtime Language Script Guardrail for Single-Language English agents
+                                            if len(allowed_names) == 1 and str(allowed_names[0]).lower() in ["english", "en"]:
+                                                import re
+                                                if bool(re.search(r'[\u0900-\u097F\u0C00-\u0C7F\u0B80-\u0BFF\u0A80-\u0AFF\u0980-\u09FF\u0A00-\u0A7F\u0D00-\u0D7F]', sentence_to_send)):
+                                                    logger.warning(f"🚨 UNALLOWED LANGUAGE SCRIPT INTERCEPTED: '{sentence_to_send}'. Overriding with English refusal.")
+                                                    sentence_to_send = "I apologize, but I am configured to speak and assist only in English. How can I help you today?"
+                                                    current_sentence = ""
                                             await tts_queue.put((context_id, sentence_to_send))
                                             
                             if current_sentence.strip():
-                                await tts_queue.put((context_id, current_sentence.strip()))
+                                final_sentence = current_sentence.strip()
+                                if len(allowed_names) == 1 and str(allowed_names[0]).lower() in ["english", "en"]:
+                                    import re
+                                    if bool(re.search(r'[\u0900-\u097F\u0C00-\u0C7F\u0B80-\u0BFF\u0A80-\u0AFF\u0980-\u09FF\u0A00-\u0A7F\u0D00-\u0D7F]', final_sentence)):
+                                        logger.warning(f"🚨 UNALLOWED LANGUAGE SCRIPT INTERCEPTED: '{final_sentence}'. Overriding with English refusal.")
+                                        final_sentence = "I apologize, but I am configured to speak and assist only in English. How can I help you today?"
+                                await tts_queue.put((context_id, final_sentence))
                                 
                             break
                         except TriggerToolRecallException:
