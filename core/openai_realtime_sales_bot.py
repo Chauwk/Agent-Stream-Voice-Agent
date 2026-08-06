@@ -440,11 +440,44 @@ class OpenAIRealtimeSalesBot:
                     # Reset timer to prevent rapid repeated follow-ups
                     openai_config["last_activity_time"] = time.time()
                     
-                    silence_count = openai_config.get("silence_prompts_count", 0)
+                    silence_count = openai_config.get("silence_prompts_count", 0) + 1
+                    openai_config["silence_prompts_count"] = silence_count
                     ws = openai_config.get("websocket")
                     
-                    if silence_count >= 2:
-                        logger.info(f"⏱️ Maximum silence limit (2) reached for stream {stream_id}. Hanging up.")
+                    if silence_count == 1:
+                        logger.info(f"⏱️ Silence Intimation 1/3 detected for 8 seconds on stream {stream_id}. Injecting prompt.")
+                        if ws:
+                            prompt_msg = {
+                                "type": "conversation.item.create",
+                                "item": {
+                                    "type": "message",
+                                    "role": "user",
+                                    "content": [{
+                                        "type": "input_text",
+                                        "text": "The customer has been silent for 8 seconds (Intimation 1/3). Please check politely if they are still on the line."
+                                    }]
+                                }
+                            }
+                            await ws.send(json.dumps(prompt_msg))
+                            await ws.send(json.dumps({"type": "response.create", "response": {"output_modalities": ["audio"]}}))
+                    elif silence_count == 2:
+                        logger.info(f"⏱️ Silence Intimation 2/3 detected for 8 seconds on stream {stream_id}. Injecting prompt.")
+                        if ws:
+                            prompt_msg = {
+                                "type": "conversation.item.create",
+                                "item": {
+                                    "type": "message",
+                                    "role": "user",
+                                    "content": [{
+                                        "type": "input_text",
+                                        "text": "The customer is still silent for 8 seconds (Intimation 2/3). Please ask if they are still there or need assistance."
+                                    }]
+                                }
+                            }
+                            await ws.send(json.dumps(prompt_msg))
+                            await ws.send(json.dumps({"type": "response.create", "response": {"output_modalities": ["audio"]}}))
+                    elif silence_count >= 3:
+                        logger.info(f"⏱️ Final Silence Intimation 3/3 reached for stream {stream_id}. Hanging up after warning.")
                         if ws:
                             goodbye_msg = {
                                 "type": "conversation.item.create",
@@ -453,21 +486,15 @@ class OpenAIRealtimeSalesBot:
                                     "role": "user",
                                     "content": [{
                                         "type": "input_text",
-                                        "text": "The customer has remained silent. Say: 'Since I haven't heard from you, I'll go ahead and disconnect. Goodbye!' and then end the call."
+                                        "text": "The customer has remained silent after 3 intimations. State politely that since there is no response, you are hanging up now. Goodbye!"
                                     }]
                                 }
                             }
                             await ws.send(json.dumps(goodbye_msg))
                             await ws.send(json.dumps({"type": "response.create", "response": {"output_modalities": ["audio"]}}))
                             
-                            # Delayed hangup to allow goodbye audio to play
-                            await asyncio.sleep(4.0)
-                            if self.sip_server:
-                                await self.sip_server.cleanup_call(stream_id)
+                            asyncio.create_task(self.delayed_hangup(stream_id))
                         break
-                        
-                    openai_config["silence_prompts_count"] = silence_count + 1
-                    logger.info(f"⏱️ Silence detected for 8 seconds on stream {stream_id} (count: {silence_count + 1}/2). Injecting follow-up prompt.")
                     
                     if ws:
                         prompt_msg = {
@@ -794,8 +821,31 @@ class OpenAIRealtimeSalesBot:
             return {"status": "error", "message": "SIP Server not available"}
 
     async def delayed_hangup(self, stream_id: str, delay_seconds: float = 0.5):
-        """Clean up the call after a short delay to let final frames play/send"""
-        await asyncio.sleep(delay_seconds)
+        """Clean up the call after waiting for final audio playback buffer to drain"""
+        try:
+            # 1. Initial grace period to allow response generation to initiate
+            await asyncio.sleep(2.0)
+
+            start_time = time.time()
+            while time.time() - start_time < 30.0:
+                buf_len = 0
+                is_playing = False
+                if self.sip_server:
+                    call_state = self.sip_server.sip_calls.get(stream_id)
+                    if call_state:
+                        is_playing = getattr(call_state, "is_playing", False)
+                        if hasattr(call_state, "playback_buffer"):
+                            buf_len = len(call_state.playback_buffer)
+                
+                if not is_playing and buf_len == 0:
+                    break
+                logger.info(f"⏳ Waiting for OpenAI speech playback to finish (is_playing={is_playing}, buffer={buf_len} bytes) for stream {stream_id}...")
+                await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.error(f"❌ Error in OpenAI delayed hangup check: {e}")
+            
+        # 2. Final grace period for RTP transmission
+        await asyncio.sleep(2.5)
         if self.sip_server:
             await self.sip_server.cleanup_call(stream_id)
 
