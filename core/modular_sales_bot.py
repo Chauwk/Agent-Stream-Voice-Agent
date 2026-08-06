@@ -1066,9 +1066,9 @@ class ModularSalesBot:
         
         keywords_query = "&".join(keyword_parts)
         if keywords_query:
-            dg_url = f"wss://api.deepgram.com/v1/listen?model={dg_model}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=true&{keywords_query}"
+            dg_url = f"wss://api.deepgram.com/v1/listen?model={dg_model}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&{keywords_query}"
         else:
-            dg_url = f"wss://api.deepgram.com/v1/listen?model={dg_model}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=true"
+            dg_url = f"wss://api.deepgram.com/v1/listen?model={dg_model}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
         import inspect
@@ -1240,20 +1240,22 @@ class ModularSalesBot:
                     alternatives = channel.get("alternatives", [])
                     if alternatives:
                         transcript = alternatives[0].get("transcript", "")
-                        if transcript.strip():
-                            # Instant Word Barge-In: Cut off bot speech immediately on interim or final words!
-                            if self.sip_server:
-                                call_state = self.sip_server.sip_calls.get(call_id)
-                                if call_state and (call_state.is_playing or len(call_state.playback_buffer) > 0):
-                                    logger.info(f"⚡ INSTANT WORD BARGE-IN: Intercepted customer speech ('{transcript}') while bot was playing. Cutting off bot playout!")
-                                    call_state.playback_buffer = b""
-                                    await self._handle_customer_interruption(call_id, cancel_llm=True)
-
                         if transcript.strip() and is_final:
                             logger.info(f"🎤 CUSTOMER SAID: {transcript}")
                             
-                            # Reset prior audio queues for the new turn
-                            await self._handle_customer_interruption(call_id, cancel_llm=False)
+                            # Check if bot is actively playing audio out loud to trigger word-based barge-in
+                            bot_is_playing_audio = False
+                            if self.sip_server:
+                                call_state = self.sip_server.sip_calls.get(call_id)
+                                if call_state and (call_state.is_playing or len(call_state.playback_buffer) > 0):
+                                    bot_is_playing_audio = True
+
+                            if bot_is_playing_audio:
+                                logger.info(f"⚡ WORD BARGE-IN: Customer spoke real words ('{transcript}') while bot was playing audio. Cutting off bot playout!")
+                                call_state.playback_buffer = b""
+                                await self._handle_customer_interruption(call_id, cancel_llm=True)
+                            else:
+                                await self._handle_customer_interruption(call_id, cancel_llm=False)
                             
                             session_state["user_speaking"] = False
                             if "user_speaking_start_time" in session_state:
