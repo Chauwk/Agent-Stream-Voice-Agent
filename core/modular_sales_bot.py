@@ -1020,18 +1020,11 @@ class ModularSalesBot:
         else:
             dg_model = configured_model
         
-        # Fast STT Selection: Use target language STT for single-language agents (~150ms latency)
-        # and multi-language mode for multi-language agents.
-        if len(allowed_langs) > 1:
-            dg_lang = "multi"
-            endpointing_ms = 100  # Deepgram recommended endpointing for multi-language code-switching
-        elif len(allowed_langs) == 1:
-            dg_lang = _map_dg_code(allowed_langs[0])
-            endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
-        else:
-            primary_lang = agent_config.get("language") or Config.SARVAM_LANGUAGE_CODE or "en"
-            dg_lang = _map_dg_code(primary_lang)
-            endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
+        # Dedicated Single Primary Language STT Mode: Lock Deepgram STT to the agent's primary language
+        # for maximum accuracy, lowest latency (~150ms), and 0 code-switching drift.
+        primary_lang_raw = agent_config.get("language") or (allowed_langs[0] if allowed_langs else Config.SARVAM_LANGUAGE_CODE or "en")
+        dg_lang = _map_dg_code(primary_lang_raw)
+        endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
         
         # Build dynamic keyword boosts from agent config with proper URL encoding
         # Deepgram 'keyterm' param for nova-3 / 'keywords' for legacy models
