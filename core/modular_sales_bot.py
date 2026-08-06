@@ -1330,6 +1330,7 @@ class ModularSalesBot:
                         llm_queue.task_done()
                         continue
                 logger.info(f"🧠 Querying Gemini LLM with: '{prompt}'")
+                session_state["is_llm_generating"] = True
                 
                 # Perform fast dynamic per-turn RAG search for top 2 relevant chunks (low token cost + 0ms tool latency)
                 kb_context_addon = ""
@@ -1558,6 +1559,7 @@ class ModularSalesBot:
                 except Exception as e:
                     logger.error(f"❌ Gemini generation task failed: {e}")
                 finally:
+                    session_state["is_llm_generating"] = False
                     session_state["current_llm_task"] = None
                     llm_queue.task_done()
                     
@@ -1873,14 +1875,14 @@ class ModularSalesBot:
                     if speaking_dur > 1.2:
                         user_is_speaking = False
 
-                is_llm_generating = bool(session_state.get("current_llm_task") and not session_state["current_llm_task"].done())
+                is_llm_generating = bool(session_state.get("is_llm_generating") or (session_state.get("current_llm_task") and not session_state["current_llm_task"].done()))
                 if user_is_speaking or self.is_bot_actively_speaking(call_id) or is_llm_generating:
                     session_state["last_activity_time"] = time.time()
                     continue
                     
-                # Check idle duration (wait 7.0 seconds of silence per intimation step so Gemini turn finishes & all intimations run)
+                # Check idle duration (wait 8.0 seconds of silence per intimation step)
                 idle_time = time.time() - session_state.get("last_activity_time", time.time())
-                if idle_time >= 7.0:
+                if idle_time >= 8.0:
                     session_state["last_activity_time"] = time.time()
                     
                     silence_count = session_state.get("silence_prompts_count", 0) + 1
