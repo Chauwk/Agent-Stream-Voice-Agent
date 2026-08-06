@@ -1024,13 +1024,14 @@ class ModularSalesBot:
         # and multi-language mode for multi-language agents.
         if len(allowed_langs) > 1:
             dg_lang = "multi"
+            endpointing_ms = 100  # Deepgram recommended endpointing for multi-language code-switching
         elif len(allowed_langs) == 1:
             dg_lang = _map_dg_code(allowed_langs[0])
+            endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
         else:
             primary_lang = agent_config.get("language") or Config.SARVAM_LANGUAGE_CODE or "en"
             dg_lang = _map_dg_code(primary_lang)
-
-        endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
+            endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
         
         # Build dynamic keyword boosts from agent config with proper URL encoding
         # Deepgram 'keyterm' param for nova-3 / 'keywords' for legacy models
