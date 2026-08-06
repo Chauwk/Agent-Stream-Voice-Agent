@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Container 1: The Voice Bot Application
   voice-bot:
