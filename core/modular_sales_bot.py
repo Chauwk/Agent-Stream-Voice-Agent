@@ -1206,8 +1206,17 @@ class ModularSalesBot:
                     logger.info(f"🎤 DEEPGRAM VAD: SpeechStarted for call {call_id}")
                     session_state["user_speaking"] = True
                     session_state["user_speaking_start_time"] = time.time()
-                    # We rely on final transcripts (real words spoken) for barge-in rather than raw VAD SpeechStarted
-                    # to completely protect the bot from being cut off by line clicks, breaths, background noise, or echo.
+                    
+                    # Instant Barge-In: If customer starts speaking while bot is playing audio, cut off bot speech immediately!
+                    bot_is_playing_audio = False
+                    if self.sip_server:
+                        call_state = self.sip_server.sip_calls.get(call_id)
+                        if call_state and (call_state.is_playing or len(call_state.playback_buffer) > 0):
+                            bot_is_playing_audio = True
+
+                    if bot_is_playing_audio:
+                        logger.info(f"⚡ INSTANT BARGE-IN: Customer started speaking while bot was playing audio for call {call_id}")
+                        await self._handle_customer_interruption(call_id)
                     
                 if speech_ended:
                     logger.info(f"🎤 DEEPGRAM VAD: SpeechEnded for call {call_id}")
