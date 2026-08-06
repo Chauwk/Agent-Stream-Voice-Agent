@@ -1143,12 +1143,27 @@ class ModularSalesBot:
                         bot_is_playing_audio = True
 
                 if bot_is_playing_audio:
-                    logger.info(f"🎤 LOCAL VAD: CUSTOMER STARTED SPEAKING (Interruption - IGNORED local VAD to prevent self-interruption/echo) for call {call_id} (RMS={rms:.1f})")
-                    # Rely on Deepgram word transcription for precise barge-in while playing audio
+                    logger.info(f"🎤 LOCAL VAD BARGE-IN: Customer speaking (RMS={rms:.1f}) while bot playing. Wiping audio buffer instantly!")
+                    # Stage 1: Instantly stop audio playout via VAD (fast, ~160ms response)
+                    if self.sip_server:
+                        call_state = self.sip_server.sip_calls.get(call_id)
+                        if call_state:
+                            call_state.playback_buffer = b""
+                            call_state.is_playing = False
+                    # Drain TTS queue so no more audio chunks get sent
+                    tts_queue = session_state.get("tts_queue")
+                    if tts_queue:
+                        while not tts_queue.empty():
+                            try:
+                                tts_queue.get_nowait()
+                                tts_queue.task_done()
+                            except Exception:
+                                break
+                    session_state["is_bot_speaking"] = False
+                    # Stage 2: Deepgram will fire is_final transcript → cancels LLM + submits new user query
                 else:
                     logger.info(f"🎤 LOCAL VAD: CUSTOMER STARTED SPEAKING (bot silent) for call {call_id} (RMS={rms:.1f})")
-                    # Bot is already silent — just update speaking state. Do NOT call _handle_customer_interruption
-                    # (it would close the Sarvam WS and kill TTS audio for the coming Gemini response turn)
+                    # Bot is already silent — just update speaking state
                     session_state["user_speaking"] = True
         else:
             session_state["consecutive_silence_frames"] += 1
