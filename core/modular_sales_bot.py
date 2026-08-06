@@ -1506,10 +1506,9 @@ class ModularSalesBot:
                                             # Runtime Language Script Guardrail for Single-Language English agents
                                             allowed_names_list = session_state.get("allowed_names", [])
                                             if len(allowed_names_list) == 1 and str(allowed_names_list[0]).lower() in ["english", "en"]:
-                                                import re
                                                 if bool(re.search(r'[\u0900-\u097F\u0C00-\u0C7F\u0B80-\u0BFF\u0A80-\u0AFF\u0980-\u09FF\u0A00-\u0A7F\u0D00-\u0D7F]', sentence_to_send)):
-                                                    logger.warning(f"🚨 UNALLOWED LANGUAGE SCRIPT INTERCEPTED: '{sentence_to_send}'. Overriding with English refusal.")
-                                                    sentence_to_send = "I apologize, but I am configured to speak and assist only in English. How can I help you today?"
+                                                    agent_name_str = str(agent_config.get("name") or "Customer Support Assistant")
+                                                    sentence_to_send = f"I am {agent_name_str}. Currently, I am available to assist you in English. How can I help you today?"
                                                     current_sentence = ""
                                             await tts_queue.put((context_id, sentence_to_send))
                                             
@@ -1520,7 +1519,8 @@ class ModularSalesBot:
                                     import re
                                     if bool(re.search(r'[\u0900-\u097F\u0C00-\u0C7F\u0B80-\u0BFF\u0A80-\u0AFF\u0980-\u09FF\u0A00-\u0A7F\u0D00-\u0D7F]', final_sentence)):
                                         logger.warning(f"🚨 UNALLOWED LANGUAGE SCRIPT INTERCEPTED: '{final_sentence}'. Overriding with English refusal.")
-                                        final_sentence = "I apologize, but I am configured to speak and assist only in English. How can I help you today?"
+                                        agent_name_str = str(agent_config.get("name") or "Customer Support Assistant")
+                                        final_sentence = f"I am {agent_name_str}. Currently, I am available to assist you in English. How can I help you today?"
                                 await tts_queue.put((context_id, final_sentence))
                                 
                             break
