@@ -1784,9 +1784,13 @@ class ModularSalesBot:
             return
             
         logger.info(f"⚡ INTERRUPTING BOT for call {call_id} (cancel_llm={cancel_llm})")
-        if self.is_bot_actively_speaking(call_id):
+        if cancel_llm:
             session_state["current_context_id"] = None
             session_state["is_bot_speaking"] = False
+            if self.sip_server:
+                call_state = self.sip_server.sip_calls.get(call_id)
+                if call_state and hasattr(call_state, "playback_buffer"):
+                    call_state.playback_buffer = b""  # Zero out speaker buffer instantly
         
         if cancel_llm:
             active_llm = session_state.get("current_llm_task")
