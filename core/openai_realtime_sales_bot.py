@@ -241,31 +241,32 @@ class OpenAIRealtimeSalesBot:
             
             if len(allowed_names) == 1:
                 final_language_mandate = (
-                    f"\n\n🚨 CRITICAL MANDATE (STRICT LANGUAGE RESTRICTION):\n"
+                    f"🚨 ABSOLUTE STRICT LANGUAGE MANDATE (ZERO EXCEPTIONS):\n"
                     f"Your allowed language is EXCLUSIVELY: {allowed_names[0]}.\n"
-                    f"Under NO circumstances are you allowed to generate, translate, or output responses in any other language (such as French, Hindi, Telugu, Spanish, German, etc.).\n"
-                    f"Even if the customer speaks to you in an unallowed language or explicitly asks you to switch languages, YOU MUST REJECT THE REQUEST AND RESPOND 100% EXCLUSIVELY IN {allowed_names[0]}.\n"
-                    f'Say politely in {allowed_names[0]}: "I apologize, but I am configured to speak and assist only in {allowed_names[0]}. How can I help you today?"'
+                    f"Under NO circumstances are you allowed to generate, translate, or speak in ANY other language (such as French, Spanish, German, etc.).\n"
+                    f"Even if the customer speaks to you in an unallowed language or asks to switch languages, YOU MUST NEVER SWITCH TO THAT UNALLOWED LANGUAGE. "
+                    f'Respond 100% EXCLUSIVELY in {allowed_names[0]} stating that you can only communicate in {allowed_names[0]}.\n\n'
                 )
             else:
                 langs_str = ", ".join(allowed_names)
                 final_language_mandate = (
-                    f"\n\n🚨 CRITICAL MANDATE (STRICT LANGUAGE RESTRICTION):\n"
+                    f"🚨 ABSOLUTE STRICT LANGUAGE MANDATE (ZERO EXCEPTIONS):\n"
                     f"Your allowed languages are STRICTLY & EXCLUSIVELY limited to: {langs_str}.\n"
-                    f"Under NO circumstances are you allowed to generate, translate, or output responses in any language outside of this allowed list (such as French, Spanish, German, Tamil, etc.).\n"
-                    f"Adapt dynamically to whichever of these allowed languages ({langs_str}) the customer speaks.\n"
-                    f"If the customer speaks or requests any language outside of ({langs_str}), YOU MUST REJECT THE REQUEST and respond back politely in the currently active allowed language stating that you can only assist in {langs_str}."
+                    f"Primary language is: {allowed_names[0]}. Speak in {allowed_names[0]} by default unless the customer addresses you in another allowed language from ({langs_str}).\n"
+                    f"Under NO circumstances are you allowed to generate, translate, or output responses in any language outside of ({langs_str}).\n"
+                    f"If the customer speaks in an unallowed language (such as French, Spanish, German, etc.), DO NOT SWITCH TO THAT UNALLOWED LANGUAGE. "
+                    f"Respond exclusively in one of your allowed languages ({langs_str}) stating that you can only assist in {langs_str}.\n\n"
                 )
 
-            # Unify system instructions to be identical for both inbound and outbound calls
+            # Unify system instructions with strict language mandate placed at the VERY TOP
             instructions = (
+                f"{final_language_mandate}"
                 f"You are a professional representative named {agent_name}. Here are your custom instructions:\n"
                 f"{sanitized_instructions}\n\n"
                 "Base your responses strictly and exclusively on your custom instructions and the knowledge base. "
                 "If asked about products, services, pricing, or policies not in your instructions, call the query_knowledge_base tool to search. Do not invent products or guess information. "
                 "Keep responses very concise, short, and natural (1-2 sentences). "
                 "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
-                f"{final_language_mandate}"
             )
 
             # Resolve greeting based on call type (inbound vs outbound) and language
@@ -835,8 +836,9 @@ class OpenAIRealtimeSalesBot:
     async def delayed_hangup(self, stream_id: str, delay_seconds: float = 0.5):
         """Clean up the call after waiting for final audio playback buffer to drain"""
         try:
-            # 1. Initial grace period to allow response generation to initiate
-            await asyncio.sleep(2.0)
+            logger.info(f"⏳ Executing delayed hangup sequence for stream {stream_id}...")
+            # 1. Initial grace period to allow OpenAI response generation and RTP audio streaming to initiate
+            await asyncio.sleep(3.0)
 
             start_time = time.time()
             while time.time() - start_time < 30.0:
@@ -850,6 +852,7 @@ class OpenAIRealtimeSalesBot:
                             buf_len = len(call_state.playback_buffer)
                 
                 if not is_playing and buf_len == 0:
+                    logger.info(f"✅ Audio playback finished for stream {stream_id}. Hanging up call cleanly.")
                     break
                 logger.info(f"⏳ Waiting for OpenAI speech playback to finish (is_playing={is_playing}, buffer={buf_len} bytes) for stream {stream_id}...")
                 await asyncio.sleep(0.5)
@@ -857,7 +860,7 @@ class OpenAIRealtimeSalesBot:
             logger.error(f"❌ Error in OpenAI delayed hangup check: {e}")
             
         # 2. Final grace period for RTP transmission
-        await asyncio.sleep(2.5)
+        await asyncio.sleep(1.5)
         if self.sip_server:
             await self.sip_server.cleanup_call(stream_id)
 
