@@ -218,6 +218,7 @@ class OpenAIRealtimeSalesBot:
                 "bn": "Bengali", "bn-IN": "Bengali",
                 "gu": "Gujarati", "gu-IN": "Gujarati"
             }
+            allowed_names = [LANG_NAMES.get(l, l) for l in agent_languages]
             # Sanitize custom agent instructions to remove conflicting or ambiguous language phrases
             sanitized_instructions = (agent_instructions or "").strip()
             if sanitized_instructions:
