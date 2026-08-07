@@ -299,24 +299,25 @@ class OpenAIRealtimeSalesBot:
             ssl_context.verify_mode = ssl.CERT_NONE
             
             # Enhanced headers for latest API version
-            headers = [
-                ("Authorization", f"Bearer {self.openai_api_key}")
-            ]
+            headers = {"Authorization": f"Bearer {self.openai_api_key}"}
             
-            # Determine correct header parameter based on websockets library version
-            import inspect
-            connect_params = inspect.signature(websockets.connect).parameters
-            connect_kwargs = {
-                "ssl": ssl_context,
-                "ping_interval": 20,
-                "ping_timeout": 10
-            }
-            if "additional_headers" in connect_params:
-                connect_kwargs["additional_headers"] = dict(headers)
-            else:
-                connect_kwargs["extra_headers"] = dict(headers)
-                
-            openai_ws = await websockets.connect(url, **connect_kwargs)
+            try:
+                openai_ws = await websockets.connect(
+                    url,
+                    ssl=ssl_context,
+                    additional_headers=headers,
+                    ping_interval=20,
+                    ping_timeout=10
+                )
+            except Exception as header_err:
+                logger.warning(f"⚠️ additional_headers fallback to extra_headers due to: {header_err}")
+                openai_ws = await websockets.connect(
+                    url,
+                    ssl=ssl_context,
+                    extra_headers=headers,
+                    ping_interval=20,
+                    ping_timeout=10
+                )
             
             # Get enhanced session configuration
             session_config = Config.get_enhanced_session_config(sample_rate, voice)
