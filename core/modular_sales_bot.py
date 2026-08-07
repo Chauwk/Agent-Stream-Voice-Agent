@@ -1020,13 +1020,18 @@ class ModularSalesBot:
         else:
             dg_model = configured_model
         
-        # Always lock Deepgram STT to the agent's primary language (first in list).
-        # Even if multiple languages are configured, we NEVER use language=multi —
-        # it is inaccurate for regional Indian languages (Telugu, Hindi, Tamil, etc.).
-        # Primary language = agent_config["language"] → or first entry in allowed_langs list.
+        # Always lock Deepgram STT to the agent's primary language (first in list) by default.
+        # language=multi is inaccurate for regional Indian languages — never use it unless
+        # explicitly enabled per-agent via agent_config["deepgramMulti"] = true in MongoDB.
         primary_lang_raw = agent_config.get("language") or (allowed_langs[0] if allowed_langs else Config.SARVAM_LANGUAGE_CODE or "en")
-        dg_lang = _map_dg_code(primary_lang_raw)
-        logger.info(f"🔒 Deepgram STT locked to primary language: {dg_lang} (from '{primary_lang_raw}')")
+        use_multi = bool(agent_config.get("deepgramMulti", False))
+        if use_multi:
+            dg_lang = "multi"
+            dg_model = "nova-3"
+            logger.info(f"🌐 deepgramMulti=true for this agent. Deepgram set to language=multi, model=nova-3")
+        else:
+            dg_lang = _map_dg_code(primary_lang_raw)
+            logger.info(f"🔒 Deepgram STT locked to primary language: {dg_lang} (from '{primary_lang_raw}')")
         endpointing_ms = getattr(Config, "DEEPGRAM_ENDPOINTING", 300)
         
         # Build dynamic keyword boosts from agent config with proper URL encoding
