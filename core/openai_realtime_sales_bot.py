@@ -158,6 +158,27 @@ class OpenAIRealtimeSalesBot:
                     except Exception as e:
                         logger.error(f"⚠️ Failed to dynamically resolve agent for ID {target_id}: {e}")
 
+            # Check per-agent mode ('modular' or 'realtime')
+            target_mode = (agent_config.get("mode") or agent_config.get("voice_bot_mode") or Config.VOICE_BOT_MODE or "realtime").lower().strip() if agent_config else "realtime"
+            if target_mode == "modular":
+                logger.info(f"🔀 [Per-Agent Handoff] Agent '{agent_config.get('name') if agent_config else 'default'}' is configured in MODULAR mode. Handing off stream {stream_id} to ModularSalesBot...")
+                if not hasattr(self, "_modular_bot") or self._modular_bot is None:
+                    from core.modular_sales_bot import ModularSalesBot
+                    self._modular_bot = ModularSalesBot()
+                self._modular_bot.sip_server = self.sip_server
+
+                # Transfer browser websocket reference if present
+                if stream_id in self.openai_connections and "browser_websocket" in self.openai_connections[stream_id]:
+                    ws = self.openai_connections[stream_id]["browser_websocket"]
+                    self._modular_bot.connections[stream_id] = {"browser_websocket": ws}
+
+                self.openai_connections[stream_id] = {
+                    "delegated_to": "modular",
+                    "modular_bot": self._modular_bot
+                }
+                await self._modular_bot.connect_to_openai_enhanced(stream_id, agent_config)
+                return
+
             # Determine voice and instructions dynamically
             voice = self.openai_voice
             instructions = None
@@ -1156,6 +1177,11 @@ class OpenAIRealtimeSalesBot:
             # Ensure OpenAI connection exists
             if stream_id not in self.openai_connections:
                 logger.warning(f"⚠️ No OpenAI connection for SIP call {call_id}")
+                return
+            
+            session = self.openai_connections.get(stream_id)
+            if session and session.get("delegated_to") == "modular" and session.get("modular_bot"):
+                await session["modular_bot"].send_audio_to_openai(call_id, audio_chunk, sample_rate=sample_rate)
                 return
             
             # Initialize sample rate tracking if needed
