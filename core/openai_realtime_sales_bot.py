@@ -349,12 +349,12 @@ class OpenAIRealtimeSalesBot:
             logger.info(f"✅ ENHANCED OPENAI CONNECTED for {stream_id} @ {sample_rate}Hz")
             logger.info(f"🎵 Audio Format: {input_format} → {output_format}")
             
-            # Configure enhanced OpenAI session
-            await self.configure_openai_session_enhanced(stream_id, agent_config)
-            
-            # Start listening to OpenAI responses and silence monitor
+            # Start listening to OpenAI responses and silence monitor FIRST so initial greeting audio is captured
             asyncio.create_task(self.handle_openai_responses_enhanced(stream_id, openai_ws))
             asyncio.create_task(self._silence_monitor_loop(stream_id))
+
+            # Configure enhanced OpenAI session and trigger initial greeting
+            await self.configure_openai_session_enhanced(stream_id, agent_config)
             
         except Exception as e:
             logger.error(f"❌ Failed to connect to OpenAI (enhanced): {e}")
@@ -406,17 +406,24 @@ class OpenAIRealtimeSalesBot:
             openai_ws = self.openai_connections[stream_id]["websocket"]
             sample_rate = self.connection_sample_rates.get(stream_id, self.default_sample_rate)
             
-            # Retrieve the connection details to check for outbound first_message
             first_message = None
+            is_outbound = False
             openai_config = self.openai_connections.get(stream_id)
             if openai_config:
                 first_message = openai_config.get("first_message")
+                is_outbound = (openai_config.get("direction") == "outbound")
 
-            # Determine initial user instruction/prompt
-            if first_message:
-                prompt_text = f"We just called the customer. The connection is running at {sample_rate}Hz. Say the first message: '{first_message}'"
+            if not first_message and agent_config:
+                first_message = agent_config.get("firstMessage")
+
+            if not first_message:
+                first_message = "Hello! Thank you for calling Chauwk. How can I help you today?"
+
+            # Determine initial user instruction/prompt based on call direction
+            if is_outbound:
+                prompt_text = f"We just called the customer. Say the first message: '{first_message}'"
             else:
-                prompt_text = f"A customer just called our sales line. The connection is running at {sample_rate}Hz audio quality. Please greet them warmly and ask how you can help them today."
+                prompt_text = f"A customer just called our sales line. Greet the caller immediately by saying: '{first_message}'"
 
             # Create enhanced conversation item with greeting
             greeting_msg = {
@@ -433,11 +440,7 @@ class OpenAIRealtimeSalesBot:
             
             await openai_ws.send(json.dumps(greeting_msg))
             
-            greeting_instruction = "Give a warm, professional greeting. Keep it concise and natural."
-            if first_message:
-                greeting_instruction = f"Greet the customer with this exact opening message: '{first_message}'"
-            elif agent_config and agent_config.get("firstMessage"):
-                greeting_instruction = f"Greet the customer with this exact opening message: '{agent_config['firstMessage']}'"
+            greeting_instruction = f"Say this exact opening greeting to the caller: '{first_message}'"
 
             # Create enhanced response with audio focus
             response_msg = {
@@ -449,7 +452,7 @@ class OpenAIRealtimeSalesBot:
             }
             await openai_ws.send(json.dumps(response_msg))
             
-            logger.info(f"👋 ENHANCED INITIAL GREETING SENT for {stream_id} @ {sample_rate}Hz")
+            logger.info(f"👋 ENHANCED INITIAL GREETING SENT for {stream_id} @ {sample_rate}Hz: '{first_message}'")
             
         except Exception as e:
             logger.error(f"❌ Error sending enhanced initial greeting: {e}")
