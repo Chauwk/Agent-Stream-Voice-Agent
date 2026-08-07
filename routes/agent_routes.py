@@ -96,6 +96,7 @@ class AgentCreateRequest(BaseModel):
     terms: Optional[TermsModel] = Field(default_factory=lambda: TermsModel(enabled=False, content=""))
     platformAgreement: Optional[Union[str, bool]] = Field(None, json_schema_extra={"example": True})
     hinglish_mode: Optional[bool] = Field(False, json_schema_extra={"example": False})
+    deepgramMulti: Optional[bool] = Field(False, json_schema_extra={"example": False}, description="If true, Deepgram STT uses language=multi (code-switching). Default is false — primary language locked. Only enable if language=multi is accurate for your use case.")
     virtualNumber: Optional[str] = Field(None, json_schema_extra={"example": "04040377112"}, description="Exotel virtual number bound to this agent.")
 
 class AgentUpdateRequest(BaseModel):
@@ -109,6 +110,7 @@ class AgentUpdateRequest(BaseModel):
     knowledgeBaseIds: Optional[List[str]] = Field(None, description="Updated list of knowledge base document IDs.")
     terms: Optional[TermsModel] = Field(None, description="Updated terms settings.")
     hinglish_mode: Optional[bool] = Field(None, description="Updated hinglish mode toggle.")
+    deepgramMulti: Optional[bool] = Field(None, description="If true, Deepgram STT uses language=multi (code-switching). Default is false — primary language locked.")
     virtualNumber: Optional[str] = Field(None, description="Updated virtual number bound to this agent.")
 
     model_config = {
@@ -363,6 +365,7 @@ async def create_agent(
         "language": primary_language,
         "languages": resolved_languages,
         "hinglish_mode": payload.hinglish_mode if payload.hinglish_mode is not None else False,
+        "deepgramMulti": payload.deepgramMulti if payload.deepgramMulti is not None else False,
         "description": payload.description or "",
         "virtualNumber": (payload.virtualNumber if hasattr(payload, 'virtualNumber') and payload.virtualNumber else "") or "",
         "agentId": agent_uuid,
