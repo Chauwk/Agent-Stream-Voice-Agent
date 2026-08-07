@@ -207,18 +207,19 @@ class OpenAIRealtimeSalesBot:
             primary_lang = agent_languages[0]
             is_hindi = primary_lang.startswith("hi")
             
-            LANG_NAMES = {
-                "en": "English", "en-IN": "English", "en-US": "English",
-                "hi": "Hindi", "hi-IN": "Hindi",
-                "ta": "Tamil", "ta-IN": "Tamil",
-                "te": "Telugu", "te-IN": "Telugu",
-                "kn": "Kannada", "kn-IN": "Kannada",
-                "ml": "Malayalam", "ml-IN": "Malayalam",
-                "mr": "Marathi", "mr-IN": "Marathi",
-                "bn": "Bengali", "bn-IN": "Bengali",
-                "gu": "Gujarati", "gu-IN": "Gujarati"
-            }
-            allowed_names = [LANG_NAMES.get(l, l) for l in agent_languages]
+            def resolve_lang_name(code: str) -> str:
+                LOOKUP = {
+                    "en": "English", "hi": "Hindi", "ta": "Tamil", "te": "Telugu",
+                    "kn": "Kannada", "ml": "Malayalam", "mr": "Marathi", "bn": "Bengali",
+                    "gu": "Gujarati", "pa": "Punjabi", "or": "Odia", "ur": "Urdu",
+                    "es": "Spanish", "fr": "French", "de": "German", "it": "Italian",
+                    "pt": "Portuguese", "ru": "Russian", "zh": "Chinese", "ja": "Japanese",
+                    "ko": "Korean", "ar": "Arabic"
+                }
+                base = str(code or "").split("-")[0].lower().strip()
+                return LOOKUP.get(base, str(code))
+
+            allowed_names = [resolve_lang_name(l) for l in agent_languages]
             # Sanitize custom agent instructions to remove conflicting or ambiguous language phrases
             sanitized_instructions = (agent_instructions or "").strip()
             if sanitized_instructions:
@@ -419,30 +420,12 @@ class OpenAIRealtimeSalesBot:
             if not first_message:
                 first_message = "Hello! Thank you for calling Chauwk. How can I help you today?"
 
-            # Determine initial user instruction/prompt based on call direction
-            if is_outbound:
-                prompt_text = f"We just called the customer. Say the first message: '{first_message}'"
-            else:
-                prompt_text = f"A customer just called our sales line. Greet the caller immediately by saying: '{first_message}'"
+            # Clear any initial PSTN silence/static from input audio buffer
+            await openai_ws.send(json.dumps({"type": "input_audio_buffer.clear"}))
 
-            # Create enhanced conversation item with greeting
-            greeting_msg = {
-                "type": "conversation.item.create",
-                "item": {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{
-                        "type": "input_text", 
-                        "text": prompt_text
-                    }]
-                }
-            }
-            
-            await openai_ws.send(json.dumps(greeting_msg))
-            
-            greeting_instruction = f"Say this exact opening greeting to the caller: '{first_message}'"
+            greeting_instruction = f"Greet the caller immediately by saying this exact opening message in your configured voice: '{first_message}'. Do not wait for the user to speak first."
 
-            # Create enhanced response with audio focus
+            # Create enhanced response for instant initial greeting
             response_msg = {
                 "type": "response.create",
                 "response": {
@@ -541,22 +524,7 @@ class OpenAIRealtimeSalesBot:
                             await ws.send(json.dumps({"type": "response.create", "response": {"modalities": ["audio", "text"]}}))
                             
                             asyncio.create_task(self.delayed_hangup(stream_id))
-                        break
-                    
-                    if ws:
-                        prompt_msg = {
-                            "type": "conversation.item.create",
-                            "item": {
-                                "type": "message",
-                                "role": "user",
-                                "content": [{
-                                    "type": "input_text",
-                                    "text": "The customer has been silent for 8 seconds. Please check if they are still there or need help."
-                                }]
-                            }
-                        }
-                        await ws.send(json.dumps(prompt_msg))
-                        await ws.send(json.dumps({"type": "response.create", "response": {"modalities": ["audio", "text"]}}))
+                            break
                         
         except asyncio.CancelledError:
             pass
@@ -575,17 +543,17 @@ class OpenAIRealtimeSalesBot:
                     data = json.loads(message)
                     event_type = data.get("type", "")
                     
-                    # Update activity timer for any valid event showing session movement
+                    # Update activity timer for session movement
                     openai_config = self.openai_connections.get(stream_id)
                     if openai_config:
                         if event_type in [
                             "input_audio_buffer.speech_started",
-                            "input_audio_buffer.speech_stopped",
-                            "conversation.item.input_audio_transcription.completed",
-                            "response.output_audio.delta"
+                            "conversation.item.input_audio_transcription.completed"
                         ]:
                             openai_config["last_activity_time"] = time.time()
                             openai_config["silence_prompts_count"] = 0
+                        elif event_type in ["response.output_audio.delta", "input_audio_buffer.speech_stopped"]:
+                            openai_config["last_activity_time"] = time.time()
                     
                     logger.debug(f"🤖 ENHANCED OPENAI EVENT: {event_type} for {stream_id}")
                     
