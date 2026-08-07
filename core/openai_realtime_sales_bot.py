@@ -343,6 +343,8 @@ class OpenAIRealtimeSalesBot:
                 "to_phone": to_phone,
                 "agent_config": agent_config,
                 "first_message": first_message,
+                "primary_language": allowed_names[0] if allowed_names else "English",
+                "allowed_languages": ", ".join(allowed_names) if allowed_names else "English",
                 "last_activity_time": time.time(),
                 "silence_prompts_count": 0,
                 "direction": "outbound" if outbound_record else "inbound"
@@ -474,6 +476,8 @@ class OpenAIRealtimeSalesBot:
                     openai_config["silence_prompts_count"] = silence_count
                     ws = openai_config.get("websocket")
                     
+                    primary_lang = openai_config.get("primary_language", "English")
+                    
                     if silence_count == 1:
                         logger.info(f"⏱️ Silence Intimation 1/3 detected for 8 seconds on stream {stream_id}. Injecting prompt.")
                         if ws:
@@ -484,7 +488,7 @@ class OpenAIRealtimeSalesBot:
                                     "role": "user",
                                     "content": [{
                                         "type": "input_text",
-                                        "text": "The customer has been silent for 8 seconds (Intimation 1/3). Please check politely if they are still on the line."
+                                        "text": f"The customer has been silent for 8 seconds (Intimation 1/3). Please check politely in {primary_lang} if they are still on the line."
                                     }]
                                 }
                             }
@@ -500,7 +504,7 @@ class OpenAIRealtimeSalesBot:
                                     "role": "user",
                                     "content": [{
                                         "type": "input_text",
-                                        "text": f"The customer is still silent for 8 seconds (Intimation 2/3). Ask in {allowed_names[0]} if they are still there or need assistance."
+                                        "text": f"The customer is still silent for 8 seconds (Intimation 2/3). Ask in {primary_lang} if they are still there or need assistance."
                                     }]
                                 }
                             }
@@ -516,7 +520,7 @@ class OpenAIRealtimeSalesBot:
                                     "role": "user",
                                     "content": [{
                                         "type": "input_text",
-                                        "text": f"The customer has remained silent after 3 intimations. State politely in {allowed_names[0]} that since there is no response, you are hanging up now. Goodbye!"
+                                        "text": f"The customer has remained silent after 3 intimations. State politely in {primary_lang} that since there is no response, you are hanging up now. Goodbye!"
                                     }]
                                 }
                             }
