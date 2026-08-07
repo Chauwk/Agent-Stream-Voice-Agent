@@ -441,7 +441,7 @@ class OpenAIRealtimeSalesBot:
             response_msg = {
                 "type": "response.create",
                 "response": {
-                    "output_modalities": ["audio"],
+                    "modalities": ["audio", "text"],
                     "instructions": greeting_instruction
                 }
             }
@@ -501,7 +501,7 @@ class OpenAIRealtimeSalesBot:
                                 }
                             }
                             await ws.send(json.dumps(prompt_msg))
-                            await ws.send(json.dumps({"type": "response.create", "response": {"output_modalities": ["audio"]}}))
+                            await ws.send(json.dumps({"type": "response.create", "response": {"modalities": ["audio", "text"]}}))
                     elif silence_count == 2:
                         logger.info(f"⏱️ Silence Intimation 2/3 detected for 8 seconds on stream {stream_id}. Injecting prompt.")
                         if ws:
@@ -517,7 +517,7 @@ class OpenAIRealtimeSalesBot:
                                 }
                             }
                             await ws.send(json.dumps(prompt_msg))
-                            await ws.send(json.dumps({"type": "response.create", "response": {"output_modalities": ["audio"]}}))
+                            await ws.send(json.dumps({"type": "response.create", "response": {"modalities": ["audio", "text"]}}))
                     elif silence_count >= 3:
                         logger.info(f"⏱️ Final Silence Intimation 3/3 reached for stream {stream_id}. Hanging up after warning.")
                         if ws:
@@ -533,7 +533,7 @@ class OpenAIRealtimeSalesBot:
                                 }
                             }
                             await ws.send(json.dumps(goodbye_msg))
-                            await ws.send(json.dumps({"type": "response.create", "response": {"output_modalities": ["audio"]}}))
+                            await ws.send(json.dumps({"type": "response.create", "response": {"modalities": ["audio", "text"]}}))
                             
                             asyncio.create_task(self.delayed_hangup(stream_id))
                         break
@@ -551,7 +551,7 @@ class OpenAIRealtimeSalesBot:
                             }
                         }
                         await ws.send(json.dumps(prompt_msg))
-                        await ws.send(json.dumps({"type": "response.create", "response": {"output_modalities": ["audio"]}}))
+                        await ws.send(json.dumps({"type": "response.create", "response": {"modalities": ["audio", "text"]}}))
                         
         except asyncio.CancelledError:
             pass
@@ -680,7 +680,7 @@ class OpenAIRealtimeSalesBot:
             response_create = {
                 "type": "response.create",
                 "response": {
-                    "output_modalities": ["audio"],
+                    "modalities": ["audio", "text"],
                     "instructions": "Respond naturally and conversationally. Use appropriate pauses and inflections."
                 }
             }
@@ -732,7 +732,7 @@ class OpenAIRealtimeSalesBot:
                 response_msg = {
                     "type": "response.create",
                     "response": {
-                        "output_modalities": ["audio"],
+                        "modalities": ["audio", "text"],
                         "instructions": f"Based on the function result, provide a natural response to the customer about {function_name}."
                     }
                 }

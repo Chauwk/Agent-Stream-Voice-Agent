@@ -692,7 +692,7 @@ class ModularSalesBot:
                 raise Exception("No active custom agent configuration found.")
 
         # Check per-agent mode ('modular' or 'realtime')
-        target_mode = (agent_config.get("mode") or agent_config.get("voice_bot_mode") or Config.VOICE_BOT_MODE or "modular").lower().strip() if agent_config else "modular"
+        target_mode = (agent_config.get("voice_bot_mode") or agent_config.get("mode") or Config.VOICE_BOT_MODE or "modular").lower().strip() if agent_config else "modular"
         if target_mode == "realtime":
             logger.info(f"🔀 [Per-Agent Handoff] Agent '{agent_config.get('name')}' is configured in REALTIME mode. Handing off call {call_id} to OpenAIRealtimeSalesBot...")
             if not hasattr(self, "_realtime_bot") or self._realtime_bot is None:
@@ -700,11 +700,13 @@ class ModularSalesBot:
                 self._realtime_bot = OpenAIRealtimeSalesBot()
             self._realtime_bot.sip_server = self.sip_server
 
-            # Transfer browser websocket reference if present
+            # Set sample rate for SIP calls (16kHz) or browser websocket (24kHz)
+            sample_rate = 16000
             if call_id in self.connections and "browser_websocket" in self.connections[call_id]:
                 ws = self.connections[call_id]["browser_websocket"]
                 self._realtime_bot.openai_connections[call_id] = {"browser_websocket": ws}
-                self._realtime_bot.connection_sample_rates[call_id] = 24000
+                sample_rate = 24000
+            self._realtime_bot.connection_sample_rates[call_id] = sample_rate
 
             self.connections[call_id] = {
                 "delegated_to": "realtime",
