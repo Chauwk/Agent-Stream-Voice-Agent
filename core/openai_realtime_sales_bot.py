@@ -429,7 +429,6 @@ class OpenAIRealtimeSalesBot:
             response_msg = {
                 "type": "response.create",
                 "response": {
-                    "modalities": ["audio", "text"],
                     "instructions": greeting_instruction
                 }
             }
@@ -489,7 +488,7 @@ class OpenAIRealtimeSalesBot:
                                 }
                             }
                             await ws.send(json.dumps(prompt_msg))
-                            await ws.send(json.dumps({"type": "response.create", "response": {"modalities": ["audio", "text"]}}))
+                            await ws.send(json.dumps({"type": "response.create"}))
                     elif silence_count == 2:
                         logger.info(f"⏱️ Silence Intimation 2/3 detected for 8 seconds on stream {stream_id}. Injecting prompt.")
                         if ws:
@@ -500,12 +499,12 @@ class OpenAIRealtimeSalesBot:
                                     "role": "user",
                                     "content": [{
                                         "type": "input_text",
-                                        "text": "The customer is still silent for 8 seconds (Intimation 2/3). Please ask if they are still there or need assistance."
+                                        "text": f"The customer is still silent for 8 seconds (Intimation 2/3). Ask in {allowed_names[0]} if they are still there or need assistance."
                                     }]
                                 }
                             }
                             await ws.send(json.dumps(prompt_msg))
-                            await ws.send(json.dumps({"type": "response.create", "response": {"modalities": ["audio", "text"]}}))
+                            await ws.send(json.dumps({"type": "response.create"}))
                     elif silence_count >= 3:
                         logger.info(f"⏱️ Final Silence Intimation 3/3 reached for stream {stream_id}. Hanging up after warning.")
                         if ws:
@@ -516,12 +515,12 @@ class OpenAIRealtimeSalesBot:
                                     "role": "user",
                                     "content": [{
                                         "type": "input_text",
-                                        "text": "The customer has remained silent after 3 intimations. State politely that since there is no response, you are hanging up now. Goodbye!"
+                                        "text": f"The customer has remained silent after 3 intimations. State politely in {allowed_names[0]} that since there is no response, you are hanging up now. Goodbye!"
                                     }]
                                 }
                             }
                             await ws.send(json.dumps(goodbye_msg))
-                            await ws.send(json.dumps({"type": "response.create", "response": {"modalities": ["audio", "text"]}}))
+                            await ws.send(json.dumps({"type": "response.create"}))
                             
                             asyncio.create_task(self.delayed_hangup(stream_id))
                             break
@@ -653,7 +652,6 @@ class OpenAIRealtimeSalesBot:
             response_create = {
                 "type": "response.create",
                 "response": {
-                    "modalities": ["audio", "text"],
                     "instructions": "Respond naturally and conversationally. Use appropriate pauses and inflections."
                 }
             }
@@ -705,7 +703,6 @@ class OpenAIRealtimeSalesBot:
                 response_msg = {
                     "type": "response.create",
                     "response": {
-                        "modalities": ["audio", "text"],
                         "instructions": f"Based on the function result, provide a natural response to the customer about {function_name}."
                     }
                 }
