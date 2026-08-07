@@ -89,8 +89,7 @@ class AgentCreateRequest(BaseModel):
     voiceId: Optional[str] = Field("default", json_schema_extra={"example": "meera"}, description="The ID of the voice to be used.")
     language: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": "en-IN"}, description="Primary language code (e.g. 'te-IN'). Default is 'en-IN' if omitted.")
     languages: Optional[Union[str, List[str]]] = Field(None, json_schema_extra={"example": ["en-IN", "hi-IN"]}, description="List of supported languages (e.g. ['te-IN', 'hi-IN']). Default is [language] or ['en-IN'].")
-    mode: Optional[str] = Field("modular", json_schema_extra={"example": "modular"}, description="Operating mode for this voice agent: 'modular' or 'realtime'. Default is 'modular'.")
-    voice_bot_mode: Optional[str] = Field(None, json_schema_extra={"example": "modular"}, description="Alias for mode ('modular' or 'realtime').")
+    voice_bot_mode: Optional[str] = Field("modular", json_schema_extra={"example": "modular"}, description="Operating mode for this voice agent: 'modular' or 'realtime'. Default is 'modular'.")
     
     # Optional Fields
     description: Optional[str] = Field("", json_schema_extra={"example": "Handles general customer inquiries."})
@@ -108,8 +107,7 @@ class AgentUpdateRequest(BaseModel):
     voiceId: Optional[str] = Field(None, description="Updated voice ID.")
     language: Optional[Union[str, List[str]]] = Field(None, description="Updated primary language code (e.g. 'te-IN').")
     languages: Optional[Union[str, List[str]]] = Field(None, description="Updated list of supported language codes (e.g. ['te-IN', 'hi-IN']).")
-    mode: Optional[str] = Field(None, description="Updated operating mode ('modular' or 'realtime').")
-    voice_bot_mode: Optional[str] = Field(None, description="Alias for updated operating mode ('modular' or 'realtime').")
+    voice_bot_mode: Optional[str] = Field(None, description="Updated operating mode ('modular' or 'realtime').")
     description: Optional[str] = Field(None, description="Updated description.")
     knowledgeBaseIds: Optional[List[str]] = Field(None, description="Updated list of knowledge base document IDs.")
     terms: Optional[TermsModel] = Field(None, description="Updated terms settings.")
@@ -121,15 +119,16 @@ class AgentUpdateRequest(BaseModel):
         "json_schema_extra": {
             "example": {
                 "instructions": "You are a polite customer support agent...",
-                "mode": "realtime"
+                "voice_bot_mode": "realtime"
             }
         }
     }
 
 class SetAgentModeRequest(BaseModel):
-    enterprise_id: Optional[str] = Field(None, json_schema_extra={"example": "enterprise_id_here"}, description="Enterprise ID (can also be passed in x-enterprise-id header)")
+    enterprise_id: str = Field(..., json_schema_extra={"example": "enterprise_id_here"}, description="Enterprise ID")
     agent_id: str = Field(..., json_schema_extra={"example": "agent_3a2e7c8f9b1d"}, description="Agent ID or MongoDB ObjectId of the agent")
-    mode: str = Field("modular", json_schema_extra={"example": "realtime"}, description="Operating mode: 'modular' or 'realtime'")
+    voice_bot_mode: Optional[str] = Field(None, json_schema_extra={"example": "modular"}, description="Operating mode: 'modular' or 'realtime'")
+    mode: Optional[str] = Field(None, json_schema_extra={"example": "modular"}, description="Alias for voice_bot_mode: 'modular' or 'realtime'")
 
 class AssignVirtualNumberRequest(BaseModel):
     enterprise_id: str = Field(..., json_schema_extra={"example": "enterprise_id_here"}, description="Enterprise ID")
@@ -167,8 +166,7 @@ class AgentDataResponse(BaseModel):
     voiceId: Optional[str] = Field(default="default", example="meera")
     language: Optional[str] = Field(default="en-IN", example="en-IN")
     languages: Optional[List[str]] = Field(default_factory=lambda: ["en-IN"], example=["en-IN", "hi-IN"])
-    mode: str = Field("modular", example="modular", description="Operating mode ('modular' or 'realtime')")
-    voice_bot_mode: Optional[str] = Field("modular", example="modular", description="Alias for operating mode ('modular' or 'realtime')")
+    voice_bot_mode: str = Field("modular", example="modular", description="Operating mode ('modular' or 'realtime')")
     hinglish_mode: bool = Field(False)
     description: Optional[str] = Field("")
     agentId: str = Field(..., example="agent_3a2e7c8f9b1d")
@@ -381,7 +379,6 @@ async def create_agent(
         "voiceId": payload.voiceId or "default",
         "language": primary_language,
         "languages": resolved_languages,
-        "mode": raw_mode,
         "voice_bot_mode": raw_mode,
         "hinglish_mode": payload.hinglish_mode if payload.hinglish_mode is not None else False,
         "deepgramMulti": payload.deepgramMulti if payload.deepgramMulti is not None else False,
@@ -428,14 +425,8 @@ async def create_agent(
 @router.post(
     "/set-agent-mode",
     status_code=status.HTTP_200_OK,
-    summary="Set Agent Operating Mode (Modular or Realtime)",
-    description="Updates the operating mode ('modular' or 'realtime') for a specific agent taking enterprise_id and agent_id."
-)
-@router.put(
-    "/set-agent-mode",
-    status_code=status.HTTP_200_OK,
-    summary="Set Agent Operating Mode (Modular or Realtime)",
-    description="Updates the operating mode ('modular' or 'realtime') for a specific agent taking enterprise_id and agent_id."
+    summary="Set Agent Voice Bot Mode",
+    description="Updates the operating mode ('modular' or 'realtime') for a specific agent taking enterprise_id, agent_id, and voice_bot_mode."
 )
 async def set_agent_mode(
     payload: SetAgentModeRequest,
@@ -453,7 +444,7 @@ async def set_agent_mode(
             detail={"success": False, "message": "agent_id is required"}
         )
 
-    mode_val = str(payload.mode or "").strip().lower()
+    mode_val = str(payload.voice_bot_mode or payload.mode or "").strip().lower()
     if mode_val not in ["modular", "realtime"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -499,11 +490,15 @@ async def set_agent_mode(
             if coll_name in await db.list_collection_names():
                 res = await db[coll_name].update_one(
                     query,
-                    {"$set": {
-                        "mode": mode_val,
-                        "voice_bot_mode": mode_val,
-                        "updatedAt": now_iso
-                    }}
+                    {
+                        "$set": {
+                            "voice_bot_mode": mode_val,
+                            "updatedAt": now_iso
+                        },
+                        "$unset": {
+                            "mode": ""
+                        }
+                    }
                 )
                 if res.modified_count > 0 or res.matched_count > 0:
                     updated_doc = await db[coll_name].find_one(query)
@@ -514,16 +509,17 @@ async def set_agent_mode(
         updated_agent = await safe_mongo_op(run_update_mode)
         if not updated_agent:
             updated_agent = dict(agent)
-            updated_agent["mode"] = mode_val
+            updated_agent.pop("mode", None)
             updated_agent["voice_bot_mode"] = mode_val
             updated_agent["updatedAt"] = now_iso
+        else:
+            updated_agent.pop("mode", None)
 
         return {
             "success": True,
-            "message": f"Successfully updated agent '{payload.agent_id}' mode to '{mode_val}'.",
+            "message": f"Successfully updated agent '{payload.agent_id}' voice_bot_mode to '{mode_val}'.",
             "enterprise_id": ent_id,
             "agent_id": payload.agent_id,
-            "mode": mode_val,
             "voice_bot_mode": mode_val,
             "data": bson_safe(dict(updated_agent))
         }
@@ -533,36 +529,6 @@ async def set_agent_mode(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"success": False, "message": f"Failed to update agent mode: {str(e)}"}
         )
-
-@router.get(
-    "/get-agent-mode",
-    status_code=status.HTTP_200_OK,
-    summary="Get Agent Operating Mode",
-    description="Retrieves the current operating mode ('modular' or 'realtime') for a specific agent."
-)
-async def get_agent_mode(
-    agent_id: str = Query(..., description="Agent ID or MongoDB ObjectId"),
-    enterprise_id: Optional[str] = Query(None, description="Enterprise ID"),
-    x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id")
-):
-    ent_id = enterprise_id or x_enterprise_id
-    validate_enterprise(ent_id)
-    agent = await find_agent_by_id_and_enterprise(agent_id, ent_id)
-    if not agent:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"success": False, "message": f"Agent '{agent_id}' not found"}
-        )
-    
-    mode_val = (agent.get("mode") or agent.get("voice_bot_mode") or "modular").lower()
-    return {
-        "success": True,
-        "enterprise_id": ent_id,
-        "agent_id": agent_id,
-        "agent_name": agent.get("name"),
-        "mode": mode_val,
-        "voice_bot_mode": mode_val
-    }
 
 @router.post(
     "/assign-virtual-number",

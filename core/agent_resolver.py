@@ -13,11 +13,11 @@ def _sanitize_agent_doc(agent: dict | None) -> dict | None:
     for k, v in list(cleaned.items()):
         if isinstance(v, ObjectId):
             cleaned[k] = str(v)
-    # Ensure per-agent mode is set (defaulting to 'modular' if omitted)
-    resolved_mode = str(cleaned.get("mode") or cleaned.get("voice_bot_mode") or "modular").lower().strip()
+    # Ensure per-agent voice_bot_mode is set (defaulting to 'modular' if omitted)
+    resolved_mode = str(cleaned.get("voice_bot_mode") or cleaned.get("mode") or "modular").lower().strip()
     if resolved_mode not in ["modular", "realtime"]:
         resolved_mode = "modular"
-    cleaned["mode"] = resolved_mode
+    cleaned.pop("mode", None)
     cleaned["voice_bot_mode"] = resolved_mode
     return cleaned
 
