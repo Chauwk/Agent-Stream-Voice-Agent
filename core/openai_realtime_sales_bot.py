@@ -366,6 +366,7 @@ class OpenAIRealtimeSalesBot:
                 "allowed_languages": ", ".join(allowed_names) if allowed_names else "English",
                 "last_activity_time": time.time(),
                 "silence_prompts_count": 0,
+                "full_instructions": instructions,
                 "direction": "outbound" if outbound_record else "inbound"
             }
             
@@ -445,7 +446,8 @@ class OpenAIRealtimeSalesBot:
             # Clear any initial PSTN silence/static from input audio buffer
             await openai_ws.send(json.dumps({"type": "input_audio_buffer.clear"}))
 
-            greeting_instruction = f"Greet the caller immediately by saying this exact opening message in your configured voice: '{first_message}'. Do not wait for the user to speak first."
+            full_instructions = openai_config.get("full_instructions", "") if openai_config else ""
+            greeting_instruction = f"{full_instructions}\n\nGreet the caller immediately by saying this exact opening message in your configured voice: '{first_message}'. Do not wait for the user to speak first."
 
             # Create enhanced response for instant initial greeting
             response_msg = {
@@ -680,12 +682,14 @@ class OpenAIRealtimeSalesBot:
             await openai_ws.send(json.dumps(item_msg))
             
             # 3. Trigger OpenAI speech response generation strictly guided by persona & RAG context
+            full_instructions = openai_config.get("full_instructions", "")
             response_msg = {
                 "type": "response.create",
                 "response": {
                     "instructions": (
-                        f"Synthesize a clear, short 1-2 sentence spoken response strictly adhering to your custom persona and allowed languages ({allowed_langs}). "
-                        "Base all product, service, pricing, and business facts EXCLUSIVELY on the AUTHORITATIVE KNOWLEDGE BASE CONTEXT provided above. "
+                        f"{full_instructions}\n\n"
+                        f"IMPORTANT TURN INSTRUCTION: Synthesize a clear, short 1-2 sentence spoken response strictly adhering to your custom persona instructions above and allowed languages ({allowed_langs}). "
+                        "Base all product, service, pricing, and business facts EXCLUSIVELY on the AUTHORITATIVE KNOWLEDGE BASE CONTEXT provided in the conversation above. "
                         f"If the context states no relevant documents found or lacks the required details, state politely in {primary_lang} that the information is not in our records. "
                         "DO NOT use pre-trained general memory or fabricate facts."
                     )
