@@ -258,15 +258,34 @@ class OpenAIRealtimeSalesBot:
                     f"Respond exclusively in one of your allowed languages ({langs_str}) stating that you can only assist in {langs_str}.\n\n"
                 )
 
-            # Unify system instructions with strict language mandate placed at the VERY TOP
+            # Check terms & guardrails in agent config
+            terms_info = agent_config.get("terms", {}) if agent_config else {}
+            terms_content = (terms_info.get("content") or "").strip() if (isinstance(terms_info, dict) and terms_info.get("enabled")) else ""
+            guardrails_block = ""
+            if terms_content:
+                guardrails_block = f"\n\n🚨 STRICT BUSINESS GUARDRAILS & TERMS:\n{terms_content}\n"
+
+            rag_mandate = (
+                "\n\n🛡️ STRICT KNOWLEDGE BASE (RAG) & HALLUCINATION PREVENTION PROTOCOL:\n"
+                "1. ZERO EXTERNAL KNOWLEDGE & ZERO HALLUCINATIONS:\n"
+                "   - You are strictly prohibited from using your internal pre-trained memory to answer questions about products, services, pricing, company history, terms, features, or policies.\n"
+                "   - Whenever the customer asks ANY question about products, services, pricing, technical specs, guarantees, FAQs, or policies, YOU MUST IMMEDIATELY CALL THE `query_knowledge_base` TOOL before responding.\n"
+                "   - DO NOT make up, estimate, speculate, or hallucinate any product names, features, or pricing.\n"
+                "2. HANDLING MISSING INFORMATION:\n"
+                "   - If `query_knowledge_base` returns empty results or no relevant matches, YOU MUST RESPOND POLITELY: 'I apologize, but I do not have that specific information in our knowledge base. How else can I assist you today?'\n"
+                "   - NEVER fabricate details or guess an answer when information is not in the knowledge base.\n"
+                "3. CONCISE RESPONSES & CALL CLOSING:\n"
+                "   - Keep responses very concise, short, and natural (1-2 sentences max).\n"
+                "   - When the conversation is finished or the user says goodbye, call the `end_call` tool to hang up."
+            )
+
+            # Unify system instructions with strict language & RAG mandates placed at the VERY TOP
             instructions = (
                 f"{final_language_mandate}"
                 f"You are a professional representative named {agent_name}. Here are your custom instructions:\n"
-                f"{sanitized_instructions}\n\n"
-                "Base your responses strictly and exclusively on your custom instructions and the knowledge base. "
-                "If asked about products, services, pricing, or policies not in your instructions, call the query_knowledge_base tool to search. Do not invent products or guess information. "
-                "Keep responses very concise, short, and natural (1-2 sentences). "
-                "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
+                f"{sanitized_instructions}\n"
+                f"{guardrails_block}"
+                f"{rag_mandate}"
             )
 
             # Resolve greeting based on call type (inbound vs outbound) and language
@@ -705,10 +724,19 @@ class OpenAIRealtimeSalesBot:
             
             # Create enhanced response (only if NOT ending the call)
             if function_name != "end_call":
+                if function_name == "query_knowledge_base":
+                    custom_instructions = (
+                        "Synthesize a clear, short 1-2 sentence response using ONLY the provided knowledge base search results. "
+                        "If the search results are empty or contain no relevant facts, state politely that the information is not in our knowledge base. "
+                        "DO NOT use pre-trained general memory or make up facts."
+                    )
+                else:
+                    custom_instructions = f"Based on the function result, provide a natural response to the customer about {function_name}."
+
                 response_msg = {
                     "type": "response.create",
                     "response": {
-                        "instructions": f"Based on the function result, provide a natural response to the customer about {function_name}."
+                        "instructions": custom_instructions
                     }
                 }
                 await openai_ws.send(json.dumps(response_msg))

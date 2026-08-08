@@ -249,11 +249,11 @@ class Config:
                 {
                     'type': 'function',
                     'name': 'query_knowledge_base',
-                    'description': 'Search the company knowledge base for answers about services, products, pricing, custom offers, and company policies.',
+                    'description': 'MANDATORY TOOL: Call this tool whenever the customer asks ANY question about company products, services, pricing, features, guarantees, FAQs, or policies to retrieve authoritative facts from the knowledge base.',
                     'parameters': {
                         'type': 'object',
                         'properties': {
-                            'query': {'type': 'string', 'description': 'The query to search in the knowledge base.'},
+                            'query': {'type': 'string', 'description': 'The exact search query to look up in the company knowledge base.'},
                         },
                         'required': ['query']
                     }
