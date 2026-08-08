@@ -88,10 +88,22 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
                         {"company_id": company_id, "status": "active"},
                         sort=[("updatedAt", -1)]
                     )
-                if agent:
-                    logger.info(f"🎯 Dynamic agent resolved for company {company_id} via phone {destination_id} in {coll_name}: {agent.get('name')}")
-                    return _sanitize_agent_doc(agent)
+                    if agent:
+                        logger.info(f"🎯 Dynamic agent resolved for company {company_id} via phone {destination_id} in {coll_name}: {agent.get('name')}")
+                        return _sanitize_agent_doc(agent)
                 
+        # 6. Fallback: If no agent matched destination_id directly (e.g. SIP user trunk URI 'chauwk1m'), resolve active agent
+        for coll_name in collections_to_search:
+            agents_collection = db[coll_name]
+            agent = await agents_collection.find_one({"status": "active", "voice_bot_mode": "realtime"}, sort=[("updatedAt", -1)])
+            if not agent:
+                agent = await agents_collection.find_one({"status": "active"}, sort=[("updatedAt", -1)])
+            if not agent:
+                agent = await agents_collection.find_one({}, sort=[("updatedAt", -1)])
+            if agent:
+                logger.info(f"🎯 Dynamic agent resolved via Active Agent Fallback in {coll_name}: {agent.get('name')} ({agent.get('agentId', agent.get('_id'))})")
+                return _sanitize_agent_doc(agent)
+
     except Exception as e:
         logger.error(f"❌ Failed to resolve agent config: {e}")
         
