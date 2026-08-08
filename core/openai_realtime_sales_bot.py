@@ -187,7 +187,7 @@ class OpenAIRealtimeSalesBot:
             
             if agent_config:
                 agent_name = agent_config.get("name", Config.SALES_BOT_NAME)
-                agent_instructions = agent_config.get("instructions", "")
+                agent_instructions = (agent_config.get("systemPrompt") or agent_config.get("instructions") or "").strip()
                 
                 # Check if voiceId is a valid OpenAI voice
                 candidate_voice = str(agent_config.get("voiceId") or "").lower()
@@ -603,12 +603,14 @@ class OpenAIRealtimeSalesBot:
                                 openai_config["transcript"].append({"role": "bot", "msg": bot_text})
                             openai_config["current_bot_text"] = ""
                     elif event_type == "conversation.item.input_audio_transcription.completed":
-                        user_text = data.get("transcript", "")
+                        user_text = data.get("transcript", "").strip()
                         if user_text:
                             logger.info(f"🎤 CUSTOMER SAID: {user_text}")
                             openai_config = self.openai_connections.get(stream_id)
                             if openai_config:
                                 openai_config["transcript"].append({"role": "user", "msg": user_text})
+                                # Trigger server-side Intercept RAG search & OpenAI context injection
+                                asyncio.create_task(self._process_user_turn_with_rag(stream_id, user_text))
                     elif event_type == "input_audio_buffer.speech_started":
                         logger.info(f"🎤 CUSTOMER STARTED SPEAKING (realtime VAD interruption triggered) for {stream_id}")
                         openai_config = self.openai_connections.get(stream_id)
@@ -636,6 +638,64 @@ class OpenAIRealtimeSalesBot:
                     
         except Exception as e:
             logger.error(f"❌ Error in enhanced OpenAI response handler: {e}")
+
+    async def _process_user_turn_with_rag(self, stream_id: str, user_transcript: str):
+        """Executes server-side RAG search on ChromaDB and injects context + custom instructions into OpenAI before triggering speech generation"""
+        try:
+            openai_config = self.openai_connections.get(stream_id)
+            if not openai_config:
+                return
+                
+            openai_ws = openai_config["websocket"]
+            to_phone = openai_config.get("to_phone", "default")
+            agent_config = openai_config.get("agent_config")
+            primary_lang = openai_config.get("primary_language", "English")
+            allowed_langs = openai_config.get("allowed_languages", "English")
+            
+            logger.info(f"🔎 Executing Server-Side Intercept RAG for user query: '{user_transcript}' on stream {stream_id}")
+            
+            # 1. Query ChromaDB directly via bot_controller
+            from controllers.bot_controller import query_knowledge_base
+            rag_results = await query_knowledge_base(to_phone, user_transcript, top_k=3, agent_config=agent_config)
+            
+            # 2. Inject retrieved RAG context into OpenAI conversation as a user message
+            context_text = json.dumps(rag_results) if rag_results else "No relevant documents found in knowledge base."
+            
+            item_msg = {
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                f"AUTHORITATIVE KNOWLEDGE BASE CONTEXT:\n{context_text}\n\n"
+                                f"USER QUESTION: {user_transcript}"
+                            )
+                        }
+                    ]
+                }
+            }
+            await openai_ws.send(json.dumps(item_msg))
+            
+            # 3. Trigger OpenAI speech response generation strictly guided by persona & RAG context
+            response_msg = {
+                "type": "response.create",
+                "response": {
+                    "instructions": (
+                        f"Synthesize a clear, short 1-2 sentence spoken response strictly adhering to your custom persona and allowed languages ({allowed_langs}). "
+                        "Base all product, service, pricing, and business facts EXCLUSIVELY on the AUTHORITATIVE KNOWLEDGE BASE CONTEXT provided above. "
+                        f"If the context states no relevant documents found or lacks the required details, state politely in {primary_lang} that the information is not in our records. "
+                        "DO NOT use pre-trained general memory or fabricate facts."
+                    )
+                }
+            }
+            await openai_ws.send(json.dumps(response_msg))
+            logger.info(f"✅ Intercept RAG context injected & response created for stream {stream_id}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error processing user turn with RAG for stream {stream_id}: {e}")
 
     async def _handle_customer_interruption(self, stream_id: str, openai_ws):
         """Handle customer interruption with enhanced response cancellation"""

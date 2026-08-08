@@ -238,7 +238,7 @@ class Config:
                 'threshold': 0.5,
                 'prefix_padding_ms': 300,
                 'silence_duration_ms': 500,
-                'create_response': True,
+                'create_response': False,
             },
             'tools': [
                 {
