@@ -203,10 +203,11 @@ class MyCall(CallBase):
                     self.media_port.createPort("OpenAI_Port", fmt)
                     
                     # Record call session details
+                    vnm = getattr(self, 'virtual_number', None) or ci.localUri
                     call_state = SIPCallState(
                         call_id=self.sip_call_id,
                         from_uri=ci.remoteUri,
-                        to_uri=ci.localUri,
+                        to_uri=vnm,
                         contact_uri=ci.remoteContact,
                         start_time=time.time(),
                         sample_rate=16000,
@@ -261,6 +262,16 @@ class MyAccount(AccountBase):
                 remote_uri = ci.remoteUri
                 local_uri = ci.localUri
                 call_id_str = ci.callIdString
+                
+                # Extract Virtual Number from raw SIP packet headers if present
+                if hasattr(prm, 'rdata') and hasattr(prm.rdata, 'wholeMsg'):
+                    raw_sip = prm.rdata.wholeMsg or ""
+                    matches = re.findall(r'(?:To:\s*<sip:|sip:|\+91|0)([0-9]{10,11})@', raw_sip, re.IGNORECASE)
+                    if not matches:
+                        matches = re.findall(r'([0-9]{10})', raw_sip)
+                    if matches:
+                        call.virtual_number = matches[0]
+                        logger.info(f"📱 Extracted Virtual Number from SIP headers: {matches[0]}")
             except Exception as e:
                 logger.error(f"❌ Error getting call info for callId={prm.callId}: {e}")
                 # Fallback to reject to be safe
@@ -450,7 +461,20 @@ class SIPServer:
                 logger.error(f"⚠️ Error resolving agent config for SIP call {call_id}: {resolve_err}")
 
             if agent_config:
-                logger.info(f"🎯 Resolved agent '{agent_config.get('name')}' (mode: {agent_config.get('voice_bot_mode')}, languages: {agent_config.get('languages')}) for call {call_id}")
+                mode = agent_config.get("voice_bot_mode", "modular")
+                logger.info(f"🎯 Resolved agent '{agent_config.get('name')}' (mode: {mode}, languages: {agent_config.get('languages')}) for call {call_id}")
+                
+                if mode == "modular":
+                    logger.info(f"🔀 Agent mode is 'modular'. Routing call {call_id} to Modular Sales Bot Engine!")
+                    try:
+                        from core.modular_sales_bot import ModularSalesBot
+                        if not hasattr(self, 'modular_bot') or not self.modular_bot:
+                            self.modular_bot = ModularSalesBot(sip_server=self)
+                        await self.modular_bot.connect_call(call_id, agent_config=agent_config)
+                        call_state.openai_connected = True
+                        return
+                    except Exception as mod_err:
+                        logger.error(f"❌ Error connecting call to Modular engine: {mod_err}. Falling back to Realtime.")
             else:
                 logger.warning(f"⚠️ No dynamic agent found for SIP call {call_id}, using default agent config")
             
