@@ -266,17 +266,17 @@ class OpenAIRealtimeSalesBot:
                 guardrails_block = f"\n\n🚨 STRICT BUSINESS GUARDRAILS & TERMS:\n{terms_content}\n"
 
             rag_mandate = (
-                "\n\n🛡️ STRICT KNOWLEDGE BASE (RAG) & HALLUCINATION PREVENTION PROTOCOL:\n"
-                "1. ZERO EXTERNAL KNOWLEDGE & ZERO HALLUCINATIONS:\n"
-                "   - You are strictly prohibited from using your internal pre-trained memory to answer questions about products, services, pricing, company history, terms, features, or policies.\n"
-                "   - Whenever the customer asks ANY question about products, services, pricing, technical specs, guarantees, FAQs, or policies, YOU MUST IMMEDIATELY CALL THE `query_knowledge_base` TOOL before responding.\n"
-                "   - DO NOT make up, estimate, speculate, or hallucinate any product names, features, or pricing.\n"
-                "2. HANDLING MISSING INFORMATION:\n"
-                "   - If `query_knowledge_base` returns empty results or no relevant matches, YOU MUST RESPOND POLITELY: 'I apologize, but I do not have that specific information in our knowledge base. How else can I assist you today?'\n"
-                "   - NEVER fabricate details or guess an answer when information is not in the knowledge base.\n"
-                "3. CONCISE RESPONSES & CALL CLOSING:\n"
-                "   - Keep responses very concise, short, and natural (1-2 sentences max).\n"
-                "   - When the conversation is finished or the user says goodbye, call the `end_call` tool to hang up."
+                "\n\n🛡️ ABSOLUTE KNOWLEDGE BASE (RAG) & INSTANT HANGUP MANDATE:\n"
+                "1. MANDATORY TOOL EXECUTION FOR KNOWLEDGE BASE (ZERO EXCEPTIONS):\n"
+                "   - You have ZERO internal memory or pre-trained knowledge regarding this company, its products, services, pricing, terms, features, or policies.\n"
+                "   - For ANY question asked by the customer regarding products, services, pricing, features, policies, warranties, or FAQs, YOU MUST ALWAYS CALL THE `query_knowledge_base` TOOL BEFORE SPEAKING A SINGLE WORD.\n"
+                "   - Never answer business or product questions directly without calling `query_knowledge_base` first.\n"
+                "2. HANDLING MISSING KNOWLEDGE:\n"
+                "   - If `query_knowledge_base` returns no matching results, state politely: 'I apologize, but that specific detail is not available in our knowledge base. How else may I help you?'\n"
+                "   - Never fabricate, guess, or hallucinate product details.\n"
+                "3. INSTANT CALL HANGUP MANDATE:\n"
+                "   - Whenever the customer says 'bye', 'goodbye', 'cut the call', 'hang up', 'end the call', or indicates they are done, YOU MUST IMMEDIATELY CALL THE `end_call` TOOL.\n"
+                "   - Speak a brief goodbye out loud (e.g. 'Thank you, goodbye!') and call `end_call` immediately."
             )
 
             # Unify system instructions with strict language & RAG mandates placed at the VERY TOP
@@ -856,28 +856,17 @@ class OpenAIRealtimeSalesBot:
             return {"status": "error", "message": "SIP Server not available"}
 
     async def delayed_hangup(self, stream_id: str, delay_seconds: float = 0.5):
-        """Clean up the call after waiting for final audio playback buffer to drain"""
+        """Clean up the call immediately after allowing brief polite goodbye phrase to play"""
         try:
-            logger.info(f"⏳ Executing delayed hangup sequence for stream {stream_id}...")
-            # 1. Initial grace period to allow OpenAI response generation and RTP audio streaming to initiate
-            await asyncio.sleep(3.0)
-
-            start_time = time.time()
-            while time.time() - start_time < 30.0:
-                buf_len = 0
-                is_playing = False
-                if self.sip_server:
-                    call_state = self.sip_server.sip_calls.get(stream_id)
-                    if call_state:
-                        is_playing = getattr(call_state, "is_playing", False)
-                        if hasattr(call_state, "playback_buffer"):
-                            buf_len = len(call_state.playback_buffer)
-                
-                if not is_playing and buf_len == 0:
-                    logger.info(f"✅ Audio playback finished for stream {stream_id}. Hanging up call cleanly.")
-                    break
-                logger.info(f"⏳ Waiting for OpenAI speech playback to finish (is_playing={is_playing}, buffer={buf_len} bytes) for stream {stream_id}...")
-                await asyncio.sleep(0.5)
+            logger.info(f"⏳ Executing fast hangup sequence for stream {stream_id}...")
+            # 1. Brief grace period (1.0s) to allow final goodbye speech packet to transmit
+            await asyncio.sleep(1.0)
+            
+            if self.sip_server:
+                logger.info(f"✂️ Instant call hangup triggered for stream {stream_id}")
+                await self.sip_server.hangup_call(stream_id)
+        except Exception as e:
+            logger.error(f"❌ Error during delayed hangup: {e}")
         except Exception as e:
             logger.error(f"❌ Error in OpenAI delayed hangup check: {e}")
             
