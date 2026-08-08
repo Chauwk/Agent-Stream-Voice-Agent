@@ -440,11 +440,17 @@ class SIPServer:
         """Bridge a SIP call with OpenAI Realtime API using dynamically resolved agent configuration"""
         try:
             if not self.openai_bot:
-                logger.error("❌ OpenAI bot reference not available for bridging")
-                prm = pj.CallOpParam(True)
-                prm.statusCode = 500
-                call.hangup(prm)
-                return
+                logger.info("ℹ️ OpenAI bot instance is None, instantiating on-the-fly...")
+                try:
+                    from core.openai_realtime_sales_bot import OpenAIRealtimeSalesBot
+                    self.openai_bot = OpenAIRealtimeSalesBot()
+                    self.openai_bot.sip_server = self
+                except Exception as inst_err:
+                    logger.error(f"❌ OpenAI bot reference not available and auto-instantiation failed: {inst_err}")
+                    prm = pj.CallOpParam(True)
+                    prm.statusCode = 500
+                    call.hangup(prm)
+                    return
                 
             call_state = self.sip_calls[call_id]
             logger.info(f"🌉 BRIDGING SIP CALL {call_id} to OpenAI")
