@@ -13,6 +13,11 @@ def _sanitize_agent_doc(agent: dict | None) -> dict | None:
     for k, v in list(cleaned.items()):
         if isinstance(v, ObjectId):
             cleaned[k] = str(v)
+            
+    # Include voiceBotMode falling back to global config if not set
+    from config import Config
+    cleaned['voiceBotMode'] = agent.get('voiceBotMode', Config.VOICE_BOT_MODE)
+    
     return cleaned
 
 async def resolve_agent_config(destination_id: str) -> dict | None:
