@@ -690,6 +690,31 @@ class ModularSalesBot:
             if agent_config is None:
                 logger.warning(f"🚫 Call {call_id} rejected: No custom agent resolved (default agent fallback disabled).")
                 raise Exception("No active custom agent configuration found.")
+
+        # Check per-agent mode ('modular' or 'realtime')
+        target_mode = (agent_config.get("voice_bot_mode") or agent_config.get("mode") or Config.VOICE_BOT_MODE or "modular").lower().strip() if agent_config else "modular"
+        if target_mode == "realtime":
+            logger.info(f"🔀 [Per-Agent Handoff] Agent '{agent_config.get('name')}' is configured in REALTIME mode. Handing off call {call_id} to OpenAIRealtimeSalesBot...")
+            if not hasattr(self, "_realtime_bot") or self._realtime_bot is None:
+                from core.openai_realtime_sales_bot import OpenAIRealtimeSalesBot
+                self._realtime_bot = OpenAIRealtimeSalesBot()
+            self._realtime_bot.sip_server = self.sip_server
+
+            # Set sample rate for SIP calls (16kHz) or browser websocket (24kHz)
+            sample_rate = 16000
+            if call_id in self.connections and "browser_websocket" in self.connections[call_id]:
+                ws = self.connections[call_id]["browser_websocket"]
+                self._realtime_bot.openai_connections[call_id] = {"browser_websocket": ws}
+                sample_rate = 24000
+            self._realtime_bot.connection_sample_rates[call_id] = sample_rate
+
+            self.connections[call_id] = {
+                "delegated_to": "realtime",
+                "realtime_bot": self._realtime_bot
+            }
+            await self._realtime_bot.connect_to_openai_enhanced(call_id, agent_config)
+            return
+
         # Ensure Gemini warmup runs if it hasn't completed yet
         if not getattr(self, "gemini_warmed_up", False) and self.gemini_client:
             asyncio.create_task(self._warmup_gemini())
@@ -1102,6 +1127,10 @@ class ModularSalesBot:
         """
         session_state = self.connections.get(call_id)
         if not session_state:
+            return
+
+        if session_state.get("delegated_to") == "realtime" and session_state.get("realtime_bot"):
+            await session_state["realtime_bot"].send_audio_to_openai(call_id, audio_chunk, sample_rate=sample_rate)
             return
             
         # Apply local noise gate and track sustained speech/silence to trigger precise local VAD

@@ -203,10 +203,11 @@ class MyCall(CallBase):
                     self.media_port.createPort("OpenAI_Port", fmt)
                     
                     # Record call session details
+                    vnm = getattr(self, 'virtual_number', None) or ci.localUri
                     call_state = SIPCallState(
                         call_id=self.sip_call_id,
                         from_uri=ci.remoteUri,
-                        to_uri=ci.localUri,
+                        to_uri=vnm,
                         contact_uri=ci.remoteContact,
                         start_time=time.time(),
                         sample_rate=16000,
@@ -261,6 +262,16 @@ class MyAccount(AccountBase):
                 remote_uri = ci.remoteUri
                 local_uri = ci.localUri
                 call_id_str = ci.callIdString
+                
+                # Extract Virtual Number from raw SIP packet headers if present
+                if hasattr(prm, 'rdata') and hasattr(prm.rdata, 'wholeMsg'):
+                    raw_sip = prm.rdata.wholeMsg or ""
+                    matches = re.findall(r'(?:To:\s*<sip:|sip:|\+91|0)([0-9]{10,11})@', raw_sip, re.IGNORECASE)
+                    if not matches:
+                        matches = re.findall(r'([0-9]{10})', raw_sip)
+                    if matches:
+                        call.virtual_number = matches[0]
+                        logger.info(f"📱 Extracted Virtual Number from SIP headers: {matches[0]}")
             except Exception as e:
                 logger.error(f"❌ Error getting call info for callId={prm.callId}: {e}")
                 # Fallback to reject to be safe
@@ -426,34 +437,67 @@ class SIPServer:
             raise
             
     async def _bridge_call_to_openai(self, call_id: str, call):
-        """Bridge a SIP call with OpenAI Realtime API"""
+        """Bridge a SIP call with OpenAI Realtime API using dynamically resolved agent configuration"""
         try:
             if not self.openai_bot:
-                logger.error("❌ OpenAI bot reference not available for bridging")
-                prm = pj.CallOpParam()
-                call.hangup(prm)
-                return
+                logger.info("ℹ️ OpenAI bot instance is None, instantiating on-the-fly...")
+                try:
+                    from core.openai_realtime_sales_bot import OpenAIRealtimeSalesBot
+                    self.openai_bot = OpenAIRealtimeSalesBot()
+                    self.openai_bot.sip_server = self
+                except Exception as inst_err:
+                    logger.error(f"❌ OpenAI bot reference not available and auto-instantiation failed: {inst_err}")
+                    prm = pj.CallOpParam(True)
+                    prm.statusCode = 500
+                    call.hangup(prm)
+                    return
                 
             call_state = self.sip_calls[call_id]
             logger.info(f"🌉 BRIDGING SIP CALL {call_id} to OpenAI")
             
-            # CRITICAL: Pin the sample rate to 16kHz for SIP calls if using OpenAI Realtime.
-            # The PJSIP media port is configured at 16kHz (fmt.clockRate = 16000).
-            # This prevents any leftover browser session rate (e.g. 24kHz) from
-            # leaking into this SIP connection via the shared connection_sample_rates dict,
-            # which would cause the wrong resample ratio and produce static/noise.
+            # Dynamically resolve agent configuration from MongoDB by virtual number / destination URI
+            agent_config = None
+            try:
+                from core.agent_resolver import resolve_agent_config
+                destination_id = getattr(call_state, 'to_uri', '') or getattr(call_state, 'from_uri', '')
+                agent_config = await resolve_agent_config(destination_id)
+                if not agent_config and hasattr(call_state, 'from_uri') and call_state.from_uri:
+                    agent_config = await resolve_agent_config(call_state.from_uri)
+            except Exception as resolve_err:
+                logger.error(f"⚠️ Error resolving agent config for SIP call {call_id}: {resolve_err}")
+
+            if agent_config:
+                mode = agent_config.get("voice_bot_mode", "modular")
+                logger.info(f"🎯 Resolved agent '{agent_config.get('name')}' (mode: {mode}, languages: {agent_config.get('languages')}) for call {call_id}")
+                
+                if mode == "modular":
+                    logger.info(f"🔀 Agent mode is 'modular'. Routing call {call_id} to Modular Sales Bot Engine!")
+                    try:
+                        from core.modular_sales_bot import ModularSalesBot
+                        if not hasattr(self, 'modular_bot') or not self.modular_bot:
+                            self.modular_bot = ModularSalesBot(sip_server=self)
+                        await self.modular_bot.connect_call(call_id, agent_config=agent_config)
+                        call_state.openai_connected = True
+                        return
+                    except Exception as mod_err:
+                        logger.error(f"❌ Error connecting call to Modular engine: {mod_err}. Falling back to Realtime.")
+            else:
+                logger.warning(f"⚠️ No dynamic agent found for SIP call {call_id}, using default agent config")
+            
+            # Set sample rate for SIP calls (16kHz)
             if hasattr(self.openai_bot, 'connection_sample_rates'):
                 self.openai_bot.connection_sample_rates[call_id] = 16000
             
-            # Connect to OpenAI Realtime API
-            await self.openai_bot.connect_to_openai_enhanced(call_id)
+            # Connect to OpenAI Realtime API WITH the resolved agent_config
+            await self.openai_bot.connect_to_openai_enhanced(call_id, agent_config=agent_config)
             call_state.openai_connected = True
             logger.info(f"✅ OpenAI connection established for {call_id}")
             
         except Exception as e:
             logger.error(f"❌ Error bridging call to OpenAI: {e}")
             try:
-                prm = pj.CallOpParam()
+                prm = pj.CallOpParam(True)
+                prm.statusCode = 500
                 call.hangup(prm)
             except:
                 pass
@@ -466,42 +510,39 @@ class SIPServer:
             self.sip_calls[call_id].playback_buffer += audio
             
     async def cleanup_call(self, call_id: str):
-        """Clean up SIP call resources"""
+        """Clean up SIP call resources and transmit SIP BYE to hang up the line"""
         try:
-            # Clean up call object reference first (essential to release memory and bindings)
-            call = None
-            if call_id in self._call_objects:
-                call = self._call_objects[call_id]
-                del self._call_objects[call_id]
-                
-            # Also clean up any temp keys or references to the same call object
-            for k, v in list(self._call_objects.items()):
-                if v == call or (call_id and getattr(v, 'sip_call_id', None) == call_id):
-                    call = v
-                    try:
-                        del self._call_objects[k]
-                    except KeyError:
-                        pass
-            
-            # Hang up call if object was resolved
-            if call:
-                if not hasattr(self, "_retired_call_objects"):
-                    self._retired_call_objects = []
-                self._retired_call_objects.append(call)
-                if len(self._retired_call_objects) > 50:
-                    self._retired_call_objects = self._retired_call_objects[-20:]
+            call = self._call_objects.get(call_id)
+            if not call:
+                for k, v in list(self._call_objects.items()):
+                    if v and getattr(v, 'sip_call_id', None) == call_id:
+                        call = v
+                        break
 
+            # Send SIP BYE FIRST before removing object reference
+            if call:
                 try:
                     if hasattr(self, 'ep'):
                         try:
                             self.ep.libRegisterThread("Async_Cleanup")
                         except:
                             pass
-                    prm = pj.CallOpParam()
+                    prm = pj.CallOpParam(True)
+                    prm.statusCode = 200
                     call.hangup(prm)
-                    logger.info(f"📞 SIP call {call_id} hung up")
+                    logger.info(f"📞 SIP BYE sent successfully for call {call_id}")
                 except Exception as hangup_err:
-                    logger.debug(f"PJSIP hangup error (session likely already closed): {hangup_err}")
+                    logger.warning(f"⚠️ PJSIP hangup error for call {call_id}: {hangup_err}")
+
+            # Now clean up call object reference
+            if call_id in self._call_objects:
+                del self._call_objects[call_id]
+            for k, v in list(self._call_objects.items()):
+                if v == call:
+                    try:
+                        del self._call_objects[k]
+                    except KeyError:
+                        pass
 
             # Clean up media buffers and OpenAI connections
             if call_id in self.sip_calls:

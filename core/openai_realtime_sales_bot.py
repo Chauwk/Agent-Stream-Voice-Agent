@@ -158,6 +158,27 @@ class OpenAIRealtimeSalesBot:
                     except Exception as e:
                         logger.error(f"⚠️ Failed to dynamically resolve agent for ID {target_id}: {e}")
 
+            # Check per-agent mode ('modular' or 'realtime')
+            target_mode = (agent_config.get("mode") or agent_config.get("voice_bot_mode") or Config.VOICE_BOT_MODE or "realtime").lower().strip() if agent_config else "realtime"
+            if target_mode == "modular":
+                logger.info(f"🔀 [Per-Agent Handoff] Agent '{agent_config.get('name') if agent_config else 'default'}' is configured in MODULAR mode. Handing off stream {stream_id} to ModularSalesBot...")
+                if not hasattr(self, "_modular_bot") or self._modular_bot is None:
+                    from core.modular_sales_bot import ModularSalesBot
+                    self._modular_bot = ModularSalesBot()
+                self._modular_bot.sip_server = self.sip_server
+
+                # Transfer browser websocket reference if present
+                if stream_id in self.openai_connections and "browser_websocket" in self.openai_connections[stream_id]:
+                    ws = self.openai_connections[stream_id]["browser_websocket"]
+                    self._modular_bot.connections[stream_id] = {"browser_websocket": ws}
+
+                self.openai_connections[stream_id] = {
+                    "delegated_to": "modular",
+                    "modular_bot": self._modular_bot
+                }
+                await self._modular_bot.connect_to_openai_enhanced(stream_id, agent_config)
+                return
+
             # Determine voice and instructions dynamically
             voice = self.openai_voice
             instructions = None
@@ -166,7 +187,16 @@ class OpenAIRealtimeSalesBot:
             
             if agent_config:
                 agent_name = agent_config.get("name", Config.SALES_BOT_NAME)
-                agent_instructions = agent_config.get("instructions", "")
+                prompt_parts = []
+                if agent_config.get("systemPrompt"):
+                    prompt_parts.append(str(agent_config["systemPrompt"]).strip())
+                if agent_config.get("instructions"):
+                    instr_str = str(agent_config["instructions"]).strip()
+                    if instr_str not in prompt_parts:
+                        prompt_parts.append(instr_str)
+                if agent_config.get("description"):
+                    prompt_parts.append(f"Agent Goal & Description: {str(agent_config['description']).strip()}")
+                agent_instructions = "\n\n".join(prompt_parts)
                 
                 # Check if voiceId is a valid OpenAI voice
                 candidate_voice = str(agent_config.get("voiceId") or "").lower()
@@ -186,17 +216,19 @@ class OpenAIRealtimeSalesBot:
             primary_lang = agent_languages[0]
             is_hindi = primary_lang.startswith("hi")
             
-            LANG_NAMES = {
-                "en": "English", "en-IN": "English", "en-US": "English",
-                "hi": "Hindi", "hi-IN": "Hindi",
-                "ta": "Tamil", "ta-IN": "Tamil",
-                "te": "Telugu", "te-IN": "Telugu",
-                "kn": "Kannada", "kn-IN": "Kannada",
-                "ml": "Malayalam", "ml-IN": "Malayalam",
-                "mr": "Marathi", "mr-IN": "Marathi",
-                "bn": "Bengali", "bn-IN": "Bengali",
-                "gu": "Gujarati", "gu-IN": "Gujarati"
-            }
+            def resolve_lang_name(code: str) -> str:
+                LOOKUP = {
+                    "en": "English", "hi": "Hindi", "ta": "Tamil", "te": "Telugu",
+                    "kn": "Kannada", "ml": "Malayalam", "mr": "Marathi", "bn": "Bengali",
+                    "gu": "Gujarati", "pa": "Punjabi", "or": "Odia", "ur": "Urdu",
+                    "es": "Spanish", "fr": "French", "de": "German", "it": "Italian",
+                    "pt": "Portuguese", "ru": "Russian", "zh": "Chinese", "ja": "Japanese",
+                    "ko": "Korean", "ar": "Arabic"
+                }
+                base = str(code or "").split("-")[0].lower().strip()
+                return LOOKUP.get(base, str(code))
+
+            allowed_names = [resolve_lang_name(l) for l in agent_languages]
             # Sanitize custom agent instructions to remove conflicting or ambiguous language phrases
             sanitized_instructions = (agent_instructions or "").strip()
             if sanitized_instructions:
@@ -218,31 +250,52 @@ class OpenAIRealtimeSalesBot:
             
             if len(allowed_names) == 1:
                 final_language_mandate = (
-                    f"\n\n🚨 CRITICAL MANDATE (STRICT LANGUAGE RESTRICTION):\n"
+                    f"🚨 ABSOLUTE STRICT LANGUAGE MANDATE (ZERO EXCEPTIONS):\n"
                     f"Your allowed language is EXCLUSIVELY: {allowed_names[0]}.\n"
-                    f"Under NO circumstances are you allowed to generate, translate, or output responses in any other language (such as French, Hindi, Telugu, Spanish, German, etc.).\n"
-                    f"Even if the customer speaks to you in an unallowed language or explicitly asks you to switch languages, YOU MUST REJECT THE REQUEST AND RESPOND 100% EXCLUSIVELY IN {allowed_names[0]}.\n"
-                    f'Say politely in {allowed_names[0]}: "I apologize, but I am configured to speak and assist only in {allowed_names[0]}. How can I help you today?"'
+                    f"Under NO circumstances are you allowed to generate, translate, or speak in ANY other language (such as French, Spanish, German, etc.).\n"
+                    f"Even if the customer speaks to you in an unallowed language or asks to switch languages, YOU MUST NEVER SWITCH TO THAT UNALLOWED LANGUAGE. "
+                    f'Respond 100% EXCLUSIVELY in {allowed_names[0]} stating that you can only communicate in {allowed_names[0]}.\n\n'
                 )
             else:
                 langs_str = ", ".join(allowed_names)
                 final_language_mandate = (
-                    f"\n\n🚨 CRITICAL MANDATE (STRICT LANGUAGE RESTRICTION):\n"
+                    f"🚨 ABSOLUTE STRICT LANGUAGE MANDATE (ZERO EXCEPTIONS):\n"
                     f"Your allowed languages are STRICTLY & EXCLUSIVELY limited to: {langs_str}.\n"
-                    f"Under NO circumstances are you allowed to generate, translate, or output responses in any language outside of this allowed list (such as French, Spanish, German, Tamil, etc.).\n"
-                    f"Adapt dynamically to whichever of these allowed languages ({langs_str}) the customer speaks.\n"
-                    f"If the customer speaks or requests any language outside of ({langs_str}), YOU MUST REJECT THE REQUEST and respond back politely in the currently active allowed language stating that you can only assist in {langs_str}."
+                    f"Primary language is: {allowed_names[0]}. Speak in {allowed_names[0]} by default unless the customer addresses you in another allowed language from ({langs_str}).\n"
+                    f"Under NO circumstances are you allowed to generate, translate, or output responses in any language outside of ({langs_str}).\n"
+                    f"If the customer speaks in an unallowed language (such as French, Spanish, German, etc.), DO NOT SWITCH TO THAT UNALLOWED LANGUAGE. "
+                    f"Respond exclusively in one of your allowed languages ({langs_str}) stating that you can only assist in {langs_str}.\n\n"
                 )
 
-            # Unify system instructions to be identical for both inbound and outbound calls
+            # Check terms & guardrails in agent config
+            terms_info = agent_config.get("terms", {}) if agent_config else {}
+            terms_content = (terms_info.get("content") or "").strip() if (isinstance(terms_info, dict) and terms_info.get("enabled")) else ""
+            guardrails_block = ""
+            if terms_content:
+                guardrails_block = f"\n\n🚨 STRICT BUSINESS GUARDRAILS & TERMS:\n{terms_content}\n"
+
+            rag_mandate = (
+                "\n\n🛡️ ABSOLUTE KNOWLEDGE BASE (RAG) & INSTANT HANGUP MANDATE:\n"
+                "1. MANDATORY TOOL EXECUTION FOR KNOWLEDGE BASE (ZERO EXCEPTIONS):\n"
+                "   - You have ZERO internal memory or pre-trained knowledge regarding this company, its products, services, pricing, terms, features, or policies.\n"
+                "   - For ANY question asked by the customer regarding products, services, pricing, features, policies, warranties, or FAQs, YOU MUST ALWAYS CALL THE `query_knowledge_base` TOOL BEFORE SPEAKING A SINGLE WORD.\n"
+                "   - Never answer business or product questions directly without calling `query_knowledge_base` first.\n"
+                "2. HANDLING MISSING KNOWLEDGE:\n"
+                "   - If `query_knowledge_base` returns no matching results, state politely: 'I apologize, but that specific detail is not available in our knowledge base. How else may I help you?'\n"
+                "   - Never fabricate, guess, or hallucinate product details.\n"
+                "3. INSTANT CALL HANGUP MANDATE:\n"
+                "   - Whenever the customer says 'bye', 'goodbye', 'cut the call', 'hang up', 'end the call', or indicates they are done, YOU MUST IMMEDIATELY CALL THE `end_call` TOOL.\n"
+                "   - Speak a brief goodbye out loud (e.g. 'Thank you, goodbye!') and call `end_call` immediately."
+            )
+
+            # Unify system instructions prioritizing custom agent instructions & persona at the top
             instructions = (
-                f"You are a professional representative named {agent_name}. Here are your custom instructions:\n"
+                f"=== AGENT ROLE & CUSTOM PERSONALITY (HIGHEST PRIORITY) ===\n"
+                f"You are a representative named {agent_name}.\n"
                 f"{sanitized_instructions}\n\n"
-                "Base your responses strictly and exclusively on your custom instructions and the knowledge base. "
-                "If asked about products, services, pricing, or policies not in your instructions, call the query_knowledge_base tool to search. Do not invent products or guess information. "
-                "Keep responses very concise, short, and natural (1-2 sentences). "
-                "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
                 f"{final_language_mandate}"
+                f"{guardrails_block}"
+                f"{rag_mandate}"
             )
 
             # Resolve greeting based on call type (inbound vs outbound) and language
@@ -277,24 +330,25 @@ class OpenAIRealtimeSalesBot:
             ssl_context.verify_mode = ssl.CERT_NONE
             
             # Enhanced headers for latest API version
-            headers = [
-                ("Authorization", f"Bearer {self.openai_api_key}")
-            ]
+            headers = {"Authorization": f"Bearer {self.openai_api_key}"}
             
-            # Determine correct header parameter based on websockets library version
-            import inspect
-            connect_params = inspect.signature(websockets.connect).parameters
-            connect_kwargs = {
-                "ssl": ssl_context,
-                "ping_interval": 20,
-                "ping_timeout": 10
-            }
-            if "additional_headers" in connect_params:
-                connect_kwargs["additional_headers"] = dict(headers)
-            else:
-                connect_kwargs["extra_headers"] = dict(headers)
-                
-            openai_ws = await websockets.connect(url, **connect_kwargs)
+            try:
+                openai_ws = await websockets.connect(
+                    url,
+                    ssl=ssl_context,
+                    additional_headers=headers,
+                    ping_interval=20,
+                    ping_timeout=10
+                )
+            except Exception as header_err:
+                logger.warning(f"⚠️ additional_headers fallback to extra_headers due to: {header_err}")
+                openai_ws = await websockets.connect(
+                    url,
+                    ssl=ssl_context,
+                    extra_headers=headers,
+                    ping_interval=20,
+                    ping_timeout=10
+                )
             
             # Get enhanced session configuration
             session_config = Config.get_enhanced_session_config(sample_rate, voice)
@@ -318,20 +372,23 @@ class OpenAIRealtimeSalesBot:
                 "to_phone": to_phone,
                 "agent_config": agent_config,
                 "first_message": first_message,
+                "primary_language": allowed_names[0] if allowed_names else "English",
+                "allowed_languages": ", ".join(allowed_names) if allowed_names else "English",
                 "last_activity_time": time.time(),
                 "silence_prompts_count": 0,
+                "full_instructions": instructions,
                 "direction": "outbound" if outbound_record else "inbound"
             }
             
             logger.info(f"✅ ENHANCED OPENAI CONNECTED for {stream_id} @ {sample_rate}Hz")
             logger.info(f"🎵 Audio Format: {input_format} → {output_format}")
             
-            # Configure enhanced OpenAI session
-            await self.configure_openai_session_enhanced(stream_id, agent_config)
-            
-            # Start listening to OpenAI responses and silence monitor
+            # Start listening to OpenAI responses and silence monitor FIRST so initial greeting audio is captured
             asyncio.create_task(self.handle_openai_responses_enhanced(stream_id, openai_ws))
             asyncio.create_task(self._silence_monitor_loop(stream_id))
+
+            # Configure enhanced OpenAI session and trigger initial greeting
+            await self.configure_openai_session_enhanced(stream_id, agent_config)
             
         except Exception as e:
             logger.error(f"❌ Failed to connect to OpenAI (enhanced): {e}")
@@ -383,50 +440,35 @@ class OpenAIRealtimeSalesBot:
             openai_ws = self.openai_connections[stream_id]["websocket"]
             sample_rate = self.connection_sample_rates.get(stream_id, self.default_sample_rate)
             
-            # Retrieve the connection details to check for outbound first_message
             first_message = None
+            is_outbound = False
             openai_config = self.openai_connections.get(stream_id)
             if openai_config:
                 first_message = openai_config.get("first_message")
+                is_outbound = (openai_config.get("direction") == "outbound")
 
-            # Determine initial user instruction/prompt
-            if first_message:
-                prompt_text = f"We just called the customer. The connection is running at {sample_rate}Hz. Say the first message: '{first_message}'"
-            else:
-                prompt_text = f"A customer just called our sales line. The connection is running at {sample_rate}Hz audio quality. Please greet them warmly and ask how you can help them today."
+            if not first_message and agent_config:
+                first_message = agent_config.get("firstMessage")
 
-            # Create enhanced conversation item with greeting
-            greeting_msg = {
-                "type": "conversation.item.create",
-                "item": {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{
-                        "type": "input_text", 
-                        "text": prompt_text
-                    }]
-                }
-            }
-            
-            await openai_ws.send(json.dumps(greeting_msg))
-            
-            greeting_instruction = "Give a warm, professional greeting. Keep it concise and natural."
-            if first_message:
-                greeting_instruction = f"Greet the customer with this exact opening message: '{first_message}'"
-            elif agent_config and agent_config.get("firstMessage"):
-                greeting_instruction = f"Greet the customer with this exact opening message: '{agent_config['firstMessage']}'"
+            if not first_message:
+                first_message = "Hello! Thank you for calling Chauwk. How can I help you today?"
 
-            # Create enhanced response with audio focus
+            # Clear any initial PSTN silence/static from input audio buffer
+            await openai_ws.send(json.dumps({"type": "input_audio_buffer.clear"}))
+
+            full_instructions = openai_config.get("full_instructions", "") if openai_config else ""
+            greeting_instruction = f"{full_instructions}\n\nGreet the caller immediately by saying this exact opening message in your configured voice: '{first_message}'. Do not wait for the user to speak first."
+
+            # Create enhanced response for instant initial greeting
             response_msg = {
                 "type": "response.create",
                 "response": {
-                    "output_modalities": ["audio"],
                     "instructions": greeting_instruction
                 }
             }
             await openai_ws.send(json.dumps(response_msg))
             
-            logger.info(f"👋 ENHANCED INITIAL GREETING SENT for {stream_id} @ {sample_rate}Hz")
+            logger.info(f"👋 ENHANCED INITIAL GREETING SENT for {stream_id} @ {sample_rate}Hz: '{first_message}'")
             
         except Exception as e:
             logger.error(f"❌ Error sending enhanced initial greeting: {e}")
@@ -465,6 +507,8 @@ class OpenAIRealtimeSalesBot:
                     openai_config["silence_prompts_count"] = silence_count
                     ws = openai_config.get("websocket")
                     
+                    primary_lang = openai_config.get("primary_language", "English")
+                    
                     if silence_count == 1:
                         logger.info(f"⏱️ Silence Intimation 1/3 detected for 8 seconds on stream {stream_id}. Injecting prompt.")
                         if ws:
@@ -475,12 +519,12 @@ class OpenAIRealtimeSalesBot:
                                     "role": "user",
                                     "content": [{
                                         "type": "input_text",
-                                        "text": "The customer has been silent for 8 seconds (Intimation 1/3). Please check politely if they are still on the line."
+                                        "text": f"The customer has been silent for 8 seconds (Intimation 1/3). Please check politely in {primary_lang} if they are still on the line."
                                     }]
                                 }
                             }
                             await ws.send(json.dumps(prompt_msg))
-                            await ws.send(json.dumps({"type": "response.create", "response": {"output_modalities": ["audio"]}}))
+                            await ws.send(json.dumps({"type": "response.create"}))
                     elif silence_count == 2:
                         logger.info(f"⏱️ Silence Intimation 2/3 detected for 8 seconds on stream {stream_id}. Injecting prompt.")
                         if ws:
@@ -491,12 +535,12 @@ class OpenAIRealtimeSalesBot:
                                     "role": "user",
                                     "content": [{
                                         "type": "input_text",
-                                        "text": "The customer is still silent for 8 seconds (Intimation 2/3). Please ask if they are still there or need assistance."
+                                        "text": f"The customer is still silent for 8 seconds (Intimation 2/3). Ask in {primary_lang} if they are still there or need assistance."
                                     }]
                                 }
                             }
                             await ws.send(json.dumps(prompt_msg))
-                            await ws.send(json.dumps({"type": "response.create", "response": {"output_modalities": ["audio"]}}))
+                            await ws.send(json.dumps({"type": "response.create"}))
                     elif silence_count >= 3:
                         logger.info(f"⏱️ Final Silence Intimation 3/3 reached for stream {stream_id}. Hanging up after warning.")
                         if ws:
@@ -507,30 +551,15 @@ class OpenAIRealtimeSalesBot:
                                     "role": "user",
                                     "content": [{
                                         "type": "input_text",
-                                        "text": "The customer has remained silent after 3 intimations. State politely that since there is no response, you are hanging up now. Goodbye!"
+                                        "text": f"The customer has remained silent after 3 intimations. State politely in {primary_lang} that since there is no response, you are hanging up now. Goodbye!"
                                     }]
                                 }
                             }
                             await ws.send(json.dumps(goodbye_msg))
-                            await ws.send(json.dumps({"type": "response.create", "response": {"output_modalities": ["audio"]}}))
+                            await ws.send(json.dumps({"type": "response.create"}))
                             
                             asyncio.create_task(self.delayed_hangup(stream_id))
-                        break
-                    
-                    if ws:
-                        prompt_msg = {
-                            "type": "conversation.item.create",
-                            "item": {
-                                "type": "message",
-                                "role": "user",
-                                "content": [{
-                                    "type": "input_text",
-                                    "text": "The customer has been silent for 8 seconds. Please check if they are still there or need help."
-                                }]
-                            }
-                        }
-                        await ws.send(json.dumps(prompt_msg))
-                        await ws.send(json.dumps({"type": "response.create", "response": {"output_modalities": ["audio"]}}))
+                            break
                         
         except asyncio.CancelledError:
             pass
@@ -549,17 +578,17 @@ class OpenAIRealtimeSalesBot:
                     data = json.loads(message)
                     event_type = data.get("type", "")
                     
-                    # Update activity timer for any valid event showing session movement
+                    # Update activity timer for session movement
                     openai_config = self.openai_connections.get(stream_id)
                     if openai_config:
                         if event_type in [
                             "input_audio_buffer.speech_started",
-                            "input_audio_buffer.speech_stopped",
-                            "conversation.item.input_audio_transcription.completed",
-                            "response.output_audio.delta"
+                            "conversation.item.input_audio_transcription.completed"
                         ]:
                             openai_config["last_activity_time"] = time.time()
                             openai_config["silence_prompts_count"] = 0
+                        elif event_type in ["response.output_audio.delta", "input_audio_buffer.speech_stopped"]:
+                            openai_config["last_activity_time"] = time.time()
                     
                     logger.debug(f"🤖 ENHANCED OPENAI EVENT: {event_type} for {stream_id}")
                     
@@ -586,30 +615,22 @@ class OpenAIRealtimeSalesBot:
                                 openai_config["transcript"].append({"role": "bot", "msg": bot_text})
                             openai_config["current_bot_text"] = ""
                     elif event_type == "conversation.item.input_audio_transcription.completed":
-                        user_text = data.get("transcript", "")
+                        user_text = data.get("transcript", "").strip()
                         if user_text:
                             logger.info(f"🎤 CUSTOMER SAID: {user_text}")
                             openai_config = self.openai_connections.get(stream_id)
                             if openai_config:
                                 openai_config["transcript"].append({"role": "user", "msg": user_text})
+                                # Trigger server-side Intercept RAG search & OpenAI context injection
+                                asyncio.create_task(self._process_user_turn_with_rag(stream_id, user_text))
                     elif event_type == "input_audio_buffer.speech_started":
-                        logger.info(f"🎤 CUSTOMER STARTED SPEAKING (enhanced) for {stream_id}")
+                        logger.info(f"🎤 CUSTOMER STARTED SPEAKING (realtime VAD interruption triggered) for {stream_id}")
                         openai_config = self.openai_connections.get(stream_id)
                         if openai_config:
                             openai_config["user_speaking"] = True
                         
-                        # Prevent self-interruption loop due to echo
-                        bot_is_speaking = False
-                        if self.sip_server and stream_id in self.sip_server.sip_calls:
-                            call_state = self.sip_server.sip_calls[stream_id]
-                            if call_state.is_playing or len(call_state.playback_buffer) > 0:
-                                bot_is_speaking = True
-                                
-                        if bot_is_speaking:
-                            logger.info(f"🎤 CUSTOMER STARTED SPEAKING (Interruption - IGNORED to prevent self-interruption/echo) for {stream_id}")
-                        else:
-                            # Enhanced interruption handling
-                            await self._handle_customer_interruption(stream_id, openai_ws)
+                        # Immediately stop bot response and clear audio playback buffer for instant barge-in
+                        await self._handle_customer_interruption(stream_id, openai_ws)
                     elif event_type == "input_audio_buffer.speech_stopped":
                         logger.info(f"🎤 CUSTOMER STOPPED SPEAKING (enhanced) for {stream_id}")
                         openai_config = self.openai_connections.get(stream_id)
@@ -629,6 +650,66 @@ class OpenAIRealtimeSalesBot:
                     
         except Exception as e:
             logger.error(f"❌ Error in enhanced OpenAI response handler: {e}")
+
+    async def _process_user_turn_with_rag(self, stream_id: str, user_transcript: str):
+        """Executes server-side RAG search on ChromaDB and injects context + custom instructions into OpenAI before triggering speech generation"""
+        try:
+            openai_config = self.openai_connections.get(stream_id)
+            if not openai_config:
+                return
+                
+            openai_ws = openai_config["websocket"]
+            to_phone = openai_config.get("to_phone", "default")
+            agent_config = openai_config.get("agent_config")
+            primary_lang = openai_config.get("primary_language", "English")
+            allowed_langs = openai_config.get("allowed_languages", "English")
+            
+            logger.info(f"🔎 Executing Server-Side Intercept RAG for user query: '{user_transcript}' on stream {stream_id}")
+            
+            # 1. Query ChromaDB directly via bot_controller
+            from controllers.bot_controller import query_knowledge_base
+            rag_results = await query_knowledge_base(to_phone, user_transcript, top_k=3, agent_config=agent_config)
+            
+            # 2. Inject retrieved RAG context into OpenAI conversation as a user message
+            context_text = json.dumps(rag_results) if rag_results else "No relevant documents found in knowledge base."
+            
+            item_msg = {
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                f"AUTHORITATIVE KNOWLEDGE BASE CONTEXT:\n{context_text}\n\n"
+                                f"USER QUESTION: {user_transcript}"
+                            )
+                        }
+                    ]
+                }
+            }
+            await openai_ws.send(json.dumps(item_msg))
+            
+            # 3. Trigger OpenAI speech response generation strictly guided by persona & RAG context
+            full_instructions = openai_config.get("full_instructions", "")
+            response_msg = {
+                "type": "response.create",
+                "response": {
+                    "instructions": (
+                        f"{full_instructions}\n\n"
+                        f"IMPORTANT TURN INSTRUCTION: Synthesize a clear, short 1-2 sentence spoken response strictly adhering to your custom persona instructions above and allowed languages ({allowed_langs}). "
+                        "Base all product, service, pricing, and business facts EXCLUSIVELY on the AUTHORITATIVE KNOWLEDGE BASE CONTEXT provided in the conversation above. "
+                        f"If the context states no relevant documents found or lacks the required details, state politely in {primary_lang} that the information is not in our records. "
+                        "DO NOT use pre-trained general memory or fabricate facts."
+                    )
+                }
+            }
+            await openai_ws.send(json.dumps(response_msg))
+            logger.info(f"✅ Intercept RAG context injected & response created for stream {stream_id}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error processing user turn with RAG for stream {stream_id}: {e}")
 
     async def _handle_customer_interruption(self, stream_id: str, openai_ws):
         """Handle customer interruption with enhanced response cancellation"""
@@ -659,7 +740,6 @@ class OpenAIRealtimeSalesBot:
             response_create = {
                 "type": "response.create",
                 "response": {
-                    "output_modalities": ["audio"],
                     "instructions": "Respond naturally and conversationally. Use appropriate pauses and inflections."
                 }
             }
@@ -708,11 +788,19 @@ class OpenAIRealtimeSalesBot:
             
             # Create enhanced response (only if NOT ending the call)
             if function_name != "end_call":
+                if function_name == "query_knowledge_base":
+                    custom_instructions = (
+                        "Synthesize a clear, short 1-2 sentence response using ONLY the provided knowledge base search results. "
+                        "If the search results are empty or contain no relevant facts, state politely that the information is not in our knowledge base. "
+                        "DO NOT use pre-trained general memory or make up facts."
+                    )
+                else:
+                    custom_instructions = f"Based on the function result, provide a natural response to the customer about {function_name}."
+
                 response_msg = {
                     "type": "response.create",
                     "response": {
-                        "output_modalities": ["audio"],
-                        "instructions": f"Based on the function result, provide a natural response to the customer about {function_name}."
+                        "instructions": custom_instructions
                     }
                 }
                 await openai_ws.send(json.dumps(response_msg))
@@ -842,31 +930,22 @@ class OpenAIRealtimeSalesBot:
             return {"status": "error", "message": "SIP Server not available"}
 
     async def delayed_hangup(self, stream_id: str, delay_seconds: float = 0.5):
-        """Clean up the call after waiting for final audio playback buffer to drain"""
+        """Clean up the call immediately after allowing brief polite goodbye phrase to play"""
         try:
-            # 1. Initial grace period to allow response generation to initiate
-            await asyncio.sleep(2.0)
-
-            start_time = time.time()
-            while time.time() - start_time < 30.0:
-                buf_len = 0
-                is_playing = False
-                if self.sip_server:
-                    call_state = self.sip_server.sip_calls.get(stream_id)
-                    if call_state:
-                        is_playing = getattr(call_state, "is_playing", False)
-                        if hasattr(call_state, "playback_buffer"):
-                            buf_len = len(call_state.playback_buffer)
-                
-                if not is_playing and buf_len == 0:
-                    break
-                logger.info(f"⏳ Waiting for OpenAI speech playback to finish (is_playing={is_playing}, buffer={buf_len} bytes) for stream {stream_id}...")
-                await asyncio.sleep(0.5)
+            logger.info(f"⏳ Executing fast hangup sequence for stream {stream_id}...")
+            # 1. Brief grace period (1.0s) to allow final goodbye speech packet to transmit
+            await asyncio.sleep(1.0)
+            
+            if self.sip_server:
+                logger.info(f"✂️ Instant call hangup triggered for stream {stream_id}")
+                await self.sip_server.hangup_call(stream_id)
+        except Exception as e:
+            logger.error(f"❌ Error during delayed hangup: {e}")
         except Exception as e:
             logger.error(f"❌ Error in OpenAI delayed hangup check: {e}")
             
         # 2. Final grace period for RTP transmission
-        await asyncio.sleep(2.5)
+        await asyncio.sleep(1.5)
         if self.sip_server:
             await self.sip_server.cleanup_call(stream_id)
 
@@ -1156,6 +1235,11 @@ class OpenAIRealtimeSalesBot:
             # Ensure OpenAI connection exists
             if stream_id not in self.openai_connections:
                 logger.warning(f"⚠️ No OpenAI connection for SIP call {call_id}")
+                return
+            
+            session = self.openai_connections.get(stream_id)
+            if session and session.get("delegated_to") == "modular" and session.get("modular_bot"):
+                await session["modular_bot"].send_audio_to_openai(call_id, audio_chunk, sample_rate=sample_rate)
                 return
             
             # Initialize sample rate tracking if needed

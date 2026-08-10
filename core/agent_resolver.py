@@ -13,11 +13,12 @@ def _sanitize_agent_doc(agent: dict | None) -> dict | None:
     for k, v in list(cleaned.items()):
         if isinstance(v, ObjectId):
             cleaned[k] = str(v)
-            
-    # Include voiceBotMode falling back to global config if not set
-    from config import Config
-    cleaned['voiceBotMode'] = agent.get('voiceBotMode', Config.VOICE_BOT_MODE)
-    
+    # Ensure per-agent voice_bot_mode is set (defaulting to 'modular' if omitted)
+    resolved_mode = str(cleaned.get("voice_bot_mode") or cleaned.get("mode") or "modular").lower().strip()
+    if resolved_mode not in ["modular", "realtime"]:
+        resolved_mode = "modular"
+    cleaned.pop("mode", None)
+    cleaned["voice_bot_mode"] = resolved_mode
     return cleaned
 
 async def resolve_agent_config(destination_id: str) -> dict | None:
@@ -90,7 +91,7 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
                 if agent:
                     logger.info(f"🎯 Dynamic agent resolved for company {company_id} via phone {destination_id} in {coll_name}: {agent.get('name')}")
                     return _sanitize_agent_doc(agent)
-                
+
     except Exception as e:
         logger.error(f"❌ Failed to resolve agent config: {e}")
         

@@ -221,8 +221,6 @@ class Config:
         """Get enhanced session configuration — uses valid OpenAI Realtime API session.update schema"""
         instructions = (
             f"You are a professional sales representative named {cls.SALES_BOT_NAME} for {cls.COMPANY_NAME}. "
-            "You must speak and respond EXCLUSIVELY in English. "
-            "Even if the user speaks in another language, or if there is noise, keep your responses in English. "
             "Keep responses very concise, short, and natural (1-2 sentences). "
             "When the conversation is finished or the user says goodbye, use the end_call tool to hang up."
         )
@@ -237,10 +235,10 @@ class Config:
             },
             'turn_detection': {
                 'type': 'server_vad',
-                'threshold': 0.5,
-                'prefix_padding_ms': 300,
-                'silence_duration_ms': 500,
-                'create_response': True,
+                'threshold': 0.65,
+                'prefix_padding_ms': 400,
+                'silence_duration_ms': 800,
+                'create_response': False,
             },
             'tools': [
                 {
@@ -251,11 +249,11 @@ class Config:
                 {
                     'type': 'function',
                     'name': 'query_knowledge_base',
-                    'description': 'Search the company knowledge base for answers about services, products, pricing, custom offers, and company policies.',
+                    'description': 'MANDATORY TOOL: Call this tool whenever the customer asks ANY question about company products, services, pricing, features, guarantees, FAQs, or policies to retrieve authoritative facts from the knowledge base.',
                     'parameters': {
                         'type': 'object',
                         'properties': {
-                            'query': {'type': 'string', 'description': 'The query to search in the knowledge base.'},
+                            'query': {'type': 'string', 'description': 'The exact search query to look up in the company knowledge base.'},
                         },
                         'required': ['query']
                     }
