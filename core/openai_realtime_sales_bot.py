@@ -187,7 +187,16 @@ class OpenAIRealtimeSalesBot:
             
             if agent_config:
                 agent_name = agent_config.get("name", Config.SALES_BOT_NAME)
-                agent_instructions = (agent_config.get("systemPrompt") or agent_config.get("instructions") or "").strip()
+                prompt_parts = []
+                if agent_config.get("systemPrompt"):
+                    prompt_parts.append(str(agent_config["systemPrompt"]).strip())
+                if agent_config.get("instructions"):
+                    instr_str = str(agent_config["instructions"]).strip()
+                    if instr_str not in prompt_parts:
+                        prompt_parts.append(instr_str)
+                if agent_config.get("description"):
+                    prompt_parts.append(f"Agent Goal & Description: {str(agent_config['description']).strip()}")
+                agent_instructions = "\n\n".join(prompt_parts)
                 
                 # Check if voiceId is a valid OpenAI voice
                 candidate_voice = str(agent_config.get("voiceId") or "").lower()
@@ -279,11 +288,12 @@ class OpenAIRealtimeSalesBot:
                 "   - Speak a brief goodbye out loud (e.g. 'Thank you, goodbye!') and call `end_call` immediately."
             )
 
-            # Unify system instructions with strict language & RAG mandates placed at the VERY TOP
+            # Unify system instructions prioritizing custom agent instructions & persona at the top
             instructions = (
+                f"=== AGENT ROLE & CUSTOM PERSONALITY (HIGHEST PRIORITY) ===\n"
+                f"You are a representative named {agent_name}.\n"
+                f"{sanitized_instructions}\n\n"
                 f"{final_language_mandate}"
-                f"You are a professional representative named {agent_name}. Here are your custom instructions:\n"
-                f"{sanitized_instructions}\n"
                 f"{guardrails_block}"
                 f"{rag_mandate}"
             )
