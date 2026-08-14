@@ -152,7 +152,7 @@ async def get_crm_agent_leads(
                     "businessInterest": business_interest,
                     "status": status_str,
                     "durationSeconds": duration,
-                    "timestamp": ts,
+                    "timestamp": ts.strftime('%Y-%m-%dT%H:%M:%S.%f') + "+05:30" if isinstance(ts, datetime.datetime) else ts,
                     "transcript": transcript
                 }
                 

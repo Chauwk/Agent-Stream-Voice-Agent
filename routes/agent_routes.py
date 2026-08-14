@@ -55,7 +55,7 @@ def bson_safe(obj):
     elif isinstance(obj, ObjectId):
         return str(obj)
     elif isinstance(obj, datetime.datetime):
-        return obj.isoformat()
+        return obj.strftime('%Y-%m-%dT%H:%M:%S.%f') + "+05:30" if obj.tzinfo is None else obj.isoformat()
     elif isinstance(obj, bytes):
         return obj.decode("utf-8", errors="replace")
     else:
