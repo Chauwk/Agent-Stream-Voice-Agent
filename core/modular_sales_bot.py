@@ -342,11 +342,25 @@ class ModularSalesBot:
         except Exception as e:
             logger.warning(f"⚠️ Gemini Client warmup failed (will retry on first call): {e}")
 
+    async def _warmup_deepgram(self):
+        """Warms up Deepgram DNS and WebSocket TCP pools to reduce first-call connection latency (O8)"""
+        try:
+            logger.info("🎙️ Warming up Deepgram DNS and WebSocket socket pools...")
+            import websockets
+            dg_url = "wss://api.deepgram.com/v1/listen?model=nova-3&encoding=linear16&sample_rate=16000&channels=1"
+            async with websockets.connect(dg_url, extra_headers={"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}) as ws:
+                pass
+            logger.info("🎙️ Deepgram WSS connections warmed up.")
+        except Exception as e:
+            logger.warning(f"⚠️ Deepgram warmup failed: {e}")
+
     async def start_server(self):
         """Start SIP server for direct Exotel SIP trunking"""
         # Run Gemini warmup task now that the event loop is running
+        # Run Gemini and Deepgram warmup tasks now that the event loop is running
         if not getattr(self, "gemini_warmed_up", False) and self.gemini_client:
             asyncio.create_task(self._warmup_gemini())
+        asyncio.create_task(self._warmup_deepgram())
             
         try:
             logger.info(f'🚀 Starting SIP Server (Modular Mode) on {Config.SIP_SERVER_HOST}:{Config.SIP_SERVER_PORT}')
@@ -1098,10 +1112,11 @@ class ModularSalesBot:
                 _add_kw(agent_company_str.lower(), 8.0)
         
         keywords_query = "&".join(keyword_parts)
+        interim = "true" if getattr(Config, "DEEPGRAM_INTERIM_RESULTS", True) else "false"
         if keywords_query:
-            dg_url = f"wss://api.deepgram.com/v1/listen?model={dg_model}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false&{keywords_query}"
+            dg_url = f"wss://api.deepgram.com/v1/listen?model={dg_model}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results={interim}&{keywords_query}"
         else:
-            dg_url = f"wss://api.deepgram.com/v1/listen?model={dg_model}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results=false"
+            dg_url = f"wss://api.deepgram.com/v1/listen?model={dg_model}&language={dg_lang}&encoding=linear16&sample_rate=16000&channels=1&endpointing={endpointing_ms}&vad_events=true&interim_results={interim}"
         dg_headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
         
         import inspect
@@ -1293,7 +1308,23 @@ class ModularSalesBot:
                     alternatives = channel.get("alternatives", [])
                     if alternatives:
                         transcript = alternatives[0].get("transcript", "")
-                        if transcript.strip() and is_final:
+                        if transcript.strip():
+                            if not is_final:
+                                if getattr(Config, "SPECULATIVE_RAG", True) and len(transcript.split()) >= 3:
+                                    agent_config = session_state.get("agent_config")
+                                    if agent_config:
+                                        try:
+                                            from controllers.bot_controller import query_knowledge_base as db_query
+                                            session_to_phone = session_state.get("to_phone", "default")
+                                            if "speculative_rag_task" in session_state:
+                                                session_state["speculative_rag_task"].cancel()
+                                            session_state["speculative_rag_task"] = asyncio.create_task(
+                                                db_query(session_to_phone, transcript, top_k=2, agent_config=agent_config)
+                                            )
+                                        except Exception:
+                                            pass
+                                continue
+
                             logger.info(f"🎤 CUSTOMER SAID: {transcript}")
                             
                             # Word-based barge-in: only interrupt if bot is actively playing audio
@@ -1392,14 +1423,40 @@ class ModularSalesBot:
                 if not prompt.startswith("System:"):
                     session_state["silence_prompts_count"] = 0
                 
+                # Trim history for LLM Time-To-First-Token
+                if len(history) > 10:
+                    history = history[-10:]
+                    session_state["history"] = history
+
                 # Perform fast dynamic per-turn RAG search for top 2 relevant chunks (low token cost + 0ms tool latency)
                 kb_context_addon = ""
                 agent_config = session_state.get("agent_config")
                 if agent_config and len(prompt.strip()) > 3:
                     try:
-                        from controllers.bot_controller import query_knowledge_base as db_query
-                        session_to_phone = session_state.get("to_phone", "default")
-                        rag_res = await db_query(session_to_phone, prompt, top_k=2, agent_config=agent_config)
+                        rag_res = None
+                        if getattr(Config, "SPECULATIVE_RAG", True) and "speculative_rag_task" in session_state:
+                            try:
+                                rag_task = session_state.pop("speculative_rag_task")
+                                rag_res = await asyncio.wait_for(rag_task, timeout=1.5)
+                                logger.info("⚡ Used Speculative RAG result!")
+                            except asyncio.TimeoutError:
+                                logger.warning("⚠️ Speculative RAG task timed out.")
+                            except asyncio.CancelledError:
+                                pass
+                            except Exception as e:
+                                logger.warning(f"Speculative RAG task failed: {e}")
+                                
+                        if not rag_res:
+                            from controllers.bot_controller import query_knowledge_base as db_query
+                            session_to_phone = session_state.get("to_phone", "default")
+                            try:
+                                rag_res = await asyncio.wait_for(
+                                    db_query(session_to_phone, prompt, top_k=2, agent_config=agent_config),
+                                    timeout=1.5
+                                )
+                            except asyncio.TimeoutError:
+                                logger.warning("⚠️ Fallback RAG task timed out.")
+                            
                         if rag_res:
                             snippets = "\n".join([f"- {r['chunk']}" for r in rag_res])
                             kb_context_addon = f"\n\n[Relevant Knowledge Base Context:\n{snippets}]"
@@ -1445,6 +1502,7 @@ class ModularSalesBot:
                             )
                             current_sentence = ""
                             first_chunk = True
+                            session_state["first_sentence_sent"] = False
                             
                             async for chunk in response:
                                 if first_chunk:
@@ -1548,7 +1606,9 @@ class ModularSalesBot:
                                         # For commas or semicolons, enforce a minimum length threshold to avoid tiny fragments
                                         if split_char in [',', ';']:
                                             words = chunk_candidate.split()
-                                            if len(words) < 3 or len(chunk_candidate) < 15:
+                                            if not session_state.get("first_sentence_sent", False):
+                                                session_state["first_sentence_sent"] = True
+                                            elif len(words) < 3 or len(chunk_candidate) < 15:
                                                 next_idx = -1
                                                 for p in punctuations:
                                                     p_idx = current_sentence.find(p, idx + 1)

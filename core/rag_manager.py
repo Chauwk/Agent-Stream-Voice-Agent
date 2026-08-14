@@ -23,6 +23,7 @@ class RAGManager:
 
     def __init__(self):
         self.chroma_client = None
+        self.embed_cache = {}
         # 1. Connect to Centralized Chroma DB Server (with error safety)
         try:
             logger.info(f"Connecting to Chroma DB at {Config.CHROMA_HOST}:{Config.CHROMA_PORT}...")
@@ -30,6 +31,11 @@ class RAGManager:
                 host=Config.CHROMA_HOST,
                 port=Config.CHROMA_PORT
             )
+            # O4: Keep client connection pool warm
+            try:
+                self.chroma_client.heartbeat()
+            except Exception as hb_err:
+                logger.warning(f"Chroma DB heartbeat failed during warmup: {hb_err}")
             logger.info("✅ Connected to Chroma DB successfully.")
         except Exception as e:
             logger.error(f"❌ Failed to connect to Chroma DB: {e}. RAG functions will be offline.")
@@ -140,6 +146,13 @@ class RAGManager:
     # ---------------------------------------------------------------------
     async def _embed_text(self, text: str) -> List[float]:
         """Generate a 768-dimension embedding via Gemini API"""
+        text_hash = hashlib.sha256(text.encode('utf-8')).hexdigest()
+        if text_hash in getattr(self, 'embed_cache', {}):
+            # Move to end for true LRU behavior
+            emb = self.embed_cache.pop(text_hash)
+            self.embed_cache[text_hash] = emb
+            return emb
+            
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None,
@@ -148,7 +161,16 @@ class RAGManager:
                 contents=text,
             )
         )
-        return response.embeddings[0].values
+        emb = response.embeddings[0].values
+        
+        if hasattr(self, 'embed_cache'):
+            self.embed_cache[text_hash] = emb
+            if len(self.embed_cache) > getattr(Config, 'EMBED_CACHE_SIZE', 1000):
+                # Simple FIFO eviction
+                first_key = next(iter(self.embed_cache))
+                del self.embed_cache[first_key]
+                
+        return emb
 
     def _split_text(self, text: str) -> List[str]:
         """Split text into manageable chunks for vector search"""

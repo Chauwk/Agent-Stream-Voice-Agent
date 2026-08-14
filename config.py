@@ -36,7 +36,10 @@ class Config:
     
     DEEPGRAM_MODEL = os.getenv('DEEPGRAM_MODEL', 'nova-3')
     DEEPGRAM_LANGUAGE = os.getenv('DEEPGRAM_LANGUAGE', 'multi')
-    DEEPGRAM_ENDPOINTING = int(os.getenv('DEEPGRAM_ENDPOINTING', '300'))
+    DEEPGRAM_ENDPOINTING = int(os.getenv('DEEPGRAM_ENDPOINTING', '180'))
+    DEEPGRAM_INTERIM_RESULTS = os.getenv('DEEPGRAM_INTERIM_RESULTS', 'true').lower() == 'true'
+    SPECULATIVE_RAG = os.getenv('SPECULATIVE_RAG', 'true').lower() == 'true'
+    EMBED_CACHE_SIZE = int(os.getenv('EMBED_CACHE_SIZE', '1000'))
     GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
     SARVAM_MODEL = os.getenv('SARVAM_MODEL', 'bulbul:v3')
     SARVAM_SPEAKER = os.getenv('SARVAM_SPEAKER', 'neha')

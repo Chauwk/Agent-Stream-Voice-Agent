@@ -61,6 +61,16 @@ class BotConfigUpdateRequest(BaseModel):
         example="gemini-2.5-flash",
         description="Active LLM model for Gemini (e.g. gemini-2.5-flash, gemini-3.5-flash)."
     )
+    deepgram_endpointing: Optional[int] = Field(
+        None,
+        example=180,
+        description="Silence delay (ms) for STT endpointing."
+    )
+    speculative_rag: Optional[bool] = Field(
+        None,
+        example=True,
+        description="Toggle zero-latency speculative RAG lookups."
+    )
     sarvam_model: Optional[str] = Field(
         None,
         example="bulbul:v3",
@@ -102,6 +112,8 @@ class BotOpenAISettings(BaseModel):
 class BotModularSettings(BaseModel):
     voice_bot_mode: str = Field(..., example="modular")
     deepgram_model: str = Field(..., example="nova-2-phonecall")
+    deepgram_endpointing: int = Field(..., example=180)
+    speculative_rag: bool = Field(..., example=True)
     gemini_model: str = Field(..., example="gemini-2.5-flash")
     sarvam_model: str = Field(..., example="bulbul:v3")
     sarvam_speaker: str = Field(..., example="shubh")

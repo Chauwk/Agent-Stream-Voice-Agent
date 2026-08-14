@@ -156,6 +156,8 @@ async def get_active_bot_telemetry() -> Dict[str, Any]:
         "modular_settings": {
             "voice_bot_mode": Config.VOICE_BOT_MODE,
             "deepgram_model": Config.DEEPGRAM_MODEL,
+            "deepgram_endpointing": getattr(Config, "DEEPGRAM_ENDPOINTING", 180),
+            "speculative_rag": getattr(Config, "SPECULATIVE_RAG", True),
             "gemini_model": Config.GEMINI_MODEL,
             "sarvam_model": Config.SARVAM_MODEL,
             "sarvam_speaker": Config.SARVAM_SPEAKER,
@@ -227,7 +229,15 @@ async def update_bot_runtime_config(payload: Dict[str, Any]) -> Dict[str, Any]:
     if "deepgram_model" in payload:
         Config.DEEPGRAM_MODEL = str(payload["deepgram_model"])
         updated_fields.append("deepgram_model")
-
+        
+    if "deepgram_endpointing" in payload:
+        Config.DEEPGRAM_ENDPOINTING = int(payload["deepgram_endpointing"])
+        updated_fields.append("deepgram_endpointing")
+        
+    if "speculative_rag" in payload:
+        Config.SPECULATIVE_RAG = bool(payload["speculative_rag"])
+        updated_fields.append("speculative_rag")
+        
     if "gemini_model" in payload:
         Config.GEMINI_MODEL = str(payload["gemini_model"])
         updated_fields.append("gemini_model")
