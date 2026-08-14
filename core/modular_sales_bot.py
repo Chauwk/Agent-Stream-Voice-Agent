@@ -1423,10 +1423,7 @@ class ModularSalesBot:
                 if not prompt.startswith("System:"):
                     session_state["silence_prompts_count"] = 0
                 
-                # Trim history for LLM Time-To-First-Token
-                if len(history) > 10:
-                    history = history[-10:]
-                    session_state["history"] = history
+                # Remove destructive history slice so full transcript is saved for analytics
 
                 # Perform fast dynamic per-turn RAG search for top 2 relevant chunks (low token cost + 0ms tool latency)
                 kb_context_addon = ""
@@ -1493,7 +1490,7 @@ class ModularSalesBot:
                             assert self.gemini_client is not None
                             response = await self.gemini_client.aio.models.generate_content_stream(
                                 model=Config.GEMINI_MODEL,
-                                contents=history,
+                                contents=history[-10:] if len(history) > 10 else history,
                                 config=types.GenerateContentConfig(
                                     system_instruction=system_instruction,
                                     tools=[end_call, query_knowledge_base, send_email],
