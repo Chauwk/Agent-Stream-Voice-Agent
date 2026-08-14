@@ -127,7 +127,7 @@ async def save_enriched_call_log(
             "agent_id": agent_id,
             "caller_phone_no": to_phone,
             "lead_phone_no": analytics.get("provided_phone_no", "Not provided"),
-            "timestamp": ist_now,
+            "timestamp": utc_now,
             
             # Transcript and summary
             "transcript": transcript,
