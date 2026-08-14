@@ -1457,7 +1457,8 @@ async def simulate_conversation(
             except Exception as e:
                 logger.error(f"Failed to fetch RAG context for simulation: {e}")
 
-        prompt = f"System Instructions:\n{instructions}\n\n{rag_context}{history_prompt}User Message: {payload.message}\nAgent Response:"
+        guardrail = "STRICT RULE: You must ONLY answer questions using the knowledge base context provided. If the user asks a question NOT covered in the context, you MUST say: 'I'm sorry, but I don't have that information.' Do NOT invent facts or use outside knowledge.\n"
+        prompt = f"System Instructions:\n{guardrail}{instructions}\n\n{rag_context}{history_prompt}User Message: {payload.message}\nAgent Response:"
         resp = rag_manager.gemini_client.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt
@@ -1553,7 +1554,8 @@ async def simulate_voice_conversation(
             except Exception as e:
                 logger.error(f"Failed to fetch RAG context for voice simulation: {e}")
 
-        prompt = f"System Instructions:\n{instructions}\n\n{rag_context}{history_prompt}User Message: {payload.message}\nAgent Response:"
+        guardrail = "STRICT RULE: You must ONLY answer questions using the knowledge base context provided. If the user asks a question NOT covered in the context, you MUST say: 'I'm sorry, but I don't have that information.' Do NOT invent facts or use outside knowledge.\n"
+        prompt = f"System Instructions:\n{guardrail}{instructions}\n\n{rag_context}{history_prompt}User Message: {payload.message}\nAgent Response:"
         resp = rag_manager.gemini_client.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt

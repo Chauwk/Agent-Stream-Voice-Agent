@@ -154,7 +154,7 @@ class Config:
         if cls.VOICE_BOT_MODE == "modular":
             if not cls.DEEPGRAM_API_KEY:
                 errors.append("DEEPGRAM_API_KEY is required in modular mode")
-            if not cls.GEMINI_API_KEY and not os.path.exists("/app/project-gcp-key.json"):
+            if not cls.GEMINI_API_KEY and not (os.path.exists("project-gcp-key.json") or os.path.exists("/app/project-gcp-key.json")):
                 errors.append("GEMINI_API_KEY is required in modular mode when project-gcp-key.json is missing")
             if not cls.SARVAM_API_KEY:
                 errors.append("SARVAM_API_KEY is required in modular mode")

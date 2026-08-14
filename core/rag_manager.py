@@ -41,7 +41,7 @@ class RAGManager:
             logger.error(f"❌ Failed to connect to Chroma DB: {e}. RAG functions will be offline.")
         
         # 2. Initialize Gemini Client for embeddings (text-embedding-004)
-        gcp_key_path = "/app/project-gcp-key.json"
+        gcp_key_path = "project-gcp-key.json" if os.path.exists("project-gcp-key.json") else "/app/project-gcp-key.json"
         if os.path.exists(gcp_key_path):
             logger.info("🔑 project-gcp-key.json found. Initializing Gemini Client in Vertex AI mode...")
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_key_path

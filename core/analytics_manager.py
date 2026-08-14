@@ -48,7 +48,7 @@ Transcript:
         import os
         
         # Initialize client using Config.GEMINI_API_KEY or Vertex AI
-        gcp_key_path = "/app/project-gcp-key.json"
+        gcp_key_path = "project-gcp-key.json" if os.path.exists("project-gcp-key.json") else "/app/project-gcp-key.json"
         if os.path.exists(gcp_key_path):
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_key_path
             client = genai.Client(vertexai=True)
