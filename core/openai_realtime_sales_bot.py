@@ -1399,33 +1399,42 @@ class OpenAIRealtimeSalesBot:
                 try:
                     duration = time.time() - openai_config["start_time"]
                     transcript = openai_config.get("transcript", [])
-                    if transcript:
-                        agent_name = None
-                        company_name = None
-                        agent_id = None
-                        agent_config = openai_config.get("agent_config")
-                        if agent_config:
-                            agent_name = agent_config.get("name")
-                            agent_id = agent_config.get("agentId")
-                            try:
-                                from core.agent_resolver import get_company_name
-                                company_name = await get_company_name(agent_config.get("enterprise"))
-                            except Exception:
-                                pass
-
-                        from core.analytics_manager import save_enriched_call_log
-                        asyncio.create_task(
-                            save_enriched_call_log(
-                                call_id=stream_id,
-                                duration=duration,
-                                transcript=transcript,
-                                to_phone=openai_config.get("to_phone", "default"),
-                                direction=openai_config.get("direction", "inbound"),
-                                agent_name=agent_name,
-                                company_name=company_name,
-                                agent_id=agent_id
-                            )
+                    agent_name = None
+                    company_name = None
+                    agent_id = None
+                    enterprise_id = None
+                    agent_mongo_id = None
+                    agent_config = openai_config.get("agent_config")
+                    if agent_config:
+                        agent_name = agent_config.get("name")
+                        agent_id = agent_config.get("agentId")
+                        enterprise_id = (
+                            agent_config.get("enterprise")
+                            or agent_config.get("createdBy")
+                            or agent_config.get("enterprise_id")
                         )
+                        agent_mongo_id = agent_config.get("_id")
+                        try:
+                            from core.agent_resolver import get_company_name
+                            company_name = await get_company_name(enterprise_id)
+                        except Exception:
+                            pass
+
+                    from core.analytics_manager import save_enriched_call_log
+                    asyncio.create_task(
+                        save_enriched_call_log(
+                            call_id=stream_id,
+                            duration=duration,
+                            transcript=transcript,
+                            to_phone=openai_config.get("to_phone", "default"),
+                            direction=openai_config.get("direction", "inbound"),
+                            agent_name=agent_name,
+                            company_name=company_name,
+                            agent_id=agent_id,
+                            enterprise_id=enterprise_id,
+                            agent_mongo_id=agent_mongo_id
+                        )
+                    )
                 except Exception as db_err:
                     logger.error(f"Failed to save call log: {db_err}")
                 

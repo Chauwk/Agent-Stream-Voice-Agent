@@ -58,7 +58,26 @@ class MongoManager:
                     ]},
                     {"$set": update_fields}
                 )
-                if res.modified_count > 0:
+                
+                # Fallback: Exotel SIP trunks often omit the custom CallSid in headers. 
+                # If no records were updated, match by the customer's phone number (to_phone from SIP).
+                if res.modified_count == 0 and call_data.get("to_phone") and call_data.get("to_phone") != "default":
+                    to_phone_raw = str(call_data.get("to_phone"))
+                    phone_digits = "".join(filter(str.isdigit, to_phone_raw))
+                    if len(phone_digits) >= 10:
+                        last_10 = phone_digits[-10:]
+                        fallback_res = await self.db['outbound_calls'].update_one(
+                            {
+                                "phone_number": {"$regex": last_10},
+                            },
+                            {"$set": update_fields},
+                            sort=[("_id", -1)] # Most recent call for this customer
+                        )
+                        if fallback_res.modified_count > 0:
+                            logger.info(f"✅ Fallback update successful! Linked transcript to outbound_calls via customer number '{last_10}'")
+                        else:
+                            logger.warning(f"⚠️ Fallback update failed: No outbound_calls record found for customer number '{last_10}'")
+                elif res.modified_count > 0:
                     logger.info(f"✅ Updated {res.modified_count} outbound_calls records for Call SID {clean_cid} to status '{status_str}'")
         except Exception as e:
             logger.error(f"❌ Failed to save call log to MongoDB: {e}")

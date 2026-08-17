@@ -2084,44 +2084,55 @@ class ModularSalesBot:
                     if msg_text:
                         transcript.append({"role": role, "msg": msg_text})
                 
-                # Only save if there is some conversation history
-                if transcript:
-                    agent_name = None
-                    company_name = None
-                    agent_id = None
-                    agent_config = session_state.get("agent_config")
-                    if agent_config:
-                        agent_name = agent_config.get("name")
-                        agent_id = agent_config.get("agentId")
-                        try:
-                            from core.agent_resolver import get_company_name
-                            company_name = await get_company_name(agent_config.get("enterprise"))
-                        except Exception:
-                            pass
-
-                    from core.analytics_manager import save_enriched_call_log
-                    asyncio.create_task(
-                        save_enriched_call_log(
-                            call_id=call_id,
-                            duration=duration,
-                            transcript=transcript,
-                            to_phone=session_state.get("to_phone", "default"),
-                            direction=session_state.get("direction", "inbound"),
-                            agent_name=agent_name,
-                            company_name=company_name,
-                            agent_id=agent_id
-                        )
+                # Always save call log even if transcript is empty (for accurate duration and 0-message call metrics)
+                agent_name = None
+                company_name = None
+                agent_id = None
+                enterprise_id = None
+                agent_mongo_id = None
+                agent_config = session_state.get("agent_config")
+                if agent_config:
+                    agent_name = agent_config.get("name")
+                    agent_id = agent_config.get("agentId")
+                    # Capture enterprise ID (stored as 'enterprise' or 'createdBy' in agent doc)
+                    enterprise_id = (
+                        agent_config.get("enterprise")
+                        or agent_config.get("createdBy")
+                        or agent_config.get("enterprise_id")
                     )
-                    # Trigger async email notifications
+                    # Capture the MongoDB _id of the agent document
+                    agent_mongo_id = agent_config.get("_id")
                     try:
-                        asyncio.create_task(trigger_post_call_emails({
-                            "call_id": call_id,
-                            "duration_seconds": round(duration, 2),
-                            "transcript": transcript,
-                            "to_number": session_state.get("to_phone", "default")
-                        }))
-                    except Exception as e:
-                        logger.error(f"Error triggering emails: {e}")
+                        from core.agent_resolver import get_company_name
+                        company_name = await get_company_name(enterprise_id)
+                    except Exception:
+                        pass
+
+                from core.analytics_manager import save_enriched_call_log
+                asyncio.create_task(
+                    save_enriched_call_log(
+                        call_id=call_id,
+                        duration=duration,
+                        transcript=transcript,
+                        to_phone=session_state.get("to_phone", "default"),
+                        direction=session_state.get("direction", "inbound"),
+                        agent_name=agent_name,
+                        company_name=company_name,
+                        agent_id=agent_id,
+                        enterprise_id=enterprise_id,
+                        agent_mongo_id=agent_mongo_id
+                    )
+                )
+                # Trigger async email notifications
+                try:
+                    asyncio.create_task(trigger_post_call_emails({
+                        "call_id": call_id,
+                        "duration_seconds": round(duration, 2),
+                        "transcript": transcript,
+                        "to_number": session_state.get("to_phone", "default")
+                    }))
+                except Exception as e:
+                    logger.error(f"Error triggering emails: {e}")
             except Exception as db_err:
                 logger.error(f"❌ Failed to save modular call log to MongoDB: {db_err}")
 

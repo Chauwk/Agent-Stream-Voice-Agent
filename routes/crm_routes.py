@@ -92,12 +92,19 @@ async def get_crm_agent_leads(
         agent_clauses.extend([
             {"agentId": tid},
             {"agent_id": tid},
-            {"agent": tid}
+            {"agent": tid},
+            {"agent_mongo_id": tid}
         ])
         if ObjectId.is_valid(tid):
             agent_clauses.append({"_id": ObjectId(tid)})
-            
-    filt = {"$or": agent_clauses}
+
+    # Also pull logs by enterprise_id (covers records saved without an agent_id)
+    resolved_enterprise = ent_id or (resolved_agent.get("enterprise") or resolved_agent.get("createdBy") or "" if resolved_agent else "")
+    if resolved_enterprise:
+        for eid_key in ("enterprise_id", "enterprise", "company_id", "createdBy"):
+            agent_clauses.append({eid_key: resolved_enterprise})
+
+    filt = {"$or": agent_clauses} if agent_clauses else {}
 
     leads_map = {}
     target_collections = ["Agent_Stream_CallsLogs", "outbound_calls", "aiagentcallreports"]
@@ -217,8 +224,8 @@ async def get_crm_call_transcript(
     db = mongo_db.client.get_default_database()
     
     id_clauses = [
-        {"call_id": conversationId},
-        {"callId": conversationId},
+        {"call_id": {"$regex": f"^{conversationId}"}},
+        {"callId": {"$regex": f"^{conversationId}"}},
         {"call_sid": conversationId},
         {"_id": conversationId}
     ]
@@ -228,9 +235,11 @@ async def get_crm_call_transcript(
     query = {"$or": id_clauses}
     
     target_collections = ["Agent_Stream_CallsLogs", "outbound_calls", "aiagentcallreports"]
+    logger.info(f"DEBUG TRANSCRIPT QUERY: {query}")
     for coll_name in target_collections:
         try:
             doc = await db[coll_name].find_one(query)
+            logger.info(f"DEBUG TRANSCRIPT RESULT for {coll_name}: {'FOUND' if doc else 'NOT FOUND'}")
             if doc:
                 safe_doc = bson_safe(dict(doc))
                 safe_doc["_id"] = str(safe_doc["_id"])
@@ -290,12 +299,19 @@ async def get_crm_agent_metrics(
         agent_clauses.extend([
             {"agentId": tid},
             {"agent_id": tid},
-            {"agent": tid}
+            {"agent": tid},
+            {"agent_mongo_id": tid}
         ])
         if ObjectId.is_valid(tid):
             agent_clauses.append({"_id": ObjectId(tid)})
-            
-    filt = {"$or": agent_clauses}
+
+    # Also pull logs by enterprise_id (covers records saved without an agent_id)
+    resolved_enterprise = ent_id or (resolved_agent.get("enterprise") or resolved_agent.get("createdBy") or "" if resolved_agent else "")
+    if resolved_enterprise:
+        for eid_key in ("enterprise_id", "enterprise", "company_id", "createdBy"):
+            agent_clauses.append({eid_key: resolved_enterprise})
+
+    filt = {"$or": agent_clauses} if agent_clauses else {}
 
     seen_ids = set()
     total_calls = 0

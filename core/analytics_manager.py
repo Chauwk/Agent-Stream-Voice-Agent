@@ -101,7 +101,9 @@ async def save_enriched_call_log(
     direction: str,
     agent_name: Optional[str] = None,
     company_name: Optional[str] = None,
-    agent_id: Optional[str] = None
+    agent_id: Optional[str] = None,
+    enterprise_id: Optional[str] = None,
+    agent_mongo_id: Optional[str] = None
 ):
     """Enriches transcript using Gemini and saves the complete call analytics document to MongoDB."""
     try:
@@ -124,7 +126,16 @@ async def save_enriched_call_log(
             "duration": f"{round(duration, 2)}s",
             "agent_name": agent_name or Config.SALES_BOT_NAME,
             "company_name": company_name or Config.COMPANY_NAME,
+            # Agent identifiers — store both UUID agentId and Mongo _id for flexible querying
             "agent_id": agent_id,
+            "agentId": agent_id,
+            "agent_mongo_id": agent_mongo_id,
+            # Enterprise identifier — stored under multiple keys to match CRM query patterns
+            "enterprise_id": enterprise_id,
+            "enterprise": enterprise_id,
+            "company_id": enterprise_id,
+            # Call metadata
+            "direction": direction or "inbound",
             "caller_phone_no": to_phone,
             "lead_phone_no": analytics.get("provided_phone_no", "Not provided"),
             "timestamp": ist_now,
@@ -144,5 +155,6 @@ async def save_enriched_call_log(
         }
         
         await mongo_db.save_call_log(call_log)
+        logger.info(f"✅ Call log saved — call_id={call_id}, agent_id={agent_id}, enterprise_id={enterprise_id}, direction={direction}")
     except Exception as e:
         logger.error(f"❌ Error generating or saving enriched call log: {e}")
