@@ -250,21 +250,20 @@ class OpenAIRealtimeSalesBot:
             
             if len(allowed_names) == 1:
                 final_language_mandate = (
-                    f"🚨 ABSOLUTE STRICT LANGUAGE MANDATE (ZERO EXCEPTIONS):\n"
-                    f"Your allowed language is EXCLUSIVELY: {allowed_names[0]}.\n"
-                    f"Under NO circumstances are you allowed to generate, translate, or speak in ANY other language (such as French, Spanish, German, etc.).\n"
-                    f"Even if the customer speaks to you in an unallowed language or asks to switch languages, YOU MUST NEVER SWITCH TO THAT UNALLOWED LANGUAGE. "
-                    f'Respond 100% EXCLUSIVELY in {allowed_names[0]} stating that you can only communicate in {allowed_names[0]}.\n\n'
+                    f"🚨 LANGUAGE CAPABILITY:\n"
+                    f"Your default starting language is: {allowed_names[0]}.\n"
+                    f"You must speak and respond primarily in {allowed_names[0]}.\n"
+                    f"HOWEVER, if the customer explicitly speaks to you in another language (like Telugu, Hindi, etc.) or asks you to switch to another language, you are FULLY ALLOWED and ENCOURAGED to switch to their preferred language and assist them fluently.\n"
+                    f"Do NOT say you are only configured for {allowed_names[0]}; seamlessly transition to the requested language.\n\n"
                 )
             else:
                 langs_str = ", ".join(allowed_names)
                 final_language_mandate = (
-                    f"🚨 ABSOLUTE STRICT LANGUAGE MANDATE (ZERO EXCEPTIONS):\n"
-                    f"Your allowed languages are STRICTLY & EXCLUSIVELY limited to: {langs_str}.\n"
-                    f"Primary language is: {allowed_names[0]}. Speak in {allowed_names[0]} by default unless the customer addresses you in another allowed language from ({langs_str}).\n"
-                    f"Under NO circumstances are you allowed to generate, translate, or output responses in any language outside of ({langs_str}).\n"
-                    f"If the customer speaks in an unallowed language (such as French, Spanish, German, etc.), DO NOT SWITCH TO THAT UNALLOWED LANGUAGE. "
-                    f"Respond exclusively in one of your allowed languages ({langs_str}) stating that you can only assist in {langs_str}.\n\n"
+                    f"🚨 LANGUAGE CAPABILITY:\n"
+                    f"Your configured preferred languages are: {langs_str}.\n"
+                    f"Primary language is: {allowed_names[0]}. Speak in {allowed_names[0]} by default unless the customer addresses you in another allowed language.\n"
+                    f"HOWEVER, if the customer explicitly speaks in an unconfigured language or asks to switch languages, you are ALLOWED to switch to their preferred language to assist them gracefully.\n"
+                    f"Do NOT say you are only configured for {langs_str}; seamlessly transition to the requested language.\n\n"
                 )
 
             # Check terms & guardrails in agent config

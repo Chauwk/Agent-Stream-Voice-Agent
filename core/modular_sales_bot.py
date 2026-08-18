@@ -857,20 +857,20 @@ class ModularSalesBot:
             
             if len(allowed_names) == 1:
                 final_language_mandate = (
-                    f"\n\n🚨 CRITICAL MANDATE (STRICT LANGUAGE RESTRICTION):\n"
-                    f"Your output language MUST BE 100% EXCLUSIVELY: {allowed_names[0]}.\n"
-                    f"Under NO circumstances are you allowed to generate, translate, or output responses in any other language or script (such as French, Hindi, Telugu, Spanish, German, etc.).\n"
-                    f"Even if the user speaks to you in a foreign/unallowed language or asks you to speak in another language, YOU MUST NOT REPLY IN THAT LANGUAGE. YOU MUST RESPOND 100% EXCLUSIVELY IN {allowed_names[0]}.\n"
-                    f'Refusal response in {allowed_names[0]}: "I apologize, but I am configured to speak and assist only in {allowed_names[0]}. How can I help you today?"'
+                    f"\n\n🚨 LANGUAGE CAPABILITY:\n"
+                    f"Your default starting language is: {allowed_names[0]}.\n"
+                    f"You must speak and respond primarily in {allowed_names[0]}.\n"
+                    f"HOWEVER, if the customer explicitly speaks to you in another language (like Telugu, Hindi, etc.) or asks you to switch to another language, you are FULLY ALLOWED and ENCOURAGED to switch to their preferred language and assist them fluently.\n"
+                    f"Do NOT say you are only configured for {allowed_names[0]}; seamlessly transition to the requested language."
                 )
             else:
                 langs_str = ", ".join(allowed_names)
                 final_language_mandate = (
-                    f"\n\n🚨 CRITICAL MANDATE (STRICT LANGUAGE RESTRICTION):\n"
-                    f"Your allowed languages are STRICTLY & EXCLUSIVELY limited to: {langs_str}.\n"
-                    f"Under NO circumstances are you allowed to generate, translate, or output responses in any language outside of this allowed list (such as French, Spanish, German, Tamil, etc.).\n"
-                    f"Adapt dynamically to whichever of these allowed languages ({langs_str}) the customer speaks.\n"
-                    f"If the customer speaks or requests any language outside of ({langs_str}), YOU MUST REJECT THE REQUEST and respond back politely in the currently active allowed language stating that you can only assist in {langs_str}."
+                    f"\n\n🚨 LANGUAGE CAPABILITY:\n"
+                    f"Your configured preferred languages are: {langs_str}.\n"
+                    f"Primary language is: {allowed_names[0]}. Speak in {allowed_names[0]} by default unless the customer addresses you in another allowed language.\n"
+                    f"HOWEVER, if the customer explicitly speaks in an unconfigured language or asks to switch languages, you are ALLOWED to switch to their preferred language to assist them gracefully.\n"
+                    f"Do NOT say you are only configured for {langs_str}; seamlessly transition to the requested language."
                 )
             
             is_hindi_primary = primary_lang.startswith("hi")
