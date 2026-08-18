@@ -1101,6 +1101,21 @@ async def get_filtered_call_logs(
         skip = (page - 1) * limit
         paginated_logs = all_logs[skip : skip + limit]
         
+        # Clean up transcript
+        for log in paginated_logs:
+            if "transcript" in log and isinstance(log["transcript"], list):
+                for msg in log["transcript"]:
+                    if isinstance(msg, dict) and "msg" in msg:
+                        text = msg["msg"]
+                        if isinstance(text, str):
+                            # Remove RAG context
+                            text = re.sub(r'\n\n\[Relevant Knowledge Base Context:.*?\]', '', text, flags=re.DOTALL)
+                            # Remove Action outputs/requests if they are the only thing in the message
+                            if text.startswith('[Requested action:') or text.startswith('[Action output:'):
+                                text = re.sub(r'\[Requested action:.*?\]', '*Triggered an internal action*', text, flags=re.DOTALL)
+                                text = re.sub(r'\[Action output:.*?\]', '*Action successfully completed*', text, flags=re.DOTALL)
+                            msg["msg"] = text.strip()
+        
         return {
             "success": True,
             "total": total_count,
