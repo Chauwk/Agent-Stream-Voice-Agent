@@ -31,21 +31,24 @@ router = APIRouter(
 )
 
 def clean_transcript(transcript):
-    """Strip injected RAG context and raw action markers from transcript messages."""
+    """Strip injected RAG context from transcript messages and drop system/tool action entries."""
     if not isinstance(transcript, list):
         return transcript
+    cleaned = []
     for msg in transcript:
         if not isinstance(msg, dict):
+            cleaned.append(msg)
             continue
         text = msg.get("msg")
         if not isinstance(text, str):
+            cleaned.append(msg)
+            continue
+        if text.startswith('[Requested action:') or text.startswith('[Action output:'):
             continue
         text = re.sub(r'\n\n\[Relevant Knowledge Base Context:.*?\]', '', text, flags=re.DOTALL)
-        if text.startswith('[Requested action:') or text.startswith('[Action output:'):
-            text = re.sub(r'\[Requested action:.*?\]', '*Triggered an internal action*', text, flags=re.DOTALL)
-            text = re.sub(r'\[Action output:.*?\]', '*Action successfully completed*', text, flags=re.DOTALL)
         msg["msg"] = text.strip()
-    return transcript
+        cleaned.append(msg)
+    return cleaned
 
 
 def parse_date_to_timestamp(date_str: str, is_end_of_day: bool = False) -> float | None:
