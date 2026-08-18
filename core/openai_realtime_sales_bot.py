@@ -667,7 +667,7 @@ class OpenAIRealtimeSalesBot:
             
             # 1. Query ChromaDB directly via bot_controller
             from controllers.bot_controller import query_knowledge_base
-            rag_results = await query_knowledge_base(to_phone, user_transcript, top_k=3, agent_config=agent_config)
+            rag_results = await query_knowledge_base(to_phone, user_transcript, top_k=8, agent_config=agent_config)
             
             # 2. Inject retrieved RAG context into OpenAI conversation as a user message
             context_text = json.dumps(rag_results) if rag_results else "No relevant documents found in knowledge base."
@@ -812,7 +812,7 @@ class OpenAIRealtimeSalesBot:
     async def query_knowledge_base_enhanced(self, stream_id: str, args: dict) -> dict:
         """Query RAG system using search parameters for caller's company context"""
         query = args.get("query", "")
-        top_k = args.get("top_k", 3)
+        top_k = args.get("top_k", 8)
         
         # Get target phone number and agent config of call
         to_phone = "default"

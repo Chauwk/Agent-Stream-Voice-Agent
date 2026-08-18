@@ -814,7 +814,7 @@ async def get_supported_voices_and_languages():
     "/list",
     status_code=status.HTTP_200_OK,
     summary="List Voice Agents",
-    description="Lists all custom voice agents created for the enterprise."
+    description="Lists all custom Exotel voice agents created for the enterprise (excludes ElevenLabs agents)."
 )
 @router.get(
     "",
@@ -845,6 +845,7 @@ async def list_agents(
             try:
                 cursor = db[coll_name].find(filter_q).sort("createdAt", -1)
                 async for doc in cursor:
+                    if doc.get("type") == "eleven": continue
                     doc_id = str(doc["_id"])
                     if doc_id not in agents_map:
                         safe_doc = bson_safe(dict(doc))
@@ -852,7 +853,7 @@ async def list_agents(
                         agents_map[doc_id] = safe_doc
             except Exception as ex:
                 logger.warning(f"Error querying collection '{coll_name}': {ex}")
-        return list(agents_map.values())
+        return [a for a in agents_map.values() if a.get("type") != "eleven"]
 
     agents = []
     try:
@@ -871,7 +872,7 @@ async def list_agents(
     "/stats",
     status_code=status.HTTP_200_OK,
     summary="Get Agent Statistics",
-    description="Retrieves aggregate metrics and configurations about an enterprise's voice agents."
+    description="Retrieves aggregate metrics and configurations about an enterprise's Exotel voice agents (excludes ElevenLabs agents)."
 )
 async def get_agent_stats(
     enterprise_id: Optional[str] = Query(None, description="Enterprise ID query parameter"),
@@ -900,6 +901,7 @@ async def get_agent_stats(
             try:
                 cursor = db[coll_name].find(filter_q)
                 async for doc in cursor:
+                    if doc.get("type") == "eleven": continue
                     doc_id = str(doc["_id"])
                     if doc_id in seen_ids:
                         continue
@@ -1072,6 +1074,7 @@ async def get_filtered_call_logs(
             try:
                 cursor = db[coll_name].find(final_filter)
                 async for doc in cursor:
+                    if doc.get("type") == "eleven": continue
                     doc_id = str(doc["_id"])
                     if doc_id not in logs_map:
                         safe_doc = bson_safe(dict(doc))
@@ -2001,7 +2004,17 @@ async def delete_agent_kb_item(
     doc = await db['agent_kb_documents'].find_one({"agentId": agent_id, "docId": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail={"success": False, "message": "Document not found"})
-        
+
+    # Clean up the vectors in Chroma and the raw file in S3 before dropping the record
+    try:
+        rag_manager.delete_document(
+            company_id=agent_id,
+            doc_id=doc_id,
+            filename=doc.get("filename", "")
+        )
+    except Exception as e:
+        logger.error(f"Failed to clean up Chroma/S3 for doc {doc_id}: {e}")
+
     await db['agent_kb_documents'].delete_one({"agentId": agent_id, "docId": doc_id})
     
     return {
@@ -2054,3 +2067,6 @@ async def download_agent_kb_item(
     except Exception as e:
         logger.error(f"Failed to generate presigned URL: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate download link")
+
+
+
