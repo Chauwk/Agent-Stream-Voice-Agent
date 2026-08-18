@@ -1055,7 +1055,11 @@ async def get_filtered_call_logs(
                         {"phone_number": rgx},
                         {"virtualNumber": rgx},
                         {"to_number": rgx},
-                        {"from_number": rgx}
+                        {"from_number": rgx},
+                        {"caller_phone_no": rgx},
+                        {"callerNumber": rgx},
+                        {"leadPhone": rgx},
+                        {"lead_phone_no": rgx}
                     ]
                 })
                 

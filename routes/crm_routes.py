@@ -30,6 +30,24 @@ router = APIRouter(
     }
 )
 
+def clean_transcript(transcript):
+    """Strip injected RAG context and raw action markers from transcript messages."""
+    if not isinstance(transcript, list):
+        return transcript
+    for msg in transcript:
+        if not isinstance(msg, dict):
+            continue
+        text = msg.get("msg")
+        if not isinstance(text, str):
+            continue
+        text = re.sub(r'\n\n\[Relevant Knowledge Base Context:.*?\]', '', text, flags=re.DOTALL)
+        if text.startswith('[Requested action:') or text.startswith('[Action output:'):
+            text = re.sub(r'\[Requested action:.*?\]', '*Triggered an internal action*', text, flags=re.DOTALL)
+            text = re.sub(r'\[Action output:.*?\]', '*Action successfully completed*', text, flags=re.DOTALL)
+        msg["msg"] = text.strip()
+    return transcript
+
+
 def parse_date_to_timestamp(date_str: str, is_end_of_day: bool = False) -> float | None:
     """Helper to parse 'YYYY-MM-DD' or ISO date strings to UNIX timestamp float."""
     if not date_str or not str(date_str).strip():
@@ -140,7 +158,7 @@ async def get_crm_agent_leads(
                 summary = doc.get("call_summary") or doc.get("summary") or ""
                 meeting_consent = doc.get("caller_meeting_consent") or doc.get("meeting_consent") or False
                 business_interest = doc.get("business_interest") or doc.get("car_model") or ""
-                transcript = doc.get("transcript") or doc.get("messages") or doc.get("conversation") or []
+                transcript = clean_transcript(doc.get("transcript") or doc.get("messages") or doc.get("conversation") or [])
                 raw_call_id = str(doc.get("call_id") or doc.get("call_sid") or doc_id).strip()
                 call_key = raw_call_id.split("@")[0].strip()
                 status_str = doc.get("status", "completed")
@@ -243,10 +261,11 @@ async def get_crm_call_transcript(
             if doc:
                 safe_doc = bson_safe(dict(doc))
                 safe_doc["_id"] = str(safe_doc["_id"])
+                safe_doc["transcript"] = clean_transcript(safe_doc.get("transcript", []))
                 return {
                     "success": True,
                     "conversationId": conversationId,
-                    "transcript": safe_doc.get("transcript", []),
+                    "transcript": safe_doc["transcript"],
                     "call_details": safe_doc
                 }
         except Exception as ex:
