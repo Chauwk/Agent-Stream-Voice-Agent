@@ -94,6 +94,7 @@ async def get_crm_agent_leads(
     page: int = Query(1, ge=1, description="Page number for pagination"),
     limit: int = Query(50, ge=1, le=500, description="Number of leads per page"),
     enterprise_id: Optional[str] = Query(None, description="Enterprise ID query parameter"),
+    direction: Optional[str] = Query(None, description="Filter by call direction: 'inbound' or 'outbound'"),
     x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id", description="Enterprise ID header")
 ):
     ent_id = (enterprise_id or x_enterprise_id or "").strip()
@@ -165,7 +166,16 @@ async def get_crm_agent_leads(
                     continue
                 if end_ts is not None and ts_val > end_ts:
                     continue
-                    
+
+                # outbound_calls docs are always outbound campaign calls by definition
+                # (no "direction" field needed); everything else falls back to its own
+                # "direction" field, defaulting to inbound when absent.
+                is_outbound = coll_name == "outbound_calls" or str(doc.get("direction", "")).lower() == "outbound"
+                if direction and direction.strip().lower() in ("inbound", "outbound"):
+                    wants_outbound = direction.strip().lower() == "outbound"
+                    if is_outbound != wants_outbound:
+                        continue
+
                 phone = doc.get("virtualNumber") or doc.get("phone_number") or doc.get("caller_phone_no") or doc.get("lead_phone_no") or doc.get("to_number") or doc.get("from_number") or ""
                 name = doc.get("customer_name") or doc.get("name") or doc.get("lead_name") or "Customer"
                 email = doc.get("email") or doc.get("lead_email") or ""
@@ -192,7 +202,10 @@ async def get_crm_agent_leads(
                     "status": status_str,
                     "durationSeconds": duration,
                     "timestamp": ts.strftime('%Y-%m-%dT%H:%M:%S.%f') + "+05:30" if isinstance(ts, datetime.datetime) else ts,
-                    "transcript": transcript
+                    "transcript": transcript,
+                    "direction": "outbound" if is_outbound else "inbound",
+                    "campaignId": doc.get("campaign_id") or doc.get("context", {}).get("campaign_id"),
+                    "campaignName": doc.get("campaign_name") or doc.get("context", {}).get("campaign_name"),
                 }
                 
                 if call_key in leads_map:
@@ -409,6 +422,7 @@ async def get_crm_agent_metrics(
     startDate: Optional[str] = Query(None, description="Filter starting from this date (e.g., 2026-05-01)"),
     endDate: Optional[str] = Query(None, description="Filter up to this date (e.g., 2026-05-31)"),
     enterprise_id: Optional[str] = Query(None, description="Enterprise ID query parameter"),
+    direction: Optional[str] = Query(None, description="Filter by call direction: 'inbound' or 'outbound'"),
     x_enterprise_id: Optional[str] = Header(None, alias="x-enterprise-id", description="Enterprise ID header")
 ):
     ent_id = (enterprise_id or x_enterprise_id or "").strip()
@@ -488,6 +502,12 @@ async def get_crm_agent_metrics(
                     continue
                 if end_ts is not None and ts_val > end_ts:
                     continue
+
+                is_outbound = coll_name == "outbound_calls" or str(doc.get("direction", "")).lower() == "outbound"
+                if direction and direction.strip().lower() in ("inbound", "outbound"):
+                    wants_outbound = direction.strip().lower() == "outbound"
+                    if is_outbound != wants_outbound:
+                        continue
 
                 total_calls += 1
                 status_str = str(doc.get("status", "completed")).lower()
