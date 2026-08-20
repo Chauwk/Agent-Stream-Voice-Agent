@@ -30,8 +30,17 @@ router = APIRouter(
     }
 )
 
+# Synthetic priming text injected as a fake first "user" turn to kick off the
+# model's greeting (see core/modular_sales_bot.py) — no human ever said this,
+# so it must never reach a transcript UI as if the customer/agent said it.
+_SYNTHETIC_PRIMING_MESSAGES = {
+    "We just called the customer.",
+    "A customer just called our sales line. Please greet them warmly and ask how you can help them today.",
+}
+
+
 def clean_transcript(transcript):
-    """Strip injected RAG context from transcript messages and drop system/tool action entries."""
+    """Strip injected RAG context and synthetic priming turns; drop system/tool action entries."""
     if not isinstance(transcript, list):
         return transcript
     cleaned = []
@@ -44,6 +53,8 @@ def clean_transcript(transcript):
             cleaned.append(msg)
             continue
         if text.startswith('[Requested action:') or text.startswith('[Action output:'):
+            continue
+        if text.strip() in _SYNTHETIC_PRIMING_MESSAGES:
             continue
         text = re.sub(r'\n\n\[Relevant Knowledge Base Context:.*?\]', '', text, flags=re.DOTALL)
         msg["msg"] = text.strip()
@@ -383,16 +394,7 @@ async def get_crm_call_transcript(
 
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
-        detail={
-            "success": False,
-            "message": f"Transcript for conversationId '{conversationId}' not found",
-            # TEMP DEBUG — remove once transcript fallback linking is confirmed working in prod.
-            "_debug_build_marker": "e873195-fallback-v2",
-            "_debug_outbound_anchor_found": outbound_anchor is not None,
-            "_debug_anchor_agent": (outbound_anchor.get("agent_id") if outbound_anchor else None),
-            "_debug_anchor_ts": (outbound_anchor.get("timestamp") if outbound_anchor else None),
-            "_debug_fallback": _debug_fallback,
-        }
+        detail={"success": False, "message": f"Transcript for conversationId '{conversationId}' not found"}
     )
 
 
