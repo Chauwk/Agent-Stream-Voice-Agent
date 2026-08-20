@@ -262,6 +262,7 @@ async def get_crm_call_transcript(
     target_collections = ["Agent_Stream_CallsLogs", "outbound_calls", "aiagentcallreports"]
     logger.info(f"DEBUG TRANSCRIPT QUERY: {query}")
     outbound_anchor = None  # remembers the outbound_calls doc if matched but transcript is empty
+    _debug_fallback = None
     for coll_name in target_collections:
         try:
             doc = await db[coll_name].find_one(query)
@@ -330,22 +331,29 @@ async def get_crm_call_transcript(
 
             best_doc = None
             best_diff = None
+            _debug_fallback = {"agent_query": agent_query, "collections": {}}
             for coll_name in ("Agent_Stream_CallsLogs", "aiagentcallreports"):
+                _cinfo = {"scanned": 0, "in_window": 0, "with_transcript": 0, "error": None}
                 try:
                     cursor = db[coll_name].find(agent_query).sort("_id", -1).limit(50)
                     async for cand in cursor:
+                        _cinfo["scanned"] += 1
                         cand_epoch = _to_epoch(cand.get("timestamp"))
                         if cand_epoch is None or not (anchor_ts - 30 <= cand_epoch <= anchor_ts + 600):
                             continue
+                        _cinfo["in_window"] += 1
                         cand_transcript = clean_transcript(cand.get("transcript", []))
                         if not cand_transcript:
                             continue
+                        _cinfo["with_transcript"] += 1
                         diff = abs(cand_epoch - anchor_ts)
                         if best_diff is None or diff < best_diff:
                             best_doc = (coll_name, cand)
                             best_diff = diff
                 except Exception as ex:
+                    _cinfo["error"] = str(ex)
                     logger.warning(f"Error querying collection '{coll_name}' for transcript fallback: {ex}")
+                _debug_fallback["collections"][coll_name] = _cinfo
 
             if best_doc is not None:
                 coll_name, cand = best_doc
@@ -373,6 +381,7 @@ async def get_crm_call_transcript(
             "_debug_outbound_anchor_found": outbound_anchor is not None,
             "_debug_anchor_agent": (outbound_anchor.get("agent_id") if outbound_anchor else None),
             "_debug_anchor_ts": (outbound_anchor.get("timestamp") if outbound_anchor else None),
+            "_debug_fallback": _debug_fallback,
         }
     )
 
