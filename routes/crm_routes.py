@@ -365,7 +365,15 @@ async def get_crm_call_transcript(
 
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
-        detail={"success": False, "message": f"Transcript for conversationId '{conversationId}' not found"}
+        detail={
+            "success": False,
+            "message": f"Transcript for conversationId '{conversationId}' not found",
+            # TEMP DEBUG — remove once transcript fallback linking is confirmed working in prod.
+            "_debug_build_marker": "e873195-fallback-v2",
+            "_debug_outbound_anchor_found": outbound_anchor is not None,
+            "_debug_anchor_agent": (outbound_anchor.get("agent_id") if outbound_anchor else None),
+            "_debug_anchor_ts": (outbound_anchor.get("timestamp") if outbound_anchor else None),
+        }
     )
 
 
