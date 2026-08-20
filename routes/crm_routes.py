@@ -317,6 +317,8 @@ async def get_crm_call_transcript(
                     ]
                 }
 
+            IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+
             def _to_epoch(ts):
                 if isinstance(ts, (int, float)):
                     return float(ts)
@@ -326,6 +328,14 @@ async def get_crm_call_transcript(
                     except Exception:
                         return None
                 if isinstance(ts, datetime.datetime):
+                    # Stored as a naive datetime representing IST wall-clock time (see
+                    # bson_safe's "+05:30" formatting elsewhere in this codebase). Calling
+                    # .timestamp() on a naive datetime silently assumes the SYSTEM's local
+                    # timezone, not IST — on a UTC-clocked server this shifts every
+                    # conversion by 5.5 hours, which was pushing every real match outside
+                    # the fallback's time window. Attach IST explicitly instead.
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=IST)
                     return ts.timestamp()
                 return None
 
