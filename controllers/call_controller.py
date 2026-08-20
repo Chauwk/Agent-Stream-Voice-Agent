@@ -20,11 +20,12 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List, Union
 
 async def initiate_outbound_call(
-    phone_number: Union[str, List[str]], 
-    customer_name: str = "Customer", 
+    phone_number: Union[str, List[str]],
+    customer_name: str = "Customer",
     enterprise_id: Optional[str] = None,
     agent_id: Optional[str] = None,
     campaign_id: Optional[str] = None,
+    campaign_name: Optional[str] = None,
     context: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
@@ -77,6 +78,8 @@ async def initiate_outbound_call(
 
         logger.info(f"📞 [CallController] Verified enterprise call for Enterprise: '{enterprise_id}' on behalf of admin. Agent: '{agent_id}', Campaign: '{campaign_id}', Targets: {phone_list}")
 
+        campaign_name = (campaign_name or "").strip() or None
+
         # Prepare merged context
         merged_context = {
             "customer_name": customer_name,
@@ -84,6 +87,7 @@ async def initiate_outbound_call(
             "enterprise_id": enterprise_id,
             "agent_id": agent_id,
             "campaign_id": campaign_id,
+            "campaign_name": campaign_name,
             **(context or {})
         }
 
@@ -186,6 +190,7 @@ async def initiate_outbound_call(
                 "enterprise_id": enterprise_id,
                 "agent_id": agent_id,
                 "campaign_id": campaign_id,
+                "campaign_name": campaign_name,
                 "status": "initiated",
                 "context": merged_context,
                 "timestamp": time.time(),
@@ -310,33 +315,39 @@ async def process_telephony_webhook(webhook_payload: Dict[str, Any]) -> Dict[str
         Dict confirming processing outcomes.
     """
     call_sid = webhook_payload.get("CallSid") or webhook_payload.get("call_sid")
-    event_type = webhook_payload.get("EventType") or webhook_payload.get("event")
-    
-    logger.info(f"📥 [CallController] Telephony Webhook Received: Event={event_type}, CallSID={call_sid}")
-    
+    event_type = webhook_payload.get("EventType") or webhook_payload.get("event") or webhook_payload.get("Status")
+    # Exotel/Twilio-style callbacks send capitalized keys ("Duration"); accept both cases since
+    # this payload previously only looked for lowercase "duration" and silently never matched,
+    # leaving `duration` permanently null on outbound_calls records.
+    duration_value = webhook_payload.get("Duration")
+    if duration_value is None:
+        duration_value = webhook_payload.get("duration")
+
+    logger.info(f"📥 [CallController] Telephony Webhook Received: Event={event_type}, CallSID={call_sid}, Duration={duration_value}")
+
     if not call_sid:
         return {
             "success": False,
             "error": "Missing CallSid identifier in callback payload."
         }
-        
+
     # Update state cache records
     if call_sid in _call_records_cache:
         _call_records_cache[call_sid]["status"] = event_type or "completed"
-        if "duration" in webhook_payload:
-            _call_records_cache[call_sid]["duration"] = webhook_payload.get("duration")
-            
+        if duration_value is not None:
+            _call_records_cache[call_sid]["duration"] = duration_value
+
     # Update status in MongoDB outbound_calls collection
     try:
         from core.mongo_manager import mongo_db
         if mongo_db.client is not None:
             db = mongo_db.client.get_default_database()
+            update_fields = {"status": event_type or "completed"}
+            if duration_value is not None:
+                update_fields["duration"] = duration_value
             await db['outbound_calls'].update_one(
                 {"call_sid": call_sid},
-                {"$set": {
-                    "status": event_type or "completed",
-                    "duration": webhook_payload.get("duration")
-                }}
+                {"$set": update_fields}
             )
             logger.info(f"💾 Updated outbound call status in MongoDB for SID: {call_sid}")
     except Exception as db_err:
@@ -409,12 +420,14 @@ async def fetch_campaign_data(
             cmp_id = doc.get("campaign_id") or doc.get("context", {}).get("campaign_id") or "cmp_default"
             ent_id = doc.get("enterprise_id") or doc.get("context", {}).get("enterprise_id") or enterprise_id
             ag_id = doc.get("agent_id") or doc.get("context", {}).get("agent_id") or agent_id or "default"
+            cmp_name = doc.get("campaign_name") or doc.get("context", {}).get("campaign_name")
             status = doc.get("status", "unknown")
             ts = doc.get("timestamp", 0)
-            
+
             if cmp_id not in campaigns_map:
                 campaigns_map[cmp_id] = {
                     "campaign_id": cmp_id,
+                    "campaign_name": cmp_name,
                     "enterprise_id": ent_id,
                     "agent_id": ag_id,
                     "total_calls": 0,

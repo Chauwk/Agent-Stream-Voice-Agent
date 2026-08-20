@@ -248,32 +248,87 @@ async def get_crm_call_transcript(
         {"call_id": {"$regex": f"^{conversationId}"}},
         {"callId": {"$regex": f"^{conversationId}"}},
         {"call_sid": conversationId},
+        # Links an outbound campaign's Exotel call_sid (from outbound_calls) directly to the
+        # transcript log written by the bridged SIP leg — see modular_sales_bot.py's
+        # "outbound_call_sid" session field.
+        {"outbound_call_sid": conversationId},
         {"_id": conversationId}
     ]
     if ObjectId.is_valid(conversationId):
         id_clauses.append({"_id": ObjectId(conversationId)})
         
     query = {"$or": id_clauses}
-    
+
     target_collections = ["Agent_Stream_CallsLogs", "outbound_calls", "aiagentcallreports"]
     logger.info(f"DEBUG TRANSCRIPT QUERY: {query}")
+    outbound_anchor = None  # remembers the outbound_calls doc if matched but transcript is empty
     for coll_name in target_collections:
         try:
             doc = await db[coll_name].find_one(query)
             logger.info(f"DEBUG TRANSCRIPT RESULT for {coll_name}: {'FOUND' if doc else 'NOT FOUND'}")
             if doc:
-                safe_doc = bson_safe(dict(doc))
-                safe_doc["_id"] = str(safe_doc["_id"])
-                safe_doc["transcript"] = clean_transcript(safe_doc.get("transcript", []))
-                return {
-                    "success": True,
-                    "conversationId": conversationId,
-                    "transcript": safe_doc["transcript"],
-                    "call_details": safe_doc
-                }
+                transcript = clean_transcript(doc.get("transcript", []))
+                if transcript:
+                    safe_doc = bson_safe(dict(doc))
+                    safe_doc["_id"] = str(safe_doc["_id"])
+                    safe_doc["transcript"] = transcript
+                    return {
+                        "success": True,
+                        "conversationId": conversationId,
+                        "transcript": safe_doc["transcript"],
+                        "call_details": safe_doc
+                    }
+                # Matched by call_sid but the bridged SIP leg never linked its own
+                # conversation doc back to this outbound call (see modular_sales_bot.py's
+                # phone-matching fallback failing when the bridged leg reports the
+                # agent's own virtual number instead of the customer's). Keep this doc as
+                # an anchor (timestamp/agent_id/enterprise_id) and fall back below to the
+                # nearest real conversation doc for the same agent instead of returning empty.
+                if coll_name == "outbound_calls":
+                    outbound_anchor = doc
         except Exception as ex:
             logger.warning(f"Error querying collection '{coll_name}' for transcript: {ex}")
-                
+
+    if outbound_anchor is not None:
+        anchor_ts = outbound_anchor.get("timestamp") or 0
+        anchor_agent = outbound_anchor.get("agent_id") or outbound_anchor.get("context", {}).get("agent_id")
+        anchor_ent = outbound_anchor.get("enterprise_id") or outbound_anchor.get("context", {}).get("enterprise_id")
+        if anchor_ts and anchor_agent:
+            window_query = {
+                "$and": [
+                    {"$or": [{"agentId": anchor_agent}, {"agent_id": anchor_agent}]},
+                    {"timestamp": {"$gte": anchor_ts - 30, "$lte": anchor_ts + 600}},
+                ]
+            }
+            if anchor_ent:
+                window_query["$and"].append({
+                    "$or": [
+                        {"enterprise_id": anchor_ent}, {"enterprise": anchor_ent},
+                        {"enterpriseId": anchor_ent}, {}
+                    ]
+                })
+            for coll_name in ("Agent_Stream_CallsLogs", "aiagentcallreports"):
+                try:
+                    cursor = db[coll_name].find(window_query).sort("timestamp", 1)
+                    async for cand in cursor:
+                        cand_transcript = clean_transcript(cand.get("transcript", []))
+                        if cand_transcript:
+                            safe_doc = bson_safe(dict(cand))
+                            safe_doc["_id"] = str(safe_doc["_id"])
+                            safe_doc["transcript"] = cand_transcript
+                            logger.info(
+                                f"DEBUG TRANSCRIPT FALLBACK: matched conversationId '{conversationId}' "
+                                f"to nearby conversation doc '{safe_doc['_id']}' in {coll_name} via time-window fallback."
+                            )
+                            return {
+                                "success": True,
+                                "conversationId": conversationId,
+                                "transcript": safe_doc["transcript"],
+                                "call_details": safe_doc
+                            }
+                except Exception as ex:
+                    logger.warning(f"Error querying collection '{coll_name}' for transcript fallback: {ex}")
+
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail={"success": False, "message": f"Transcript for conversationId '{conversationId}' not found"}
@@ -342,6 +397,7 @@ async def get_crm_agent_metrics(
     total_duration_sec = 0.0
     business_interests = {}
     languages_dist = {}
+    day_wise = {}  # date str (YYYY-MM-DD) -> { count, seconds, <business_interest>: count }
 
     target_collections = ["Agent_Stream_CallsLogs", "outbound_calls", "aiagentcallreports"]
     for coll_name in target_collections:
@@ -352,7 +408,7 @@ async def get_crm_agent_metrics(
                 if doc_id in seen_ids:
                     continue
                 seen_ids.add(doc_id)
-                
+
                 ts = doc.get("timestamp") or doc.get("createdAt") or doc.get("created_at") or 0
                 ts_val = 0.0
                 if isinstance(ts, (int, float)):
@@ -364,34 +420,42 @@ async def get_crm_agent_metrics(
                         ts_val = 0.0
                 elif isinstance(ts, datetime.datetime):
                     ts_val = ts.timestamp()
-                    
+
                 if start_ts is not None and ts_val < start_ts:
                     continue
                 if end_ts is not None and ts_val > end_ts:
                     continue
-                    
+
                 total_calls += 1
                 status_str = str(doc.get("status", "completed")).lower()
                 if status_str in ["completed", "success", "answered"]:
                     completed_calls += 1
                 else:
                     failed_calls += 1
-                    
+
                 duration = float(doc.get("duration") or doc.get("duration_seconds") or 0)
                 total_duration_sec += duration
-                
+
                 b_interest = doc.get("business_interest") or doc.get("car_model") or "General"
                 business_interests[b_interest] = business_interests.get(b_interest, 0) + 1
-                
+
                 lang = doc.get("language") or "en"
                 if isinstance(lang, list) and lang:
                     lang = lang[0]
                 languages_dist[str(lang)] = languages_dist.get(str(lang), 0) + 1
+
+                if ts_val > 0:
+                    day_key = datetime.datetime.fromtimestamp(ts_val).strftime("%Y-%m-%d")
+                    day_entry = day_wise.setdefault(day_key, {"date": day_key, "count": 0, "seconds": 0.0})
+                    day_entry["count"] += 1
+                    day_entry["seconds"] += duration
+                    day_entry[b_interest] = day_entry.get(b_interest, 0) + 1
         except Exception as ex:
             logger.warning(f"Error computing metrics from '{coll_name}': {ex}")
 
     avg_duration = round(total_duration_sec / total_calls, 2) if total_calls > 0 else 0.0
     total_minutes = round(total_duration_sec / 60.0, 2)
+    day_wise_list = sorted(day_wise.values(), key=lambda d: d["date"])
 
     return {
         "success": True,
@@ -404,6 +468,7 @@ async def get_crm_agent_metrics(
             "totalDurationMinutes": total_minutes,
             "averageDurationSeconds": avg_duration,
             "businessInterests": business_interests,
-            "languages": languages_dist
+            "languages": languages_dist,
+            "dayWise": day_wise_list
         }
     }

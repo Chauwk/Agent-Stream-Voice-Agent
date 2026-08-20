@@ -634,15 +634,20 @@ class ModularSalesBot:
                     db = mongo_db.client.get_default_database()
                     outbound_calls_coll = db['outbound_calls']
                     
+                    # NOTE: We deliberately do NOT filter by `status` here. The `status` field on
+                    # this same record is also written by GET /api/v1/calls/status/{sid} (live
+                    # Exotel polling) and the webhook callback, both of which can race ahead of
+                    # this SIP-bridge lookup and flip the record to a terminal status (e.g.
+                    # "completed") microseconds after Exotel actually connects the leg — which
+                    # would otherwise make an actively-ringing/just-answered call invisible to
+                    # outbound detection. Recency (tight time window) is a safe-enough signal on
+                    # its own for identifying "this is the leg we just triggered."
                     cursor = outbound_calls_coll.find({
-                        "timestamp": {"$gt": now_ts - 3600}
+                        "timestamp": {"$gt": now_ts - 600}
                     }).sort("timestamp", -1)
-                    
+
                     candidates = []
                     async for record in cursor:
-                        rec_status = str(record.get("status") or "").lower().replace("-", "_").strip()
-                        if rec_status in ["completed", "failed", "no_answer", "busy", "canceled"]:
-                            continue
                         candidates.append(record)
                         record_phone = record.get("phone_number", "")
                         clean_record = "".join(filter(str.isdigit, str(record_phone)))[-10:]
@@ -651,7 +656,7 @@ class ModularSalesBot:
                             logger.info(f"📞 MongoDB Phone Match! Detected OUTBOUND call to customer: '{record.get('customer_name')}' (phone: {record_phone})")
                             break
 
-                    # Fallback: match most recent initiated call within 180 seconds if number format differed
+                    # Fallback: match most recent call within 180 seconds if number format differed
                     if not outbound_record and candidates:
                         for cand in candidates:
                             cand_ts = cand.get("timestamp", 0)
@@ -662,23 +667,21 @@ class ModularSalesBot:
 
                 except Exception as db_err:
                     logger.error(f"⚠️ Failed to query outbound_calls collection from MongoDB: {db_err}")
-            
+
             # Fallback to in-memory _call_records_cache if MongoDB did not resolve
             if not outbound_record:
                 from controllers.call_controller import _call_records_cache
                 for call_sid, record in _call_records_cache.items():
-                    rec_status = str(record.get("status") or "").lower().replace("-", "_").strip()
-                    if rec_status not in ["completed", "failed", "no_answer", "busy", "canceled"]:
-                        record_phone = record.get("phone_number", "")
-                        clean_record = "".join(filter(str.isdigit, str(record_phone)))[-10:]
-                        if clean_record and (clean_record == clean_from or clean_record == clean_to):
-                            outbound_record = record
-                            logger.info(f"📞 Cache Phone Match! Detected OUTBOUND call to customer: '{record.get('customer_name')}'")
-                            break
-                        elif (now_ts - record.get("timestamp", 0)) <= 180:
-                            outbound_record = record
-                            logger.info(f"📞 Cache Recent Match! Detected OUTBOUND call to customer: '{record.get('customer_name')}'")
-                            break
+                    record_phone = record.get("phone_number", "")
+                    clean_record = "".join(filter(str.isdigit, str(record_phone)))[-10:]
+                    if clean_record and (clean_record == clean_from or clean_record == clean_to):
+                        outbound_record = record
+                        logger.info(f"📞 Cache Phone Match! Detected OUTBOUND call to customer: '{record.get('customer_name')}'")
+                        break
+                    elif (now_ts - record.get("timestamp", 0)) <= 180:
+                        outbound_record = record
+                        logger.info(f"📞 Cache Recent Match! Detected OUTBOUND call to customer: '{record.get('customer_name')}'")
+                        break
                         
         if agent_config is None:
             # Resolve target ID from matched outbound record (agent_id or enterprise_id) or default to session_to_phone
@@ -875,7 +878,7 @@ class ModularSalesBot:
             
             is_hindi_primary = primary_lang.startswith("hi")
             default_greeting_inbound = f"नमस्ते! मैं {Config.COMPANY_NAME} से {agent_name} बोल रही हूँ। मैं आज आपकी क्या सहायता कर सकती हूँ?" if is_hindi_primary else f"Hello! I'm {agent_name} calling back from {Config.COMPANY_NAME}. How can I help you today?"
-            default_greeting_outbound = f"नमस्ते! मैं {Config.COMPANY_NAME} से {agent_name} बोल रही हूँ। क्या मेरी बात {{customer_name}} से हो रही है?" if is_hindi_primary else f"Hello! I'm {agent_name} calling back from {Config.COMPANY_NAME}. How can I help you today?"
+            default_greeting_outbound = f"नमस्ते! मैं {Config.COMPANY_NAME} से {agent_name} बोल रही हूँ। क्या मेरी बात {{customer_name}} से हो रही है?" if is_hindi_primary else f"Hello! I'm {agent_name} calling from {Config.COMPANY_NAME}. Am I speaking with {{customer_name}}?"
 
             # Build system instruction: include custom agent instructions, guardrails, and place highest-priority language mandate at the VERY END!
             base_prompt = f"You are {agent_name}, a customer support agent.\n"
@@ -897,9 +900,12 @@ class ModularSalesBot:
                 f"{final_language_mandate}"
             )
 
-            # Determine whether this is an active outbound call session vs a customer calling in
-            rec_status = str(outbound_record.get("status") if outbound_record else "").lower().replace("-", "_").strip()
-            is_active_outbound_leg = bool(outbound_record and rec_status not in ["completed", "failed", "no_answer", "busy", "canceled"])
+            # Determine whether this is an active outbound call session vs a customer calling in.
+            # `outbound_record` was already matched by recency + phone number above; we don't
+            # re-check `status` here for the same reason we don't filter on it in the match query
+            # (see comment above) — a live poll/webhook can flip it to a terminal status while
+            # this bridged leg is still actively ringing/talking.
+            is_active_outbound_leg = bool(outbound_record)
             
             if is_active_outbound_leg:
                 custom_outbound = (agent_config.get("firstMessage") or "").strip() if agent_config else ""
@@ -961,6 +967,9 @@ class ModularSalesBot:
             "send_email_tool": send_email,
             "to_phone": session_to_phone,
             "agent_config": agent_config, # Store agent configuration reference
+            "outbound_call_sid": outbound_record.get("call_sid") if outbound_record else None,
+            "outbound_customer_name": outbound_record.get("customer_name") if outbound_record else None,
+            "outbound_phone_number": outbound_record.get("phone_number") if outbound_record else None,
             "direction": "outbound" if outbound_record else "inbound",
             "deepgram_ws": None,
             "sarvam_ws": None,
@@ -2119,6 +2128,9 @@ class ModularSalesBot:
                         agent_name=agent_name,
                         company_name=company_name,
                         agent_id=agent_id,
+                        outbound_call_sid=session_state.get("outbound_call_sid"),
+                        outbound_customer_name=session_state.get("outbound_customer_name"),
+                        outbound_phone_number=session_state.get("outbound_phone_number"),
                         enterprise_id=enterprise_id,
                         agent_mongo_id=agent_mongo_id
                     )

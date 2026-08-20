@@ -103,7 +103,10 @@ async def save_enriched_call_log(
     company_name: Optional[str] = None,
     agent_id: Optional[str] = None,
     enterprise_id: Optional[str] = None,
-    agent_mongo_id: Optional[str] = None
+    agent_mongo_id: Optional[str] = None,
+    outbound_call_sid: Optional[str] = None,
+    outbound_customer_name: Optional[str] = None,
+    outbound_phone_number: Optional[str] = None
 ):
     """Enriches transcript using Gemini and saves the complete call analytics document to MongoDB."""
     try:
@@ -137,15 +140,20 @@ async def save_enriched_call_log(
             # Call metadata
             "direction": direction or "inbound",
             "caller_phone_no": to_phone,
-            "lead_phone_no": analytics.get("provided_phone_no", "Not provided"),
+            # Prefer the phone number the customer actually stated during the call; fall back to
+            # the number we dialed (known upfront for outbound campaigns) if Gemini found none.
+            "lead_phone_no": analytics.get("provided_phone_no") if analytics.get("provided_phone_no", "Not provided") != "Not provided" else (outbound_phone_number or "Not provided"),
             "timestamp": ist_now,
-            
+            # Links this transcript back to the outbound_calls campaign record that triggered it
+            # (Exotel's outbound call_sid), so campaign results can be joined to a conversation.
+            "outbound_call_sid": outbound_call_sid,
+
             # Transcript and summary
             "transcript": transcript,
             "messages_count": len(transcript),
-            
+
             # Extracted Fields from Gemini
-            "name": analytics.get("name", "Not provided"),
+            "name": analytics.get("name") if analytics.get("name", "Not provided") != "Not provided" else (outbound_customer_name or "Not provided"),
             "address": analytics.get("address", "Not provided"),
             "email_id": analytics.get("email_id", "Not provided"),
             "caller_meeting_consent": analytics.get("caller_meeting_consent", "No"),

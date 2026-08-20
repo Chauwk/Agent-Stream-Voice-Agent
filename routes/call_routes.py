@@ -48,6 +48,11 @@ class OutboundCallRequest(BaseModel):
         example="cmp_20260731_a1b2c3d4",
         description="Campaign ID. Automatically generated if omitted."
     )
+    campaign_name: Optional[str] = Field(
+        None,
+        example="Summer Promo 2026",
+        description="Human-readable campaign name, persisted and returned in campaign listings."
+    )
     context: Optional[Dict[str, Any]] = Field(
         None,
         example={"source": "HubSpot"},
@@ -95,6 +100,7 @@ class CampaignCallDetail(BaseModel):
 
 class CampaignSummary(BaseModel):
     campaign_id: str = Field(..., json_schema_extra={"example": "cmp_20260731_a1b2c3d4"})
+    campaign_name: Optional[str] = Field(None, json_schema_extra={"example": "Summer Promo 2026"})
     enterprise_id: str = Field(..., json_schema_extra={"example": "ent_admin_101"})
     agent_id: str = Field(..., json_schema_extra={"example": "agent_sales_01"})
     total_calls: int = Field(..., json_schema_extra={"example": 10})
@@ -137,6 +143,7 @@ async def trigger_call(payload: OutboundCallRequest):
         enterprise_id=payload.enterprise_id,
         agent_id=payload.agent_id,
         campaign_id=payload.campaign_id,
+        campaign_name=payload.campaign_name,
         context=payload.context
     )
     
@@ -375,7 +382,8 @@ async def trigger_bulk_calls(
     file: UploadFile = File(...),
     enterprise_id: Optional[str] = Query(None, description="Enterprise ID for verification on behalf of enterprise admin"),
     agent_id: Optional[str] = Query(None, description="Agent ID for AI configuration"),
-    campaign_id: Optional[str] = Query(None, description="Campaign ID (Auto-generated if omitted)")
+    campaign_id: Optional[str] = Query(None, description="Campaign ID (Auto-generated if omitted)"),
+    campaign_name: Optional[str] = Query(None, description="Human-readable campaign name, persisted and returned in campaign listings")
 ):
     filename = file.filename.lower()
     if not (filename.endswith('.csv') or filename.endswith('.xlsx')):
@@ -472,7 +480,8 @@ async def trigger_bulk_calls(
                 customer_name=name,
                 enterprise_id=contact.get("enterprise_id"),
                 agent_id=contact.get("agent_id"),
-                campaign_id=contact.get("campaign_id")
+                campaign_id=contact.get("campaign_id"),
+                campaign_name=campaign_name
             )
             initiated_calls.append({
                 "phone_number": phone,

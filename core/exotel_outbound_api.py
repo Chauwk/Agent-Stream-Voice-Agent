@@ -94,7 +94,11 @@ class ExotelOutboundAPI:
             }
             
             if context:
-                payload["StatusCallback"] = f"http://{Config.SIP_PUBLIC_IP}:5000/api/v1/calls/webhook"
+                # NOTE: previously hardcoded port 5000, but the FastAPI app actually listens on
+                # Config.SERVER_PORT (5002 by default) — the mismatch meant Exotel's status
+                # callback could never reach this server, so `status`/`duration` on outbound_calls
+                # never updated automatically (only manual polling of GET /status/{sid} worked).
+                payload["StatusCallback"] = f"http://{Config.SIP_PUBLIC_IP}:{Config.SERVER_PORT}/api/v1/calls/webhook"
             
             headers = {
                 "Authorization": self.auth_header,
