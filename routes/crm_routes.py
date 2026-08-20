@@ -294,40 +294,74 @@ async def get_crm_call_transcript(
         anchor_agent = outbound_anchor.get("agent_id") or outbound_anchor.get("context", {}).get("agent_id")
         anchor_ent = outbound_anchor.get("enterprise_id") or outbound_anchor.get("context", {}).get("enterprise_id")
         if anchor_ts and anchor_agent:
-            window_query = {
-                "$and": [
-                    {"$or": [{"agentId": anchor_agent}, {"agent_id": anchor_agent}]},
-                    {"timestamp": {"$gte": anchor_ts - 30, "$lte": anchor_ts + 600}},
+            # NOTE: outbound_calls.timestamp is a numeric epoch, but
+            # Agent_Stream_CallsLogs/aiagentcallreports store timestamp as an ISO
+            # string — a numeric Mongo range query on that field matches nothing
+            # across collections with mixed types, so filter by agent only in
+            # Mongo and do the time-window comparison in Python instead.
+            agent_query = {
+                "$or": [
+                    {"agentId": anchor_agent}, {"agent_id": anchor_agent},
+                    {"agent_mongo_id": anchor_agent}
                 ]
             }
             if anchor_ent:
-                window_query["$and"].append({
-                    "$or": [
-                        {"enterprise_id": anchor_ent}, {"enterprise": anchor_ent},
-                        {"enterpriseId": anchor_ent}, {}
+                agent_query = {
+                    "$and": [
+                        agent_query,
+                        {"$or": [
+                            {"enterprise_id": anchor_ent}, {"enterprise": anchor_ent},
+                            {"enterpriseId": anchor_ent}
+                        ]}
                     ]
-                })
+                }
+
+            def _to_epoch(ts):
+                if isinstance(ts, (int, float)):
+                    return float(ts)
+                if isinstance(ts, str):
+                    try:
+                        return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+                    except Exception:
+                        return None
+                if isinstance(ts, datetime.datetime):
+                    return ts.timestamp()
+                return None
+
+            best_doc = None
+            best_diff = None
             for coll_name in ("Agent_Stream_CallsLogs", "aiagentcallreports"):
                 try:
-                    cursor = db[coll_name].find(window_query).sort("timestamp", 1)
+                    cursor = db[coll_name].find(agent_query).sort("_id", -1).limit(50)
                     async for cand in cursor:
+                        cand_epoch = _to_epoch(cand.get("timestamp"))
+                        if cand_epoch is None or not (anchor_ts - 30 <= cand_epoch <= anchor_ts + 600):
+                            continue
                         cand_transcript = clean_transcript(cand.get("transcript", []))
-                        if cand_transcript:
-                            safe_doc = bson_safe(dict(cand))
-                            safe_doc["_id"] = str(safe_doc["_id"])
-                            safe_doc["transcript"] = cand_transcript
-                            logger.info(
-                                f"DEBUG TRANSCRIPT FALLBACK: matched conversationId '{conversationId}' "
-                                f"to nearby conversation doc '{safe_doc['_id']}' in {coll_name} via time-window fallback."
-                            )
-                            return {
-                                "success": True,
-                                "conversationId": conversationId,
-                                "transcript": safe_doc["transcript"],
-                                "call_details": safe_doc
-                            }
+                        if not cand_transcript:
+                            continue
+                        diff = abs(cand_epoch - anchor_ts)
+                        if best_diff is None or diff < best_diff:
+                            best_doc = (coll_name, cand)
+                            best_diff = diff
                 except Exception as ex:
                     logger.warning(f"Error querying collection '{coll_name}' for transcript fallback: {ex}")
+
+            if best_doc is not None:
+                coll_name, cand = best_doc
+                safe_doc = bson_safe(dict(cand))
+                safe_doc["_id"] = str(safe_doc["_id"])
+                safe_doc["transcript"] = clean_transcript(cand.get("transcript", []))
+                logger.info(
+                    f"DEBUG TRANSCRIPT FALLBACK: matched conversationId '{conversationId}' "
+                    f"to nearby conversation doc '{safe_doc['_id']}' in {coll_name} via time-window fallback."
+                )
+                return {
+                    "success": True,
+                    "conversationId": conversationId,
+                    "transcript": safe_doc["transcript"],
+                    "call_details": safe_doc
+                }
 
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
