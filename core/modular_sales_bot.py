@@ -802,11 +802,39 @@ class ModularSalesBot:
                     cc_recipient: Optional CC email address (e.g. for partnerships/proposals).
                 """
                 from core.email_client import SMTPClient
+
+                # Prefer this agent's own Gmail App Password creds (saved via
+                # POST /{id}/sendemialfromaiagentstools) over the global SMTP
+                # config, so each agent sends from its own configured address.
+                override = None
+                agent_cc_list = []
+                agent_id_for_email = agent_config.get("agentId") if agent_config else None
+                if agent_id_for_email:
+                    try:
+                        from core.mongo_manager import mongo_db
+                        if mongo_db.client is not None:
+                            db = mongo_db.client.get_default_database()
+                            creds = await db['agent_email_credentials'].find_one({"agentId": agent_id_for_email})
+                            if creds and creds.get("smtp_user") and creds.get("smtp_password"):
+                                override = {
+                                    "host": creds.get("smtp_host"),
+                                    "port": creds.get("smtp_port"),
+                                    "user": creds.get("smtp_user"),
+                                    "password": creds.get("smtp_password"),
+                                    "from_name": creds.get("senderName"),
+                                    "from_email": creds.get("email"),
+                                }
+                                agent_cc_list = creds.get("ccList", [])
+                    except Exception as cred_err:
+                        logger.warning(f"⚠️ Failed to load per-agent email credentials for '{agent_id_for_email}': {cred_err}")
+
                 success = await SMTPClient.send_email(
                     recipient_email=recipient_email,
                     subject=subject,
                     body=body,
-                    cc_recipient=cc_recipient
+                    cc_recipient=cc_recipient,
+                    cc_list=agent_cc_list,
+                    override=override
                 )
                 if success:
                     return f"Email successfully sent to {recipient_email}"

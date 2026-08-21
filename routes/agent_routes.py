@@ -149,11 +149,13 @@ class KBTextCreateRequest(BaseModel):
     content: str = Field(..., example="Full refunds within 30 days of purchase...")
 
 class SaveEmailCredentialsRequest(BaseModel):
-    email: str = Field(..., example="agent@company.com")
-    smtp_host: str = Field(..., example="smtp.gmail.com")
-    smtp_port: int = Field(..., example=587)
-    smtp_user: str = Field(..., example="agent@company.com")
-    smtp_password: str = Field(..., example="app-password-here")
+    # Frontend sends Gmail App Password creds under these upper-case keys
+    # (see AIAgentsExotelViewTools.jsx) — Gmail's SMTP host/port are fixed,
+    # so there's no need to collect them from the user.
+    SENDER_EMAIL: str = Field(..., example="agent@company.com")
+    PASSWORD: str = Field(..., example="xxxx xxxx xxxx xxxx")
+    NAME: str = Field(..., example="Chauwk Support")
+    CC: List[str] = Field(default_factory=list, example=["ops@company.com"])
 
 # === Pydantic Response Schemas ===
 
@@ -1745,13 +1747,22 @@ async def save_email_credentials(
         )
     
     agent_id = agent.get("agentId")
+    # Stable, deterministic id (not a fresh ObjectId per save) so re-saving
+    # credentials for the same agent always returns the same doc_id — the
+    # frontend chains this straight into the KB-text-creation call to link
+    # the agent's "I can send email" capability to its knowledge base.
+    doc_id = f"email_creds_{agent_id}"
     creds_doc = {
         "agentId": agent_id,
-        "email": payload.email,
-        "smtp_host": payload.smtp_host,
-        "smtp_port": payload.smtp_port,
-        "smtp_user": payload.smtp_user,
-        "smtp_password": payload.smtp_password,
+        "docId": doc_id,
+        "email": payload.SENDER_EMAIL,
+        "senderName": payload.NAME,
+        "ccList": [c.strip() for c in payload.CC if c and c.strip()],
+        # Gmail App Passwords always use these fixed SMTP settings.
+        "smtp_host": "smtp.gmail.com",
+        "smtp_port": 587,
+        "smtp_user": payload.SENDER_EMAIL,
+        "smtp_password": payload.PASSWORD,
         "updatedAt": datetime.datetime.utcnow().isoformat() + "Z"
     }
 
@@ -1771,7 +1782,8 @@ async def save_email_credentials(
 
     return {
         "success": True,
-        "message": "Email credentials saved successfully"
+        "message": "Email credentials saved successfully",
+        "data": {"_id": doc_id, "docId": doc_id}
     }
 
 @router.get(
@@ -1815,6 +1827,8 @@ async def get_email_credentials(
         "success": True,
         "data": {
             "email": creds.get("email"),
+            "senderName": creds.get("senderName"),
+            "ccList": creds.get("ccList", []),
             "smtp_host": creds.get("smtp_host"),
             "smtp_port": creds.get("smtp_port"),
             "smtp_user": creds.get("smtp_user"),
