@@ -93,7 +93,15 @@ class Config:
     SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '')
     SMTP_FROM_NAME = os.getenv('SMTP_FROM_NAME', 'Chauwk Sales Team')
     SMTP_FROM_EMAIL = os.getenv('SMTP_FROM_EMAIL', '')
-    
+
+    # ===== GMAIL OAUTH (per-enterprise "send as me" — replaces App Passwords) =====
+    # Must match the OAuth client used by ai-webhooks.chauwk.com's existing
+    # /auth/google/{id} Calendar-connect flow, which already writes refresh
+    # tokens into the shared `oauthtokens` Mongo collection this reads from.
+    GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
+    GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
+    GOOGLE_TOKEN_URI = os.getenv('GOOGLE_TOKEN_URI', 'https://oauth2.googleapis.com/token')
+
     # ===== DISABLE AI ENGINES (FOR TESTING / SAVING CREDITS) =====
     DISABLE_AI_ENGINES = os.getenv('DISABLE_AI_ENGINES', 'false').lower() == 'true'
     

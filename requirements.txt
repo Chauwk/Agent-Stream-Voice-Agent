@@ -37,3 +37,5 @@ python-multipart
 playwright
 motor
 openpyxl
+google-auth
+google-api-python-client

@@ -803,12 +803,46 @@ class ModularSalesBot:
                 """
                 from core.email_client import SMTPClient
 
-                # Prefer this agent's own Gmail App Password creds (saved via
-                # POST /{id}/sendemialfromaiagentstools) over the global SMTP
-                # config, so each agent sends from its own configured address.
+                agent_id_for_email = agent_config.get("agentId") if agent_config else None
+                enterprise_id_for_email = agent_config.get("enterpriseId") or agent_config.get("enterprise") if agent_config else None
+
+                # 1) Preferred: send as the Enterprise Admin's own connected Gmail
+                # (OAuth, no password stored) — one connection shared across every
+                # agent that enterprise owns. See core/gmail_client.py.
+                if enterprise_id_for_email:
+                    try:
+                        from core.gmail_client import GmailOAuthClient
+                        if GmailOAuthClient.is_configured():
+                            from core.mongo_manager import mongo_db
+                            if mongo_db.client is not None:
+                                db = mongo_db.client.get_default_database()
+                                from bson import ObjectId as _ObjectId
+                                try:
+                                    ent_oid = _ObjectId(enterprise_id_for_email) if _ObjectId.is_valid(enterprise_id_for_email) else enterprise_id_for_email
+                                except Exception:
+                                    ent_oid = enterprise_id_for_email
+                                enterprise_doc = await db['enterprises'].find_one({"_id": ent_oid})
+                                if enterprise_doc and enterprise_doc.get("email"):
+                                    success = await GmailOAuthClient.send_email(
+                                        enterprise_id=str(enterprise_id_for_email),
+                                        sender_email=enterprise_doc.get("email"),
+                                        sender_name=enterprise_doc.get("userName") or "Chauwk",
+                                        recipient_email=recipient_email,
+                                        subject=subject,
+                                        body=body,
+                                        cc_list=[cc_recipient] if cc_recipient else [],
+                                    )
+                                    if success:
+                                        return f"Email successfully sent to {recipient_email}"
+                                    # No connected Gmail / send failed — fall through to legacy paths below.
+                    except Exception as gmail_err:
+                        logger.warning(f"⚠️ Gmail OAuth send failed for enterprise '{enterprise_id_for_email}': {gmail_err}")
+
+                # 2) Legacy fallback: this agent's own Gmail App Password creds
+                # (saved via POST /{id}/sendemialfromaiagentstools), kept for
+                # agents that configured this before OAuth was available.
                 override = None
                 agent_cc_list = []
-                agent_id_for_email = agent_config.get("agentId") if agent_config else None
                 if agent_id_for_email:
                     try:
                         from core.mongo_manager import mongo_db
@@ -828,6 +862,7 @@ class ModularSalesBot:
                     except Exception as cred_err:
                         logger.warning(f"⚠️ Failed to load per-agent email credentials for '{agent_id_for_email}': {cred_err}")
 
+                # 3) Final fallback: global Config.SMTP_* shared account.
                 success = await SMTPClient.send_email(
                     recipient_email=recipient_email,
                     subject=subject,
