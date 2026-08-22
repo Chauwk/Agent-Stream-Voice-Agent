@@ -73,8 +73,24 @@ jobs:
           sudo docker rm -f voice-bot || true
 
       - name: Deploy with Docker Compose
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: |
           cp /home/ubuntu/Agent-Stream-Voice-Agent/.env .env
+          # Overlay repo secrets that aren't yet on the persistent server .env
+          # (e.g. GOOGLE_CLIENT_ID/SECRET for the Gmail OAuth send feature).
+          # Idempotent: replaces the line if present, appends if not.
+          for VAR in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET; do
+            VAL="${!VAR}"
+            if [ -n "$VAL" ]; then
+              if grep -q "^${VAR}=" .env; then
+                sed -i "s|^${VAR}=.*|${VAR}=${VAL}|" .env
+              else
+                echo "${VAR}=${VAL}" >> .env
+              fi
+            fi
+          done
           sudo docker compose pull voice-bot
           sudo docker compose up -d --no-recreate chromadb
           sudo docker compose up -d --force-recreate voice-bot
