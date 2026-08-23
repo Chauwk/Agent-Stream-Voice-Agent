@@ -186,7 +186,20 @@ async def get_crm_agent_leads(
                 raw_call_id = str(doc.get("call_id") or doc.get("call_sid") or doc_id).strip()
                 call_key = raw_call_id.split("@")[0].strip()
                 status_str = doc.get("status", "completed")
-                duration = doc.get("duration") or doc.get("duration_seconds") or 0
+                # duration_seconds is always numeric; "duration" is a display
+                # string like "232.5s" (see analytics_manager.py) that used to
+                # win here since it's checked first and always truthy — the
+                # frontend's Math ops then evaluated "232s" as NaN. Prefer the
+                # numeric field, and defensively coerce whatever we do get.
+                raw_duration = doc.get("duration_seconds")
+                if raw_duration is None:
+                    raw_duration = doc.get("duration")
+                if isinstance(raw_duration, str):
+                    try:
+                        raw_duration = float(raw_duration.rstrip("sS").strip())
+                    except (ValueError, AttributeError):
+                        raw_duration = 0
+                duration = raw_duration or 0
                 
                 lead_entry = {
                     "id": doc_id,
@@ -516,7 +529,20 @@ async def get_crm_agent_metrics(
                 else:
                     failed_calls += 1
 
-                duration = float(doc.get("duration") or doc.get("duration_seconds") or 0)
+                # Same duration_seconds-vs-"duration" string bug as the leads
+                # endpoint above — "duration" can be "232.5s", which float()
+                # raises on, silently aborting the rest of this collection's
+                # loop (caught by the broad except below). Prefer the numeric
+                # field and defensively parse the string as a fallback.
+                raw_duration = doc.get("duration_seconds")
+                if raw_duration is None:
+                    raw_duration = doc.get("duration")
+                if isinstance(raw_duration, str):
+                    try:
+                        raw_duration = float(raw_duration.rstrip("sS").strip())
+                    except (ValueError, AttributeError):
+                        raw_duration = 0
+                duration = float(raw_duration or 0)
                 total_duration_sec += duration
 
                 b_interest = doc.get("business_interest") or doc.get("car_model") or "General"
