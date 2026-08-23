@@ -876,6 +876,41 @@ class ModularSalesBot:
                 else:
                     return f"Failed to send email to {recipient_email}. Please check SMTP configurations."
 
+            # Define schedule_meeting tool
+            async def schedule_meeting(
+                attendee_email: str,
+                meeting_date: str,
+                meeting_time: str,
+                duration_minutes: int = 30,
+                summary: str = "Meeting with Chauwk",
+            ) -> str:
+                """Check availability and book a real meeting on the connected Google Calendar.
+
+                Args:
+                    attendee_email: The caller's email address to invite to the meeting.
+                    meeting_date: The requested date in YYYY-MM-DD format.
+                    meeting_time: The requested time in 24-hour HH:MM format (IST).
+                    duration_minutes: Meeting length in minutes. Defaults to 30.
+                    summary: A short title for the meeting.
+                """
+                enterprise_id_for_meeting = agent_config.get("enterpriseId") or agent_config.get("enterprise") if agent_config else None
+                if not enterprise_id_for_meeting:
+                    return "Unable to schedule: no enterprise is associated with this agent."
+
+                from core.calendar_client import CalendarClient
+                result = await CalendarClient.schedule_meeting(
+                    enterprise_id=str(enterprise_id_for_meeting),
+                    attendee_email=attendee_email,
+                    meeting_date=meeting_date,
+                    meeting_time=meeting_time,
+                    duration_minutes=duration_minutes,
+                    summary=summary,
+                )
+                if result["success"]:
+                    return f"Meeting successfully booked for {meeting_date} at {meeting_time}."
+                else:
+                    return f"Meeting could not be booked: {result['reason']}"
+
             agent_name = agent_config.get("name", Config.SALES_BOT_NAME) if agent_config else Config.SALES_BOT_NAME
             agent_instructions = agent_config.get("instructions", "") if agent_config else ""
             
@@ -1028,6 +1063,7 @@ class ModularSalesBot:
             "end_call_tool": end_call,
             "query_knowledge_base_tool": query_knowledge_base,
             "send_email_tool": send_email,
+            "schedule_meeting_tool": schedule_meeting,
             "to_phone": session_to_phone,
             "agent_config": agent_config, # Store agent configuration reference
             "outbound_call_sid": outbound_record.get("call_sid") if outbound_record else None,
@@ -1472,6 +1508,7 @@ class ModularSalesBot:
         end_call = session_state["end_call_tool"]
         query_knowledge_base = session_state["query_knowledge_base_tool"]
         send_email = session_state.get("send_email_tool")
+        schedule_meeting = session_state.get("schedule_meeting_tool")
         llm_queue = session_state["llm_queue"]
         tts_queue = session_state["tts_queue"]
         
@@ -1565,7 +1602,7 @@ class ModularSalesBot:
                                 contents=history[-10:] if len(history) > 10 else history,
                                 config=types.GenerateContentConfig(
                                     system_instruction=system_instruction,
-                                    tools=[end_call, query_knowledge_base, send_email],
+                                    tools=[end_call, query_knowledge_base, send_email, schedule_meeting],
                                     safety_settings=safety_settings
                                 )
                             )
