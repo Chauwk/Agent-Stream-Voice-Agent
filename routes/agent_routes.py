@@ -2106,7 +2106,7 @@ async def download_agent_kb_item(
 
 
 @router.get(
-    "/api/exotel-sip/agents/{id}/email-credential-history",
+    "/{id}/email-credential-history",
     tags=["Agent Tools"],
     summary="Get Email Credential History (Exotel)",
     description="Gets the currently configured SMTP credentials for this agent."
@@ -2117,57 +2117,20 @@ async def get_email_credential_history(
 ):
     validate_enterprise(x_enterprise_id)
     agent = await find_agent_by_id_and_enterprise(id, x_enterprise_id)
-    
+
     if not agent:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"success": False, "message": "Agent not found"}
         )
-    
+
     agent_id = agent.get("agentId")
     db = mongo_db.client.get_default_database()
     cred = await db['agent_email_credentials'].find_one({"agentId": agent_id})
-    
+
     if not cred:
         return {"success": True, "data": []}
-        
-    return {
-        "success": True,
-        "data": [{
-            "id": str(cred.get("_id", "")),
-            "email": cred.get("email", ""),
-            "status": "Verified",
-            "createdAt": cred.get("updatedAt", "")
-        }]
-    }
 
-
-@router.get(
-    "/api/exotel-sip/agents/{id}/email-credential-history",
-    tags=["Agent Tools"],
-    summary="Get Email Credential History (Exotel)",
-    description="Gets the currently configured SMTP credentials for this agent."
-)
-async def get_email_credential_history(
-    id: str,
-    x_enterprise_id: str = Header(None, alias="x-enterprise-id")
-):
-    validate_enterprise(x_enterprise_id)
-    agent = await find_agent_by_id_and_enterprise(id, x_enterprise_id)
-    
-    if not agent:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"success": False, "message": "Agent not found"}
-        )
-    
-    agent_id = agent.get("agentId")
-    db = mongo_db.client.get_default_database()
-    cred = await db['agent_email_credentials'].find_one({"agentId": agent_id})
-    
-    if not cred:
-        return {"success": True, "data": []}
-        
     return {
         "success": True,
         "data": [{
