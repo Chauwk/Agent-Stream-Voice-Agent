@@ -697,8 +697,23 @@ class ModularSalesBot:
                     agent_config = await resolve_agent_config(target_id)
                     if not agent_config and session_from_phone:
                         agent_config = await resolve_agent_config(session_from_phone)
-                        
+
                     if agent_config:
+                        # Per-recipient language override — set on the bulk-upload/outbound-call
+                        # record via the "language" file column (routes/call_routes.py). Build a
+                        # NEW dict rather than mutating agent_config in place: resolve_agent_config()
+                        # may return a cached/shared object reused by other concurrent calls to the
+                        # same agent, and mutating it would leak this one recipient's language
+                        # override into unrelated calls.
+                        # Note: language resolution below (agent_languages) checks the PLURAL
+                        # "languages" list before falling back to this singular "language" key —
+                        # override both so the per-recipient value wins regardless of which the
+                        # agent was originally configured with.
+                        call_language = (outbound_record.get("context") or {}).get("language") if outbound_record else None
+                        if call_language:
+                            agent_config = {**agent_config, "language": call_language, "languages": [call_language]}
+                            logger.info(f"🌐 Per-recipient language override for this outbound call: '{call_language}'")
+
                         # Pre-trigger custom agent greeting audio caching in background so audio is ready in RAM
                         asyncio.create_task(self._get_agent_greeting_audio(agent_config))
                 except Exception as e:

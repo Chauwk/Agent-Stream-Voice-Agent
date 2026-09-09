@@ -405,14 +405,19 @@ async def trigger_bulk_calls(
                 r_ent = row.get("enterprise_id") or row.get("enterprise") or enterprise_id
                 r_ag = row.get("agent_id") or row.get("agent") or agent_id
                 r_cmp = row.get("campaign_id") or row.get("campaign") or batch_campaign_id
-                
+                # Per-recipient language override — optional. If a row omits it (or the column
+                # isn't present at all), the call falls back to the agent's own default language,
+                # same as before this column existed.
+                r_lang = row.get("language") or row.get("Language") or row.get("lang")
+
                 if phone:
                     contacts.append({
                         "phone": str(phone).strip(),
                         "name": str(name).strip(),
                         "enterprise_id": r_ent,
                         "agent_id": r_ag,
-                        "campaign_id": r_cmp
+                        "campaign_id": r_cmp,
+                        "language": str(r_lang).strip() if r_lang else None
                     })
         else:
             # Excel parser using openpyxl
@@ -429,7 +434,8 @@ async def trigger_bulk_calls(
             ent_idx = None
             ag_idx = None
             cmp_idx = None
-            
+            lang_idx = None
+
             for idx, header in enumerate(headers):
                 if header:
                     h = str(header).lower().strip()
@@ -443,13 +449,15 @@ async def trigger_bulk_calls(
                         ag_idx = idx
                     elif h in ["campaign_id", "campaign", "campaign id"]:
                         cmp_idx = idx
-                        
+                    elif h in ["language", "lang"]:
+                        lang_idx = idx
+
             # Fallbacks if headers are missing
             if phone_idx is None:
                 phone_idx = 0
             if name_idx is None:
                 name_idx = 1 if len(headers) > 1 else 0
-                
+
             # Iterate data rows
             for row in sheet.iter_rows(min_row=2, values_only=True):
                 if not row or len(row) <= phone_idx:
@@ -459,14 +467,17 @@ async def trigger_bulk_calls(
                 r_ent = row[ent_idx] if ent_idx is not None and len(row) > ent_idx else enterprise_id
                 r_ag = row[ag_idx] if ag_idx is not None and len(row) > ag_idx else agent_id
                 r_cmp = row[cmp_idx] if cmp_idx is not None and len(row) > cmp_idx else batch_campaign_id
-                
+                # Optional per-recipient language override — same fallback rule as the CSV path.
+                r_lang = row[lang_idx] if lang_idx is not None and len(row) > lang_idx else None
+
                 if phone:
                     contacts.append({
                         "phone": str(phone).strip(),
                         "name": str(name).strip() if name else "Customer",
                         "enterprise_id": str(r_ent).strip() if r_ent else enterprise_id,
                         "agent_id": str(r_ag).strip() if r_ag else agent_id,
-                        "campaign_id": str(r_cmp).strip() if r_cmp else batch_campaign_id
+                        "campaign_id": str(r_cmp).strip() if r_cmp else batch_campaign_id,
+                        "language": str(r_lang).strip() if r_lang else None
                     })
 
         initiated_calls = []
@@ -475,13 +486,15 @@ async def trigger_bulk_calls(
             name = contact["name"]
             
             # Call initiate_outbound_call controller function
+            call_context = {"language": contact["language"]} if contact.get("language") else None
             result = await call_controller.initiate_outbound_call(
                 phone_number=phone,
                 customer_name=name,
                 enterprise_id=contact.get("enterprise_id"),
                 agent_id=contact.get("agent_id"),
                 campaign_id=contact.get("campaign_id"),
-                campaign_name=campaign_name
+                campaign_name=campaign_name,
+                context=call_context
             )
             initiated_calls.append({
                 "phone_number": phone,
