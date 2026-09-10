@@ -421,6 +421,8 @@ async def fetch_campaign_data(
             ent_id = doc.get("enterprise_id") or doc.get("context", {}).get("enterprise_id") or enterprise_id
             ag_id = doc.get("agent_id") or doc.get("context", {}).get("agent_id") or agent_id or "default"
             cmp_name = doc.get("campaign_name") or doc.get("context", {}).get("campaign_name")
+            source_file_name = doc.get("context", {}).get("source_file_name")
+            source_file_url = doc.get("context", {}).get("source_file_url")
             status = doc.get("status", "unknown")
             ts = doc.get("timestamp", 0)
 
@@ -428,6 +430,8 @@ async def fetch_campaign_data(
                 campaigns_map[cmp_id] = {
                     "campaign_id": cmp_id,
                     "campaign_name": cmp_name,
+                    "source_file_name": source_file_name,
+                    "source_file_url": source_file_url,
                     "enterprise_id": ent_id,
                     "agent_id": ag_id,
                     "total_calls": 0,

@@ -5,6 +5,7 @@ Exposes REST endpoints for triggering calls, fetching status, and receiving call
 Generates comprehensive OpenAPI Swagger schemas.
 """
 
+import asyncio
 from fastapi import APIRouter, HTTPException, Depends, status, Query, Header, UploadFile, File
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional, Union, List
@@ -101,6 +102,8 @@ class CampaignCallDetail(BaseModel):
 class CampaignSummary(BaseModel):
     campaign_id: str = Field(..., json_schema_extra={"example": "cmp_20260731_a1b2c3d4"})
     campaign_name: Optional[str] = Field(None, json_schema_extra={"example": "Summer Promo 2026"})
+    source_file_name: Optional[str] = Field(None, json_schema_extra={"example": "batch_call_template.xlsx"})
+    source_file_url: Optional[str] = Field(None, json_schema_extra={"example": "https://s3.amazonaws.com/..."})
     enterprise_id: str = Field(..., json_schema_extra={"example": "ent_admin_101"})
     agent_id: str = Field(..., json_schema_extra={"example": "agent_sales_01"})
     total_calls: int = Field(..., json_schema_extra={"example": 10})
@@ -396,6 +399,36 @@ async def trigger_bulk_calls(
         contents = await file.read()
         contacts = []
 
+        # Persist the raw uploaded file to S3 (reusing the same bucket/client
+        # already set up for KB document uploads) so the campaign history can
+        # show/link back to exactly what was uploaded for this batch. Best
+        # effort — if S3 isn't configured or the upload fails, the calls still
+        # go through, we just won't have a stored copy for this one campaign.
+        source_file_url = None
+        try:
+            from routes.agent_routes import rag_manager
+            if rag_manager.s3_client and rag_manager.bucket_name:
+                s3_key = f"outbound-campaigns/{batch_campaign_id}/{file.filename}"
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None,
+                    lambda: rag_manager.s3_client.put_object(
+                        Bucket=rag_manager.bucket_name,
+                        Key=s3_key,
+                        Body=contents
+                    )
+                )
+                source_file_url = await loop.run_in_executor(
+                    None,
+                    lambda: rag_manager.s3_client.generate_presigned_url(
+                        "get_object",
+                        Params={"Bucket": rag_manager.bucket_name, "Key": s3_key},
+                        ExpiresIn=604800,  # 7 days
+                    )
+                )
+        except Exception as s3_err:
+            logger.warning(f"⚠️ Could not persist uploaded batch-call file to S3: {s3_err}")
+
         if filename.endswith('.csv'):
             decoded = contents.decode('utf-8')
             csv_reader = csv.DictReader(io.StringIO(decoded))
@@ -486,7 +519,12 @@ async def trigger_bulk_calls(
             name = contact["name"]
             
             # Call initiate_outbound_call controller function
-            call_context = {"language": contact["language"]} if contact.get("language") else None
+            call_context = {}
+            if contact.get("language"):
+                call_context["language"] = contact["language"]
+            call_context["source_file_name"] = file.filename
+            if source_file_url:
+                call_context["source_file_url"] = source_file_url
             result = await call_controller.initiate_outbound_call(
                 phone_number=phone,
                 customer_name=name,
