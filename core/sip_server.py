@@ -466,6 +466,42 @@ class SIPServer:
             except Exception as resolve_err:
                 logger.error(f"⚠️ Error resolving agent config for SIP call {call_id}: {resolve_err}")
 
+            # Per-recipient language override — set via the bulk-upload "language" file column
+            # (routes/call_routes.py), stored on the matching outbound_calls record. Applied here,
+            # before the modular/realtime dispatch below, so it reaches BOTH engines (previously
+            # the Realtime dispatch path bypassed this entirely since it never goes through
+            # modular_sales_bot.py).
+            if agent_config:
+                try:
+                    from core.mongo_manager import mongo_db
+                    if mongo_db.client is not None:
+                        from_uri = getattr(call_state, 'from_uri', '') or ''
+                        to_uri = getattr(call_state, 'to_uri', '') or ''
+                        clean_from = "".join(filter(str.isdigit, from_uri))[-10:]
+                        clean_to = "".join(filter(str.isdigit, to_uri))[-10:]
+                        now_ts = time.time()
+                        db = mongo_db.client.get_default_database()
+                        cursor = db['outbound_calls'].find({"timestamp": {"$gt": now_ts - 600}}).sort("timestamp", -1)
+                        outbound_record = None
+                        candidates = []
+                        async for record in cursor:
+                            candidates.append(record)
+                            clean_record = "".join(filter(str.isdigit, str(record.get("phone_number", ""))))[-10:]
+                            if clean_record and (clean_record == clean_from or clean_record == clean_to):
+                                outbound_record = record
+                                break
+                        if not outbound_record and candidates:
+                            for cand in candidates:
+                                if (now_ts - cand.get("timestamp", 0)) <= 180:
+                                    outbound_record = cand
+                                    break
+                        call_language = (outbound_record.get("context") or {}).get("language") if outbound_record else None
+                        if call_language:
+                            agent_config = {**agent_config, "language": call_language, "languages": [call_language]}
+                            logger.info(f"🌐 Per-recipient language override for this outbound call: '{call_language}'")
+                except Exception as lang_err:
+                    logger.error(f"⚠️ Failed to apply per-recipient language override for call {call_id}: {lang_err}")
+
             if agent_config:
                 mode = agent_config.get("voice_bot_mode", "modular")
                 logger.info(f"🎯 Resolved agent '{agent_config.get('name')}' (mode: {mode}, languages: {agent_config.get('languages')}) for call {call_id}")
