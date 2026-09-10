@@ -723,6 +723,16 @@ class ModularSalesBot:
                 logger.warning(f"🚫 Call {call_id} rejected: No custom agent resolved (default agent fallback disabled).")
                 raise Exception("No active custom agent configuration found.")
 
+        # Per-recipient language override — applies even when agent_config was already
+        # resolved by the caller (e.g. sip_server.py resolves it before calling in), not
+        # just in the branch above. Without this, the override set via the bulk-upload
+        # "language" file column (routes/call_routes.py) never reached real SIP calls.
+        if agent_config and outbound_record:
+            call_language = (outbound_record.get("context") or {}).get("language")
+            if call_language:
+                agent_config = {**agent_config, "language": call_language, "languages": [call_language]}
+                logger.info(f"🌐 Per-recipient language override for this outbound call: '{call_language}'")
+
         # Check per-agent mode ('modular' or 'realtime')
         target_mode = (agent_config.get("voice_bot_mode") or agent_config.get("mode") or Config.VOICE_BOT_MODE or "modular").lower().strip() if agent_config else "modular"
         if target_mode == "realtime":

@@ -476,7 +476,7 @@ class SIPServer:
                         from core.modular_sales_bot import ModularSalesBot
                         if not hasattr(self, 'modular_bot') or not self.modular_bot:
                             self.modular_bot = ModularSalesBot(sip_server=self)
-                        await self.modular_bot.connect_call(call_id, agent_config=agent_config)
+                        await self.modular_bot.connect_to_openai_enhanced(call_id, agent_config=agent_config)
                         call_state.openai_connected = True
                         return
                     except Exception as mod_err:
