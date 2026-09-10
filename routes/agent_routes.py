@@ -532,6 +532,71 @@ async def set_agent_mode(
             detail={"success": False, "message": f"Failed to update agent mode: {str(e)}"}
         )
 
+class AdminSetAgentModeRequest(BaseModel):
+    voiceBotMode: Optional[str] = Field(None, json_schema_extra={"example": "realtime"}, description="Operating mode: 'modular' or 'realtime' (realtime runs on the gpt-realtime-mini model).")
+    mode: Optional[str] = Field(None, description="Alias for voiceBotMode.")
+
+@router.patch(
+    "/mode/{id}",
+    status_code=status.HTTP_200_OK,
+    summary="[Admin] Set Agent Voice Bot Mode",
+    description="Super-admin endpoint: updates the operating mode ('modular' or 'realtime') for any agent by its id, across all enterprises. No enterprise scoping required."
+)
+async def admin_set_agent_mode(id: str, payload: AdminSetAgentModeRequest):
+    mode_val = str(payload.voiceBotMode or payload.mode or "").strip().lower()
+    if mode_val not in ["modular", "realtime"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"success": False, "message": "Invalid mode. Allowed values are 'modular' or 'realtime'."}
+        )
+
+    if mongo_db.client is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"success": False, "message": "Database connection is not available"}
+        )
+
+    now_iso = datetime.datetime.utcnow().isoformat() + "Z"
+    id_conds = [{"agentId": id}, {"_id": id}]
+    if ObjectId.is_valid(id):
+        id_conds.append({"_id": ObjectId(id)})
+    query = {"$or": id_conds}
+
+    async def run_update_mode():
+        db = mongo_db.client.get_default_database()
+        for coll_name in ["exotel_agents", "agents"]:
+            if coll_name in await db.list_collection_names():
+                res = await db[coll_name].update_one(
+                    query,
+                    {"$set": {"voice_bot_mode": mode_val, "updatedAt": now_iso}, "$unset": {"mode": ""}}
+                )
+                if res.matched_count > 0:
+                    return await db[coll_name].find_one(query)
+        return None
+
+    try:
+        updated_agent = await safe_mongo_op(run_update_mode)
+        if not updated_agent:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"success": False, "message": f"Agent '{id}' not found"}
+            )
+        return {
+            "success": True,
+            "message": f"Successfully updated agent '{id}' voice_bot_mode to '{mode_val}'.",
+            "agent_id": id,
+            "voice_bot_mode": mode_val,
+            "data": bson_safe(dict(updated_agent))
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating agent mode (admin): {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"success": False, "message": f"Failed to update agent mode: {str(e)}"}
+        )
+
 @router.post(
     "/assign-virtual-number",
     status_code=status.HTTP_200_OK,
