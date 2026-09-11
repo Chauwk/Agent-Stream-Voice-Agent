@@ -13,11 +13,17 @@ def _sanitize_agent_doc(agent: dict | None) -> dict | None:
     for k, v in list(cleaned.items()):
         if isinstance(v, ObjectId):
             cleaned[k] = str(v)
-    # Ensure per-agent voice_bot_mode is set (defaulting to 'modular' if omitted)
-    resolved_mode = str(cleaned.get("voice_bot_mode") or cleaned.get("mode") or "modular").lower().strip()
+    # Ensure per-agent voice_bot_mode is set (defaulting to 'modular' if omitted).
+    # Also accept "voiceBotMode" (camelCase) — the admin portal's Node backend writes
+    # the mode under that key, which this snake_case lookup was silently missing,
+    # so every agent set to Realtime kept resolving to the "modular" default.
+    resolved_mode = str(
+        cleaned.get("voice_bot_mode") or cleaned.get("voiceBotMode") or cleaned.get("mode") or "modular"
+    ).lower().strip()
     if resolved_mode not in ["modular", "realtime"]:
         resolved_mode = "modular"
     cleaned.pop("mode", None)
+    cleaned.pop("voiceBotMode", None)
     cleaned["voice_bot_mode"] = resolved_mode
     return cleaned
 
