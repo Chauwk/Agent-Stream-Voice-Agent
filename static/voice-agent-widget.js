@@ -30,6 +30,10 @@ class VoiceAgentWidget extends HTMLElement {
         this.audioQueue = [];
         this.isPlayingAudio = false;
         this.nextStartTime = 0;
+
+        // Chat tab state
+        this.chatHistory = []; // [{role: "user"|"model", text: "..."}]
+        this.chatSending = false;
     }
 
     connectedCallback() {
@@ -414,6 +418,139 @@ class VoiceAgentWidget extends HTMLElement {
                 color: var(--text-muted);
                 margin-top: 12px;
             }
+
+            /* Mode tabs (Voice / Chat) */
+            .mode-tabs {
+                display: flex;
+                gap: 6px;
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 12px;
+                padding: 4px;
+                margin: 0 20px 14px;
+            }
+
+            .mode-tab {
+                flex: 1;
+                text-align: center;
+                padding: 8px 0;
+                border-radius: 9px;
+                border: none;
+                background: transparent;
+                color: var(--text-muted);
+                font-weight: 600;
+                font-size: 0.875rem;
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+
+            .mode-tab.active {
+                background: var(--primary-grad);
+                color: white;
+            }
+
+            .voice-panel, .chat-panel {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                width: 100%;
+            }
+
+            .chat-panel {
+                display: none;
+                padding: 0 20px 20px;
+            }
+
+            .chat-panel.active {
+                display: flex;
+            }
+
+            .voice-panel.hidden {
+                display: none;
+            }
+
+            .chat-log {
+                width: 100%;
+                height: 260px;
+                overflow-y: auto;
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                padding: 4px 2px 10px;
+            }
+
+            .chat-msg {
+                max-width: 85%;
+                padding: 9px 13px;
+                border-radius: 12px;
+                font-size: 0.875rem;
+                line-height: 1.4;
+                word-wrap: break-word;
+            }
+
+            .chat-msg.user {
+                align-self: flex-end;
+                background: var(--primary-grad);
+                color: white;
+            }
+
+            .chat-msg.agent {
+                align-self: flex-start;
+                background: var(--card-bg);
+                border: 1px solid var(--border);
+                color: var(--text);
+            }
+
+            .chat-msg.pending {
+                opacity: 0.6;
+            }
+
+            .chat-msg.error {
+                align-self: flex-start;
+                background: rgba(239, 68, 68, 0.12);
+                border: 1px solid rgba(239, 68, 68, 0.4);
+                color: var(--danger);
+            }
+
+            .chat-input-row {
+                width: 100%;
+                display: flex;
+                gap: 8px;
+            }
+
+            .chat-input {
+                flex: 1;
+                padding: 11px 14px;
+                border-radius: 12px;
+                border: 1px solid var(--border);
+                background: rgba(255, 255, 255, 0.05);
+                color: var(--text);
+                font-size: 0.875rem;
+                outline: none;
+                font-family: inherit;
+            }
+
+            .chat-input::placeholder {
+                color: var(--text-muted);
+            }
+
+            .chat-send-btn {
+                width: 44px;
+                height: 44px;
+                border-radius: 12px;
+                border: none;
+                background: var(--primary-grad);
+                color: white;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                flex-shrink: 0;
+            }
+
+            .chat-send-btn:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
         `;
 
         const template = `
@@ -438,31 +575,52 @@ class VoiceAgentWidget extends HTMLElement {
                 </div>
 
                 <div class="agent-name">${this.agentName}</div>
-                <div class="status-badge" id="status-badge">
-                    <span class="dot online" id="status-dot"></span>
-                    <span id="status-text">Ready to talk</span>
+
+                <div class="mode-tabs">
+                    <button class="mode-tab active" id="tab-voice-btn">Voice</button>
+                    <button class="mode-tab" id="tab-chat-btn">Chat</button>
                 </div>
 
-                <div class="visualizer" id="visualizer">
-                    <div class="bar"></div>
-                    <div class="bar"></div>
-                    <div class="bar"></div>
-                    <div class="bar"></div>
-                    <div class="bar"></div>
+                <div class="voice-panel" id="voice-panel">
+                    <div class="status-badge" id="status-badge">
+                        <span class="dot online" id="status-dot"></span>
+                        <span id="status-text">Ready to talk</span>
+                    </div>
+
+                    <div class="visualizer" id="visualizer">
+                        <div class="bar"></div>
+                        <div class="bar"></div>
+                        <div class="bar"></div>
+                        <div class="bar"></div>
+                        <div class="bar"></div>
+                    </div>
+
+                    <div class="controls" id="controls-box">
+                        <button class="btn btn-start" id="start-btn">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
+                                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                                <line x1="12" y1="19" x2="12" y2="22"></line>
+                            </svg>
+                            Start Conversation
+                        </button>
+                    </div>
+
+                    <div class="call-timer" id="call-timer" style="display: none;">00:00</div>
                 </div>
 
-                <div class="controls" id="controls-box">
-                    <button class="btn btn-start" id="start-btn">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
-                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                            <line x1="12" y1="19" x2="12" y2="22"></line>
-                        </svg>
-                        Start Conversation
-                    </button>
+                <div class="chat-panel" id="chat-panel">
+                    <div class="chat-log" id="chat-log"></div>
+                    <div class="chat-input-row">
+                        <input type="text" class="chat-input" id="chat-input" placeholder="Type a message..." />
+                        <button class="chat-send-btn" id="chat-send-btn" title="Send">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
-
-                <div class="call-timer" id="call-timer" style="display: none;">00:00</div>
             </div>
 
             <div class="launcher-btn" id="launcher-btn" title="Talk to AI Voice Agent">
@@ -497,6 +655,104 @@ class VoiceAgentWidget extends HTMLElement {
                 this.startCall();
             }
         });
+
+        // Voice / Chat mode tabs
+        const tabVoiceBtn = shadow.getElementById('tab-voice-btn');
+        const tabChatBtn = shadow.getElementById('tab-chat-btn');
+        const voicePanel = shadow.getElementById('voice-panel');
+        const chatPanel = shadow.getElementById('chat-panel');
+
+        tabVoiceBtn.addEventListener('click', () => {
+            tabVoiceBtn.classList.add('active');
+            tabChatBtn.classList.remove('active');
+            voicePanel.classList.remove('hidden');
+            chatPanel.classList.remove('active');
+        });
+
+        tabChatBtn.addEventListener('click', () => {
+            tabChatBtn.classList.add('active');
+            tabVoiceBtn.classList.remove('active');
+            chatPanel.classList.add('active');
+            voicePanel.classList.add('hidden');
+        });
+
+        // Chat send
+        const chatInput = shadow.getElementById('chat-input');
+        const chatSendBtn = shadow.getElementById('chat-send-btn');
+
+        const trySend = () => {
+            const text = chatInput.value.trim();
+            if (text) this.sendChatMessage(text);
+        };
+
+        chatSendBtn.addEventListener('click', trySend);
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                trySend();
+            }
+        });
+    }
+
+    appendChatMessage(role, text, extraClass) {
+        const shadow = this.shadowRoot;
+        const log = shadow.getElementById('chat-log');
+        if (!log) return null;
+        const bubble = document.createElement('div');
+        bubble.className = `chat-msg ${role === 'user' ? 'user' : 'agent'}${extraClass ? ' ' + extraClass : ''}`;
+        bubble.textContent = text;
+        log.appendChild(bubble);
+        log.scrollTop = log.scrollHeight;
+        return bubble;
+    }
+
+    async sendChatMessage(text) {
+        if (this.chatSending) return;
+        this.chatSending = true;
+
+        const shadow = this.shadowRoot;
+        const chatInput = shadow.getElementById('chat-input');
+        const chatSendBtn = shadow.getElementById('chat-send-btn');
+        chatInput.value = '';
+        chatInput.disabled = true;
+        chatSendBtn.disabled = true;
+
+        this.appendChatMessage('user', text);
+        const pendingBubble = this.appendChatMessage('agent', 'Thinking...', 'pending');
+
+        try {
+            const res = await fetch(`${this.serverUrl}/api/v1/chat/text`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    agent_id: this.agentId,
+                    message: text,
+                    history: this.chatHistory,
+                }),
+            });
+            const data = await res.json();
+
+            if (res.ok && data.success) {
+                pendingBubble.textContent = data.reply || '...';
+                pendingBubble.classList.remove('pending');
+                this.chatHistory.push({ role: 'user', text });
+                this.chatHistory.push({ role: 'model', text: data.reply || '' });
+            } else {
+                pendingBubble.textContent = data.error || 'Something went wrong. Please try again.';
+                pendingBubble.classList.remove('pending');
+                pendingBubble.classList.add('error');
+            }
+        } catch (e) {
+            console.error('VoiceAgentWidget: Chat request failed', e);
+            pendingBubble.textContent = 'Connection failed. Please try again.';
+            pendingBubble.classList.remove('pending');
+            pendingBubble.classList.add('error');
+        } finally {
+            chatInput.disabled = false;
+            chatSendBtn.disabled = false;
+            chatInput.focus();
+            this.chatSending = false;
+        }
     }
 
     async startCall() {

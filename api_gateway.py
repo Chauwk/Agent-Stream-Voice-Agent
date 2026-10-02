@@ -10,9 +10,9 @@ import logging
 import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any, Union
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.encoders import ENCODERS_BY_TYPE
 from bson import ObjectId
@@ -375,6 +375,85 @@ async def browser_stream_endpoint(websocket: WebSocket):
         if hasattr(sales_bot_engine, "cleanup_connections"):
             await sales_bot_engine.cleanup_connections(stream_id)
 
+
+@app.post("/api/v1/chat/text", include_in_schema=False)
+async def browser_chat_text_endpoint(request: Request):
+    """
+    Text-chat counterpart to /api/v1/stream/browser for the embeddable widget's
+    Chat tab. Fully isolated from the live-call audio pipeline: it only reads
+    the shared Gemini client already warmed up on sales_bot_engine, and makes
+    one non-streaming request per message - no call/session state is touched.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"success": False, "error": "Invalid JSON body"}, status_code=400)
+
+    agent_id = (body.get("agent_id") or "default").strip()
+    message = (body.get("message") or "").strip()
+    history_in = body.get("history") or []  # [{role: "user"|"model", text: "..."}]
+
+    if not message:
+        return JSONResponse({"success": False, "error": "message is required"}, status_code=400)
+
+    if type(sales_bot_engine).__name__ != "ModularSalesBot" or not getattr(sales_bot_engine, "gemini_client", None):
+        return JSONResponse({"success": False, "error": "Chat is not available on this server."}, status_code=503)
+
+    from core.agent_resolver import resolve_agent_config
+    agent_config = await resolve_agent_config(agent_id)
+    if not agent_config:
+        return JSONResponse({"success": False, "error": "Agent not found."}, status_code=404)
+
+    system_instruction = (
+        agent_config.get("instructions")
+        or agent_config.get("systemPrompt")
+        or agent_config.get("system_prompt")
+        or f"You are {agent_config.get('name') or agent_config.get('agentName') or 'a helpful AI assistant'}."
+    )
+
+    async def query_knowledge_base(query: str) -> str:
+        """Search the company knowledge base for answers about services, products, pricing, and policies.
+
+        Args:
+            query: The query string to search for in the database.
+        """
+        try:
+            from controllers.bot_controller import query_knowledge_base as db_query
+            results = await db_query(agent_id, query, top_k=3, agent_config=agent_config)
+            if not results:
+                return "No matches found in the knowledge base."
+            return "\n\n".join(
+                f"Document: {r['source']}\nContent: {r['chunk']}" for r in results
+            )
+        except Exception as db_err:
+            logger.error(f"❌ [Browser Chat] RAG search failed: {db_err}")
+            return "Error: Unable to search the knowledge base at this time. Fallback to general knowledge."
+
+    try:
+        from google.genai import types
+
+        history = []
+        for turn in history_in[-10:]:
+            role = "user" if turn.get("role") == "user" else "model"
+            text = str(turn.get("text") or "")
+            if text:
+                history.append(types.Content(role=role, parts=[types.Part.from_text(text=text)]))
+        history.append(types.Content(role="user", parts=[types.Part.from_text(text=message)]))
+
+        response = await sales_bot_engine.gemini_client.aio.models.generate_content(
+            model=Config.GEMINI_MODEL,
+            contents=history,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                tools=[query_knowledge_base],
+            ),
+        )
+        reply_text = (response.text or "").strip()
+    except Exception as e:
+        logger.error(f"❌ [Browser Chat] Text generation failed for agent_id='{agent_id}': {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": "Failed to generate a reply."}, status_code=500)
+
+    return JSONResponse({"success": True, "reply": reply_text})
 
 
 # ==============================================================================
