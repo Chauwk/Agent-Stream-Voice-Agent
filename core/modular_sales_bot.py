@@ -936,6 +936,24 @@ class ModularSalesBot:
                 else:
                     return f"Meeting could not be booked: {result['reason']}"
 
+            # Define send_whatsapp tool
+            async def send_whatsapp(recipient_phone: str, message: str) -> str:
+                """Send a WhatsApp message to a customer.
+
+                Args:
+                    recipient_phone: The customer's phone number in international format (e.g. +919876543210).
+                    message: The text message body to send over WhatsApp.
+                """
+                from core.whatsapp_client import WhatsAppClient
+                success = await WhatsAppClient.send_text(
+                    recipient_phone=recipient_phone,
+                    message=message,
+                )
+                if success:
+                    return f"WhatsApp message successfully sent to {recipient_phone}"
+                else:
+                    return f"Failed to send WhatsApp message to {recipient_phone}. Please check WhatsApp API configuration."
+
             agent_name = agent_config.get("name", Config.SALES_BOT_NAME) if agent_config else Config.SALES_BOT_NAME
             agent_instructions = agent_config.get("instructions", "") if agent_config else ""
             
@@ -1089,6 +1107,7 @@ class ModularSalesBot:
             "query_knowledge_base_tool": query_knowledge_base,
             "send_email_tool": send_email,
             "schedule_meeting_tool": schedule_meeting,
+            "send_whatsapp_tool": send_whatsapp,
             "to_phone": session_to_phone,
             "agent_config": agent_config, # Store agent configuration reference
             "outbound_call_sid": outbound_record.get("call_sid") if outbound_record else None,
@@ -1534,6 +1553,7 @@ class ModularSalesBot:
         query_knowledge_base = session_state["query_knowledge_base_tool"]
         send_email = session_state.get("send_email_tool")
         schedule_meeting = session_state.get("schedule_meeting_tool")
+        send_whatsapp = session_state.get("send_whatsapp_tool")
         llm_queue = session_state["llm_queue"]
         tts_queue = session_state["tts_queue"]
         
@@ -1627,7 +1647,7 @@ class ModularSalesBot:
                                 contents=history[-10:] if len(history) > 10 else history,
                                 config=types.GenerateContentConfig(
                                     system_instruction=system_instruction,
-                                    tools=[end_call, query_knowledge_base, send_email, schedule_meeting],
+                                    tools=[end_call, query_knowledge_base, send_email, schedule_meeting, send_whatsapp],
                                     safety_settings=safety_settings
                                 )
                             )
@@ -1671,6 +1691,29 @@ class ModularSalesBot:
                                             body = fc.args.get("body", "")
                                             cc_recipient = fc.args.get("cc_recipient")
                                             ans = await send_email(recipient_email=recipient_email, subject=subject, body=body, cc_recipient=cc_recipient)
+                                            history.append(
+                                                types.Content(
+                                                    role="model",
+                                                    parts=[types.Part.from_function_call(
+                                                        name=fc.name,
+                                                        args=fc.args
+                                                    )]
+                                                )
+                                            )
+                                            history.append(
+                                                types.Content(
+                                                    role="user",
+                                                    parts=[types.Part.from_function_response(
+                                                        name=fc.name,
+                                                        response={"result": ans}
+                                                    )]
+                                                )
+                                            )
+                                            raise TriggerToolRecallException()
+                                        elif fc.name == "send_whatsapp":
+                                            recipient_phone = fc.args.get("recipient_phone", "")
+                                            message = fc.args.get("message", "")
+                                            ans = await send_whatsapp(recipient_phone=recipient_phone, message=message)
                                             history.append(
                                                 types.Content(
                                                     role="model",
