@@ -36,7 +36,7 @@ async def resolve_agent_config(destination_id: str) -> dict | None:
         
     try:
         db = mongo_db.client.get_default_database()
-        collections_to_search = ['exotel_agents', 'agents']
+        collections_to_search = ['exotel_agents']  # Exotel agents only, never ElevenLabs
         
         for coll_name in collections_to_search:
             agents_collection = db[coll_name]

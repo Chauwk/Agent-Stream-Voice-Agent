@@ -279,10 +279,11 @@ async def find_agent_by_id_and_enterprise(agent_id_or_mongo_id: str, enterprise_
                 ]
             }
             
-        for coll_name in ["agents", "exotel_agents"]:
+        # Exotel collection only - never hand back an ElevenLabs agent.
+        for coll_name in ["exotel_agents"]:
             if coll_name in await db.list_collection_names():
                 agent = await db[coll_name].find_one(query)
-                if agent:
+                if agent and agent.get("type") != "eleven":
                     return agent
         return None
 
@@ -488,7 +489,7 @@ async def set_agent_mode(
             }
 
         updated_doc = None
-        for coll_name in ["exotel_agents", "agents"]:
+        for coll_name in ["exotel_agents"]:
             if coll_name in await db.list_collection_names():
                 res = await db[coll_name].update_one(
                     query,
@@ -564,7 +565,7 @@ async def admin_set_agent_mode(id: str, payload: AdminSetAgentModeRequest):
 
     async def run_update_mode():
         db = mongo_db.client.get_default_database()
-        for coll_name in ["exotel_agents", "agents"]:
+        for coll_name in ["exotel_agents"]:
             if coll_name in await db.list_collection_names():
                 res = await db[coll_name].update_one(
                     query,
@@ -635,7 +636,7 @@ async def assign_virtual_number(payload: AssignVirtualNumberRequest):
                 ]
             }
         
-        for coll_name in ["exotel_agents", "agents", "modernexotelaiagents", "modernaiagents"]:
+        for coll_name in ["exotel_agents", "modernexotelaiagents"]:
             if coll_name in await db.list_collection_names():
                 doc = await db[coll_name].find_one(query)
                 if doc:
@@ -724,7 +725,7 @@ async def add_voice_id_to_agent(payload: AddVoiceIdRequest):
                 ]
             }
         
-        for coll_name in ["exotel_agents", "agents", "modernexotelaiagents", "modernaiagents"]:
+        for coll_name in ["exotel_agents", "modernexotelaiagents"]:
             if coll_name in await db.list_collection_names():
                 doc = await db[coll_name].find_one(query)
                 if doc:
@@ -907,7 +908,9 @@ async def list_agents(
             filter_q = {"$or": conds}
             
         agents_map = {}
-        target_colls = ["agents", "exotel_agents", "modernexotelaiagents", "modernaiagents"]
+        # Exotel collections only - "agents"/"modernaiagents" belong to the
+        # ElevenLabs agents and must never show up as Exotel agents.
+        target_colls = ["exotel_agents", "modernexotelaiagents"]
         for coll_name in target_colls:
             try:
                 cursor = db[coll_name].find(filter_q).sort("createdAt", -1)
@@ -963,7 +966,8 @@ async def get_agent_stats(
         active_agents = 0
         languages = {}
         seen_ids = set()
-        target_colls = ["agents", "exotel_agents", "modernexotelaiagents", "modernaiagents"]
+        # Exotel collections only (same as the agent list).
+        target_colls = ["exotel_agents", "modernexotelaiagents"]
         for coll_name in target_colls:
             try:
                 cursor = db[coll_name].find(filter_q)

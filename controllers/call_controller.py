@@ -122,7 +122,7 @@ async def initiate_outbound_call(
                                 ]
                             }
 
-                    for coll_name in ["exotel_agents", "agents", "modernexotelaiagents", "modernaiagents"]:
+                    for coll_name in ["exotel_agents", "modernexotelaiagents"]:
                         if coll_name in await db.list_collection_names():
                             agent_doc = await db[coll_name].find_one(query)
                             if agent_doc:
