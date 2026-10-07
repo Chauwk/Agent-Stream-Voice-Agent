@@ -95,7 +95,8 @@ class Config:
     SMTP_FROM_EMAIL = os.getenv('SMTP_FROM_EMAIL', '')
 
     # ===== WHATSAPP API CONFIGURATION =====
-    # HTTP endpoint accepting POST {"to": "<phone>", "message": "<text>"}.
+    # Template-send endpoint accepting POST {"to", "templateName", "languageCode"}.
+    # The template (hello_world / en_US) is hardcoded in the send_whatsapp tool.
     # Leave WHATSAPP_API_URL blank to run the WhatsApp tool in mock mode.
     WHATSAPP_API_URL = os.getenv('WHATSAPP_API_URL', '')
     WHATSAPP_API_TOKEN = os.getenv('WHATSAPP_API_TOKEN', '')

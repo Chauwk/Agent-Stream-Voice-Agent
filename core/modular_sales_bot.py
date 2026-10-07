@@ -937,40 +937,47 @@ class ModularSalesBot:
                     return f"Meeting could not be booked: {result['reason']}"
 
             # Define send_whatsapp tool
-            async def send_whatsapp(recipient_phone: str, message: str) -> str:
-                """Send a WhatsApp message to a customer.
+            async def send_whatsapp(recipient_phone: str) -> str:
+                """Send the approved WhatsApp template message to a customer.
+
+                Sends the fixed, pre-approved 'hello_world' template (no body
+                variables). You only need to provide the recipient's number.
 
                 Args:
-                    recipient_phone: The customer's phone number in international format (e.g. +919876543210).
-                    message: The text message body to send over WhatsApp.
+                    recipient_phone: The customer's phone number in international format (e.g. +919876543210 or 919876543210).
                 """
                 from core.whatsapp_client import WhatsAppClient
 
+                # Fixed, pre-approved template (no body variables).
+                template_name = "hello_world"
+                language_code = "en_US"
+
                 # Idempotency guard: the LLM can re-emit the same tool call during
                 # the tool-recall loop (or as a parallel call), which would send the
-                # WhatsApp message twice. Suppress an identical (recipient, message)
-                # send to the same call within a short window.
+                # WhatsApp message twice. Suppress an identical send to the same
+                # recipient within a short window.
                 import time as _t
                 _sess = self.connections.get(call_id)
                 _recent = _sess.setdefault("_recent_whatsapp", {}) if isinstance(_sess, dict) else {}
-                _dedup_key = ((recipient_phone or "").strip(), (message or "").strip())
+                _dedup_key = ((recipient_phone or "").strip(), template_name)
                 _now = _t.time()
                 _last = _recent.get(_dedup_key)
                 if _last is not None and (_now - _last) < 30:
                     logger.info(
-                        f"🚫 Duplicate WhatsApp to {recipient_phone} suppressed "
+                        f"🚫 Duplicate WhatsApp template to {recipient_phone} suppressed "
                         f"({_now - _last:.1f}s since identical send) for call {call_id}"
                     )
-                    return f"A WhatsApp message with the same content was just sent to {recipient_phone}; not sending it again."
+                    return f"A WhatsApp message was just sent to {recipient_phone}; not sending it again."
                 _recent[_dedup_key] = _now
 
-                result = await WhatsAppClient.send_text(
+                result = await WhatsAppClient.send_template(
                     recipient_phone=recipient_phone,
-                    message=message,
+                    template_name=template_name,
+                    language_code=language_code,
                 )
 
-                # Track the request + outcome in MongoDB: who asked, whether the
-                # API was actually called, and the API response. Wrapped so a
+                # Track the request + outcome in MongoDB: who asked, which template,
+                # whether the API was called, and the API response. Wrapped so a
                 # logging failure can never break the live call.
                 try:
                     from core.mongo_manager import mongo_db
@@ -985,10 +992,13 @@ class ModularSalesBot:
                             "agent_id": ac.get("agentId"),
                             "enterprise_id": ac.get("enterpriseId") or ac.get("enterprise"),
                             "recipient_phone": recipient_phone,
-                            "message": message,
+                            "template_name": template_name,
+                            "language_code": language_code,
+                            "message": f"[template: {template_name}]",
                             "api_called": result.get("called"),
                             "api_url": result.get("api_url"),
                             "http_status": result.get("status"),
+                            "message_id": result.get("message_id"),
                             "api_response": result.get("response"),
                             "success": result.get("success"),
                         }
