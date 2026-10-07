@@ -181,6 +181,36 @@ async def delete_call_log(call_id: str):
 
 app.include_router(calls_log_router)
 
+# ------------------------------------------------------------------------------
+# WhatsApp send logs (who asked, whether the API was called, API response)
+# ------------------------------------------------------------------------------
+whatsapp_log_router = APIRouter(prefix="/api/v1/whatsapp", tags=["WhatsApp Logs"])
+
+@whatsapp_log_router.get("/logs")
+async def get_whatsapp_logs(limit: int = 100):
+    """Retrieve WhatsApp send logs from MongoDB, newest first."""
+    from core.mongo_manager import mongo_db
+    if mongo_db.client is None:
+        return []
+    try:
+        db = mongo_db.client.get_default_database()
+        cursor = db["whatsapp_logs"].find({}).sort("timestamp", -1).limit(limit)
+        logs = []
+        async for doc in cursor:
+            doc["_id"] = str(doc["_id"])
+            if doc.get("timestamp"):
+                try:
+                    doc["timestamp"] = doc["timestamp"].isoformat()
+                except Exception:
+                    pass
+            logs.append(doc)
+        return logs
+    except Exception as e:
+        logger.error(f"❌ Failed to fetch WhatsApp logs: {e}")
+        return []
+
+app.include_router(whatsapp_log_router)
+
 
 # ==============================================================================
 # FastAPI WebSocket Telephony Adapter

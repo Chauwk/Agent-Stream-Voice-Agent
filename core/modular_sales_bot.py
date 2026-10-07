@@ -945,11 +945,40 @@ class ModularSalesBot:
                     message: The text message body to send over WhatsApp.
                 """
                 from core.whatsapp_client import WhatsAppClient
-                success = await WhatsAppClient.send_text(
+                result = await WhatsAppClient.send_text(
                     recipient_phone=recipient_phone,
                     message=message,
                 )
-                if success:
+
+                # Track the request + outcome in MongoDB: who asked, whether the
+                # API was actually called, and the API response. Wrapped so a
+                # logging failure can never break the live call.
+                try:
+                    from core.mongo_manager import mongo_db
+                    if mongo_db.client is not None:
+                        import datetime as _dt
+                        ac = agent_config or {}
+                        log_doc = {
+                            "timestamp": _dt.datetime.utcnow(),
+                            "call_id": call_id,
+                            "call_phone": session_to_phone,
+                            "agent_name": ac.get("name"),
+                            "agent_id": ac.get("agentId"),
+                            "enterprise_id": ac.get("enterpriseId") or ac.get("enterprise"),
+                            "recipient_phone": recipient_phone,
+                            "message": message,
+                            "api_called": result.get("called"),
+                            "api_url": result.get("api_url"),
+                            "http_status": result.get("status"),
+                            "api_response": result.get("response"),
+                            "success": result.get("success"),
+                        }
+                        db = mongo_db.client.get_default_database()
+                        await db["whatsapp_logs"].insert_one(log_doc)
+                except Exception as log_err:
+                    logger.error(f"⚠️ Failed to write whatsapp_log for call {call_id}: {log_err}")
+
+                if result.get("success"):
                     return f"WhatsApp message successfully sent to {recipient_phone}"
                 else:
                     return f"Failed to send WhatsApp message to {recipient_phone}. Please check WhatsApp API configuration."
