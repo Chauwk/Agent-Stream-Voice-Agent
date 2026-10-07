@@ -945,6 +945,25 @@ class ModularSalesBot:
                     message: The text message body to send over WhatsApp.
                 """
                 from core.whatsapp_client import WhatsAppClient
+
+                # Idempotency guard: the LLM can re-emit the same tool call during
+                # the tool-recall loop (or as a parallel call), which would send the
+                # WhatsApp message twice. Suppress an identical (recipient, message)
+                # send to the same call within a short window.
+                import time as _t
+                _sess = self.connections.get(call_id)
+                _recent = _sess.setdefault("_recent_whatsapp", {}) if isinstance(_sess, dict) else {}
+                _dedup_key = ((recipient_phone or "").strip(), (message or "").strip())
+                _now = _t.time()
+                _last = _recent.get(_dedup_key)
+                if _last is not None and (_now - _last) < 30:
+                    logger.info(
+                        f"🚫 Duplicate WhatsApp to {recipient_phone} suppressed "
+                        f"({_now - _last:.1f}s since identical send) for call {call_id}"
+                    )
+                    return f"A WhatsApp message with the same content was just sent to {recipient_phone}; not sending it again."
+                _recent[_dedup_key] = _now
+
                 result = await WhatsAppClient.send_text(
                     recipient_phone=recipient_phone,
                     message=message,
