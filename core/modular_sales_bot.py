@@ -937,20 +937,48 @@ class ModularSalesBot:
                     return f"Meeting could not be booked: {result['reason']}"
 
             # Define send_whatsapp tool
-            async def send_whatsapp(recipient_phone: str) -> str:
-                """Send the approved WhatsApp template message to a customer.
+            async def send_whatsapp(recipient_phone: str, customer_name: str = "") -> str:
+                """Send this agent's approved WhatsApp template message to a customer.
 
-                Sends the fixed, pre-approved 'hello_world' template (no body
-                variables). You only need to provide the recipient's number.
+                The message text is fixed by the agent's pre-approved template;
+                you only provide who it goes to.
 
                 Args:
                     recipient_phone: The customer's phone number in international format (e.g. +919876543210 or 919876543210).
+                    customer_name: The customer's name if they told you during the call, otherwise leave empty.
                 """
                 from core.whatsapp_client import WhatsAppClient
 
-                # Fixed, pre-approved template (no body variables).
-                template_name = "hello_world"
-                language_code = "en_US"
+                # The agent's own template (set in Super Admin), else the default.
+                #   whatsappTemplate = {"name", "languageCode", "bodyParams": ["{customer_name}", "fixed text", ...], "bodyText"}
+                # bodyParams fill the template's {{1}}, {{2}}, ... in order; a param may
+                # use {customer_name} / {agent_name}, filled from this call.
+                wa_cfg = (agent_config or {}).get("whatsappTemplate") or {}
+                template_name = (wa_cfg.get("name") or "").strip() or Config.WHATSAPP_DEFAULT_TEMPLATE
+                language_code = (wa_cfg.get("languageCode") or "").strip() or Config.WHATSAPP_DEFAULT_LANGUAGE
+                fill = {
+                    "customer_name": (customer_name or "").strip()
+                    or ((outbound_record or {}).get("customer_name") or "").strip()
+                    or "there",
+                    "agent_name": (agent_config or {}).get("name") or (agent_config or {}).get("agentName") or "",
+                }
+
+                def _fill(text) -> str:
+                    out = str(text or "")
+                    for key, val in fill.items():
+                        out = out.replace("{" + key + "}", str(val))
+                    return out
+
+                body_values = [_fill(p) for p in (wa_cfg.get("bodyParams") or []) if str(p or "").strip()]
+                components = (
+                    [{"type": "body", "parameters": [{"type": "text", "text": v} for v in body_values]}]
+                    if body_values else None
+                )
+                # Readable copy of what was sent, for the portal's "WhatsApp Message" column.
+                sent_text = str(wa_cfg.get("bodyText") or "")
+                for i, v in enumerate(body_values, start=1):
+                    sent_text = sent_text.replace("{{" + str(i) + "}}", v)
+                sent_text = sent_text.strip() or f"[template: {template_name}]"
 
                 # Idempotency guard: the LLM can re-emit the same tool call during
                 # the tool-recall loop (or as a parallel call), which would send the
@@ -974,6 +1002,7 @@ class ModularSalesBot:
                     recipient_phone=recipient_phone,
                     template_name=template_name,
                     language_code=language_code,
+                    components=components,
                 )
 
                 # Track the request + outcome in MongoDB: who asked, which template,
@@ -994,7 +1023,8 @@ class ModularSalesBot:
                             "recipient_phone": recipient_phone,
                             "template_name": template_name,
                             "language_code": language_code,
-                            "message": f"[template: {template_name}]",
+                            "message": sent_text,
+                            "template_params": body_values,
                             "api_called": result.get("called"),
                             "api_url": result.get("api_url"),
                             "http_status": result.get("status"),
@@ -1770,8 +1800,12 @@ class ModularSalesBot:
                                             raise TriggerToolRecallException()
                                         elif fc.name == "send_whatsapp":
                                             recipient_phone = fc.args.get("recipient_phone", "")
-                                            message = fc.args.get("message", "")
-                                            ans = await send_whatsapp(recipient_phone=recipient_phone, message=message)
+                                            # The message text comes from the agent's approved template,
+                                            # so only the number (and the name, if heard) is passed.
+                                            ans = await send_whatsapp(
+                                                recipient_phone=recipient_phone,
+                                                customer_name=fc.args.get("customer_name", ""),
+                                            )
                                             history.append(
                                                 types.Content(
                                                     role="model",

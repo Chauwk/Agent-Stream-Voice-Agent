@@ -95,11 +95,18 @@ class Config:
     SMTP_FROM_EMAIL = os.getenv('SMTP_FROM_EMAIL', '')
 
     # ===== WHATSAPP API CONFIGURATION =====
-    # Template-send endpoint accepting POST {"to", "templateName", "languageCode"}.
-    # The template (hello_world / en_US) is hardcoded in the send_whatsapp tool.
+    # Template-send endpoint accepting POST {"to", "templateName", "languageCode", "components"?}.
+    # Each agent can set its own template (agent field "whatsappTemplate");
+    # agents without one send WHATSAPP_DEFAULT_TEMPLATE.
     # Leave WHATSAPP_API_URL blank to run the WhatsApp tool in mock mode.
     WHATSAPP_API_URL = os.getenv('WHATSAPP_API_URL', '')
     WHATSAPP_API_TOKEN = os.getenv('WHATSAPP_API_TOKEN', '')
+    WHATSAPP_DEFAULT_TEMPLATE = os.getenv('WHATSAPP_DEFAULT_TEMPLATE', 'hello_world')
+    WHATSAPP_DEFAULT_LANGUAGE = os.getenv('WHATSAPP_DEFAULT_LANGUAGE', 'en_US')
+    # When set, GET /api/v1/whatsapp/logs without an agent_id / enterprise_id
+    # filter (i.e. every enterprise's logs) requires header x-admin-key with this
+    # value. Blank = no check (previous behaviour).
+    WHATSAPP_LOGS_ADMIN_KEY = os.getenv('WHATSAPP_LOGS_ADMIN_KEY', '')
 
     # ===== GMAIL OAUTH (per-enterprise "send as me" — replaces App Passwords) =====
     # Must match the OAuth client used by ai-webhooks.chauwk.com's existing
