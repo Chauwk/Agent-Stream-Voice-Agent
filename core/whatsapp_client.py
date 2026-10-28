@@ -138,69 +138,69 @@ class WhatsAppClient:
     async def send_template_internal(
         cls,
         customer_phone: str,
-        template_name: str,
         tenant_id: str,
         body_parameters: Optional[list] = None,
     ) -> dict:
         """
-        Send a pre-approved WhatsApp template via the internal multi-tenant
+        Send this tenant's pre-approved WhatsApp template via the unified
         voice-agent endpoint. The service resolves the enterprise's WhatsApp
-        account + template (language, components/header) from tenant_id
-        server-side, so we send only the template name and ordered body params.
+        account AND which template to send from tenant_id server-side, so we
+        send only the recipient, type, tenant, and (optionally) ordered body
+        variable values — no template name.
 
-            POST {INTERNAL_WHATSAPP_API_URL}
+            POST {WHATSAPP_API_URL}/api/internal/voice-agent/send-whatsapp
               headers: x-api-key: <INTERNAL_API_KEY>, Content-Type: application/json
-              body:   {"customerPhone","type":"template","templateName","tenantId","bodyParameters"?}
+              body:   {"customerPhone","type":"template","tenantId","bodyParameters"?}
               200 ->  {"success": true, "messageId": "wamid..."}
 
-        body_parameters: ordered list of body variable values, e.g. ["John", "ORD-12345"]
-        for a 2-variable template. Omit/empty for templates with no body variables.
+        body_parameters: ordered list of body variable values, e.g. ["John", "ORD-12345"].
+        Omit/empty for templates with no body variables.
 
-        Returns the same detail dict shape as send_template() — never raises.
+        Returns a detail dict — never raises.
         """
         customer_phone = (customer_phone or "").strip()
-        template_name = (template_name or "").strip()
         tenant_id = (tenant_id or "").strip()
 
         if not customer_phone:
             logger.warning("⚠️ WhatsApp skipped: Empty recipient phone number.")
             return {"success": False, "called": False, "status": None,
                     "response": "Empty recipient phone number.", "api_url": None, "message_id": None}
-        if not template_name:
-            logger.warning("⚠️ WhatsApp skipped: Empty template name.")
-            return {"success": False, "called": False, "status": None,
-                    "response": "Empty template name.", "api_url": None, "message_id": None}
         if not tenant_id:
             logger.warning("⚠️ WhatsApp skipped: Empty tenant id.")
             return {"success": False, "called": False, "status": None,
                     "response": "Empty tenant id (agent has no enterprise).", "api_url": None, "message_id": None}
 
-        api_url = Config.INTERNAL_WHATSAPP_API_URL
+        payload = {"customerPhone": customer_phone, "type": "template", "tenantId": tenant_id}
+        if body_parameters:
+            payload["bodyParameters"] = list(body_parameters)
+        return await cls._post_whatsapp(payload)
+
+    @classmethod
+    async def _post_whatsapp(cls, payload: dict) -> dict:
+        """POST a payload to the unified WhatsApp endpoint. Never raises.
+
+        WHATSAPP_API_URL is the base host; the endpoint path is appended here.
+        """
+        base = (Config.WHATSAPP_API_URL or "").rstrip("/")
         api_key = Config.INTERNAL_API_KEY
 
         # If not configured, fall back to mock log reporter (no API call made).
-        if not api_url:
+        if not base:
             logger.info(
-                f"💬 [MOCK WHATSAPP CLIENT] To: {customer_phone}\n"
-                f"   Template: {template_name}  tenant: {tenant_id}  bodyParameters: {body_parameters}\n"
-                f"   👉 INTERNAL_WHATSAPP_API_URL is missing. Mocking delivery."
+                f"💬 [MOCK WHATSAPP CLIENT] {payload}\n"
+                f"   👉 WHATSAPP_API_URL is missing. Mocking delivery."
             )
             return {"success": True, "called": False, "status": None,
-                    "response": "MOCK: INTERNAL_WHATSAPP_API_URL not configured; no API call made.",
+                    "response": "MOCK: WHATSAPP_API_URL not configured; no API call made.",
                     "api_url": None, "message_id": None}
 
+        path = "/api/internal/voice-agent/send-whatsapp"
+        api_url = base if base.endswith(path) else base + path
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["x-api-key"] = api_key
-        payload = {
-            "customerPhone": customer_phone,
-            "type": "template",
-            "templateName": template_name,
-            "tenantId": tenant_id,
-        }
-        if body_parameters:
-            payload["bodyParameters"] = list(body_parameters)
 
+        _who = f"{payload.get('customerPhone')} (tenant={payload.get('tenantId')}, type={payload.get('type')})"
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -224,18 +224,12 @@ class WhatsAppClient:
                         pass
 
                     if success:
-                        logger.info(
-                            f"✅ WhatsApp template '{template_name}' sent to {customer_phone} "
-                            f"(tenant={tenant_id}, HTTP {resp.status}, id={message_id})"
-                        )
+                        logger.info(f"✅ WhatsApp sent to {_who} (HTTP {resp.status}, id={message_id})")
                     else:
-                        logger.error(
-                            f"❌ Internal WhatsApp API error for '{template_name}' → {customer_phone} "
-                            f"(tenant={tenant_id}): HTTP {resp.status}: {body}"
-                        )
+                        logger.error(f"❌ WhatsApp API error → {_who}: HTTP {resp.status}: {body}")
                     return {"success": success, "called": True, "status": resp.status,
                             "response": (body or "")[:2000], "api_url": api_url, "message_id": message_id}
         except Exception as e:
-            logger.error(f"❌ Failed to send internal WhatsApp template to {customer_phone}: {e}")
+            logger.error(f"❌ Failed to send WhatsApp to {_who}: {e}")
             return {"success": False, "called": True, "status": None,
                     "response": f"exception: {e}", "api_url": api_url, "message_id": None}

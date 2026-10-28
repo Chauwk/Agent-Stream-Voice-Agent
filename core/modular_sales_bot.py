@@ -987,7 +987,6 @@ class ModularSalesBot:
 
                 result = await WhatsAppClient.send_template_internal(
                     customer_phone=recipient_phone,
-                    template_name=template_name,
                     tenant_id=tenant_id,
                     body_parameters=body_parameters,
                 )

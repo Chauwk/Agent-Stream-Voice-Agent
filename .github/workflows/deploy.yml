@@ -82,7 +82,6 @@ jobs:
           WHATSAPP_API_TOKEN: ${{ secrets.WHATSAPP_API_TOKEN }}
           WHATSAPP_DEFAULT_TEMPLATE: ${{ secrets.WHATSAPP_DEFAULT_TEMPLATE }}
           WHATSAPP_LOGS_ADMIN_KEY: ${{ secrets.WHATSAPP_LOGS_ADMIN_KEY }}
-          INTERNAL_WHATSAPP_API_URL: ${{ secrets.INTERNAL_WHATSAPP_API_URL }}
           INTERNAL_API_KEY: ${{ secrets.INTERNAL_API_KEY }}
         run: |
           cp /home/ubuntu/Agent-Stream-Voice-Agent/.env .env
@@ -91,7 +90,7 @@ jobs:
           # OPENAI_MODEL for the realtime engine's model version,
           # WHATSAPP_API_URL/TOKEN for the send_whatsapp tool).
           # Idempotent: replaces the line if present, appends if not.
-          for VAR in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET OPENAI_MODEL WHATSAPP_API_URL WHATSAPP_API_TOKEN WHATSAPP_DEFAULT_TEMPLATE WHATSAPP_LOGS_ADMIN_KEY INTERNAL_WHATSAPP_API_URL INTERNAL_API_KEY; do
+          for VAR in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET OPENAI_MODEL WHATSAPP_API_URL WHATSAPP_API_TOKEN WHATSAPP_DEFAULT_TEMPLATE WHATSAPP_LOGS_ADMIN_KEY INTERNAL_API_KEY; do
             VAL="${!VAR}"
             if [ -n "$VAL" ]; then
               if grep -q "^${VAR}=" .env; then

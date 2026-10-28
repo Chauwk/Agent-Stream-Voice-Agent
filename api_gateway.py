@@ -552,7 +552,7 @@ async def browser_chat_text_endpoint(request: Request):
         _sent_whatsapp.add(key)
 
         result = await WhatsAppClient.send_template_internal(
-            customer_phone=recipient_phone, template_name=template_name,
+            customer_phone=recipient_phone,
             tenant_id=tenant_id, body_parameters=body_parameters,
         )
         try:

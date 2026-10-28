@@ -95,28 +95,22 @@ class Config:
     SMTP_FROM_EMAIL = os.getenv('SMTP_FROM_EMAIL', '')
 
     # ===== WHATSAPP API CONFIGURATION =====
-    # Legacy single-tenant template-send endpoint accepting
-    # POST {"to", "templateName", "languageCode", "components"?}. Leave blank for mock mode.
-    # NOTE: the ACTIVE send path is the internal multi-tenant endpoint below
-    # (INTERNAL_WHATSAPP_API_URL). WHATSAPP_DEFAULT_TEMPLATE/LANGUAGE back the legacy
-    # send_template; WHATSAPP_LOGS_ADMIN_KEY guards the cross-tenant logs endpoint.
+    # Unified WhatsApp automation service. WHATSAPP_API_URL is the BASE host
+    # (e.g. https://whatsapp-automation.chauwk.com); the code appends the path
+    # /api/internal/voice-agent/send-whatsapp for both template and text sends.
+    # The service resolves the enterprise's WhatsApp account + which template to
+    # send from tenantId, so we post only {customerPhone, type, tenantId,
+    # bodyParameters?}. Auth is the x-api-key header (INTERNAL_API_KEY).
+    # Leave WHATSAPP_API_URL blank to run the WhatsApp tool in mock mode.
     WHATSAPP_API_URL = os.getenv('WHATSAPP_API_URL', '')
-    WHATSAPP_API_TOKEN = os.getenv('WHATSAPP_API_TOKEN', '')
+    INTERNAL_API_KEY = os.getenv('INTERNAL_API_KEY', '')
+    WHATSAPP_API_TOKEN = os.getenv('WHATSAPP_API_TOKEN', '')  # legacy; unused by the x-api-key endpoint
     WHATSAPP_DEFAULT_TEMPLATE = os.getenv('WHATSAPP_DEFAULT_TEMPLATE', 'hello_world')
     WHATSAPP_DEFAULT_LANGUAGE = os.getenv('WHATSAPP_DEFAULT_LANGUAGE', 'en_US')
     # When set, GET /api/v1/whatsapp/logs without an agent_id / enterprise_id
     # filter (i.e. every enterprise's logs) requires header x-admin-key with this
     # value. Blank = no check (previous behaviour).
     WHATSAPP_LOGS_ADMIN_KEY = os.getenv('WHATSAPP_LOGS_ADMIN_KEY', '')
-
-    # Internal multi-tenant voice-agent WhatsApp endpoint. The service resolves
-    # the enterprise's WhatsApp account + template (language, components) from
-    # tenantId server-side; we send only the template name + ordered body params:
-    #   POST {"customerPhone","type":"template","templateName","tenantId","bodyParameters"?}
-    #   Header: x-api-key: <INTERNAL_API_KEY>
-    # Leave INTERNAL_WHATSAPP_API_URL blank to run the WhatsApp tool in mock mode.
-    INTERNAL_WHATSAPP_API_URL = os.getenv('INTERNAL_WHATSAPP_API_URL', '')
-    INTERNAL_API_KEY = os.getenv('INTERNAL_API_KEY', '')
 
     # ===== GMAIL OAUTH (per-enterprise "send as me" — replaces App Passwords) =====
     # Must match the OAuth client used by ai-webhooks.chauwk.com's existing
