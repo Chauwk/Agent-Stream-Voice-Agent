@@ -937,20 +937,35 @@ class ModularSalesBot:
                     return f"Meeting could not be booked: {result['reason']}"
 
             # Define send_whatsapp tool
-            async def send_whatsapp(recipient_phone: str) -> str:
-                """Send the approved WhatsApp template message to a customer.
+            async def send_whatsapp(recipient_phone: str, body_parameters: list | None = None) -> str:
+                """Send this agent's approved WhatsApp template message to a customer.
 
-                Sends the fixed, pre-approved 'hello_world' template (no body
-                variables). You only need to provide the recipient's number.
+                The agent has a single pre-approved template; you do not choose it.
+                Only provide body_parameters when that template requires variables
+                (listed in your instructions), in the exact order shown.
 
                 Args:
                     recipient_phone: The customer's phone number in international format (e.g. +919876543210 or 919876543210).
+                    body_parameters: Ordered list of body variable values (e.g. ["John", "ORD-12345"]); omit when the template has no variables.
                 """
                 from core.whatsapp_client import WhatsAppClient
+                from core.whatsapp_templates import first_template
 
-                # Fixed, pre-approved template (no body variables).
-                template_name = "hello_world"
-                language_code = "en_US"
+                ac = agent_config or {}
+
+                # Gate: WhatsApp must be explicitly enabled for this agent.
+                if not ac.get("isWhatsAppEnabled"):
+                    logger.info(f"🚫 WhatsApp send blocked: isWhatsAppEnabled is off for agent '{ac.get('agentId')}'.")
+                    return "I'm sorry, I'm not able to send a WhatsApp message for this account right now."
+
+                tenant_id = str(ac.get("enterpriseId") or ac.get("enterprise") or "").strip()
+
+                # Resolve this agent's single approved template.
+                _tmpl = first_template(ac.get("whatsappTemplate"))
+                if not _tmpl:
+                    logger.info(f"🚫 WhatsApp send blocked: no template configured for agent '{ac.get('agentId')}'.")
+                    return "I'm sorry, no WhatsApp template is set up for this account, so I can't send a message."
+                template_name = _tmpl["name"]
 
                 # Idempotency guard: the LLM can re-emit the same tool call during
                 # the tool-recall loop (or as a parallel call), which would send the
@@ -959,7 +974,7 @@ class ModularSalesBot:
                 import time as _t
                 _sess = self.connections.get(call_id)
                 _recent = _sess.setdefault("_recent_whatsapp", {}) if isinstance(_sess, dict) else {}
-                _dedup_key = ((recipient_phone or "").strip(), template_name)
+                _dedup_key = ((recipient_phone or "").strip(), template_name, tuple(body_parameters or ()))
                 _now = _t.time()
                 _last = _recent.get(_dedup_key)
                 if _last is not None and (_now - _last) < 30:
@@ -970,10 +985,11 @@ class ModularSalesBot:
                     return f"A WhatsApp message was just sent to {recipient_phone}; not sending it again."
                 _recent[_dedup_key] = _now
 
-                result = await WhatsAppClient.send_template(
-                    recipient_phone=recipient_phone,
+                result = await WhatsAppClient.send_template_internal(
+                    customer_phone=recipient_phone,
                     template_name=template_name,
-                    language_code=language_code,
+                    tenant_id=tenant_id,
+                    body_parameters=body_parameters,
                 )
 
                 # Track the request + outcome in MongoDB: who asked, which template,
@@ -983,17 +999,16 @@ class ModularSalesBot:
                     from core.mongo_manager import mongo_db
                     if mongo_db.client is not None:
                         import datetime as _dt
-                        ac = agent_config or {}
                         log_doc = {
                             "timestamp": _dt.datetime.utcnow(),
                             "call_id": call_id,
                             "call_phone": session_to_phone,
                             "agent_name": ac.get("name"),
                             "agent_id": ac.get("agentId"),
-                            "enterprise_id": ac.get("enterpriseId") or ac.get("enterprise"),
+                            "enterprise_id": tenant_id,
                             "recipient_phone": recipient_phone,
                             "template_name": template_name,
-                            "language_code": language_code,
+                            "body_parameters": body_parameters,
                             "message": f"[template: {template_name}]",
                             "api_called": result.get("called"),
                             "api_url": result.get("api_url"),
@@ -1083,7 +1098,19 @@ class ModularSalesBot:
             base_prompt = f"You are {agent_name}, a customer support agent.\n"
             if sanitized_instructions:
                 base_prompt += f"Here are your custom instructions and role behavior:\n{sanitized_instructions}\n\n"
-            
+
+            # Inject the per-agent WhatsApp template catalog (from exotel_agents.whatsappTemplate)
+            # so the agent can choose which approved template to send via send_whatsapp.
+            # Only when WhatsApp is enabled for this agent.
+            try:
+                if agent_config and agent_config.get("isWhatsAppEnabled"):
+                    from core.whatsapp_templates import first_template, render_single_template
+                    _wa_block = render_single_template(first_template(agent_config.get("whatsappTemplate")))
+                    if _wa_block:
+                        base_prompt += f"{_wa_block}\n\n"
+            except Exception as _wa_err:
+                logger.error(f"⚠️ Failed to build WhatsApp template prompt: {_wa_err}")
+
             system_instruction = (
                 f"{base_prompt}"
                 "Tone: Clear, concise, professional, friendly, patient, helpful, and empathetic. Avoid technical jargon.\n\n"

@@ -441,6 +441,17 @@ async def browser_chat_text_endpoint(request: Request):
         or f"You are {agent_config.get('name') or agent_config.get('agentName') or 'a helpful AI assistant'}."
     )
 
+    # Inject the per-agent WhatsApp template catalog so the agent can choose which
+    # approved template to send via the send_whatsapp tool — only when enabled.
+    try:
+        if agent_config.get("isWhatsAppEnabled"):
+            from core.whatsapp_templates import first_template, render_single_template
+            _wa_block = render_single_template(first_template(agent_config.get("whatsappTemplate")))
+            if _wa_block:
+                system_instruction = f"{system_instruction}\n\n{_wa_block}"
+    except Exception as _wa_err:
+        logger.error(f"⚠️ [Browser Chat] Failed to build WhatsApp template prompt: {_wa_err}")
+
     async def query_knowledge_base(query: str) -> str:
         """Search the company knowledge base for answers about services, products, pricing, and policies.
 
@@ -459,6 +470,166 @@ async def browser_chat_text_endpoint(request: Request):
             logger.error(f"❌ [Browser Chat] RAG search failed: {db_err}")
             return "Error: Unable to search the knowledge base at this time. Fallback to general knowledge."
 
+    # Action tools — same behaviour as the voice pipeline, so text chat can act too.
+    _sent_whatsapp = set()  # per-request dedupe (recipient) to avoid a double-send
+
+    async def send_whatsapp(recipient_phone: str, body_parameters: list | None = None) -> str:
+        """Send this agent's approved WhatsApp template message to a customer.
+
+        The agent has a single pre-approved template; you do not choose it. Only
+        provide body_parameters when that template requires variables (listed in
+        your instructions), in the exact order shown.
+
+        Args:
+            recipient_phone: The customer's phone number in international format (e.g. +919876543210 or 919876543210).
+            body_parameters: Ordered list of body variable values (e.g. ["John", "ORD-12345"]); omit when the template has no variables.
+        """
+        from core.whatsapp_client import WhatsAppClient
+        from core.whatsapp_templates import first_template
+
+        ac = agent_config or {}
+
+        # Gate: WhatsApp must be explicitly enabled for this agent.
+        if not ac.get("isWhatsAppEnabled"):
+            logger.info(f"🚫 [Browser Chat] WhatsApp send blocked: isWhatsAppEnabled is off for agent '{agent_id}'.")
+            return "I'm sorry, I'm not able to send a WhatsApp message for this account right now."
+
+        tenant_id = str(ac.get("enterpriseId") or ac.get("enterprise") or "").strip()
+
+        # Resolve this agent's single approved template.
+        _tmpl = first_template(ac.get("whatsappTemplate"))
+        if not _tmpl:
+            logger.info(f"🚫 [Browser Chat] WhatsApp send blocked: no template configured for agent '{agent_id}'.")
+            return "I'm sorry, no WhatsApp template is set up for this account, so I can't send a message."
+        template_name = _tmpl["name"]
+
+        key = ((recipient_phone or "").strip(), template_name, tuple(body_parameters or ()))
+        if key in _sent_whatsapp:
+            return f"A WhatsApp message was just sent to {recipient_phone}; not sending it again."
+        _sent_whatsapp.add(key)
+
+        result = await WhatsAppClient.send_template_internal(
+            customer_phone=recipient_phone, template_name=template_name,
+            tenant_id=tenant_id, body_parameters=body_parameters,
+        )
+        try:
+            from core.mongo_manager import mongo_db
+            if mongo_db.client is not None:
+                await mongo_db.client.get_default_database()["whatsapp_logs"].insert_one({
+                    "timestamp": datetime.datetime.utcnow(),
+                    "call_id": f"chat_{uuid.uuid4().hex[:8]}",
+                    "call_phone": "text-chat",
+                    "source": "text-chat",
+                    "agent_name": ac.get("name"),
+                    "agent_id": agent_id,
+                    "enterprise_id": tenant_id,
+                    "recipient_phone": recipient_phone,
+                    "template_name": template_name,
+                    "body_parameters": body_parameters,
+                    "message": f"[template: {template_name}]",
+                    "api_called": result.get("called"),
+                    "api_url": result.get("api_url"),
+                    "http_status": result.get("status"),
+                    "message_id": result.get("message_id"),
+                    "api_response": result.get("response"),
+                    "success": result.get("success"),
+                })
+        except Exception as log_err:
+            logger.error(f"⚠️ [Browser Chat] Failed to write whatsapp_log: {log_err}")
+
+        if result.get("success"):
+            return f"WhatsApp message successfully sent to {recipient_phone}"
+        return f"Failed to send WhatsApp message to {recipient_phone}. Please check WhatsApp API configuration."
+
+    async def send_email(recipient_email: str, subject: str, body: str, cc_recipient: str | None = None) -> str:
+        """Send an email to a customer or internally to Chauwk teams.
+
+        Args:
+            recipient_email: The target email address to send the email to.
+            subject: The subject line of the email.
+            body: The body content of the email.
+            cc_recipient: Optional CC email address.
+        """
+        from core.email_client import SMTPClient
+        agent_id_for_email = agent_config.get("agentId") if agent_config else None
+        enterprise_id_for_email = agent_config.get("enterpriseId") or agent_config.get("enterprise") if agent_config else None
+
+        # 1) Preferred: send as the enterprise admin's connected Gmail (OAuth).
+        if enterprise_id_for_email:
+            try:
+                from core.gmail_client import GmailOAuthClient
+                if GmailOAuthClient.is_configured():
+                    from core.mongo_manager import mongo_db
+                    if mongo_db.client is not None:
+                        db = mongo_db.client.get_default_database()
+                        from bson import ObjectId as _ObjectId
+                        try:
+                            ent_oid = _ObjectId(enterprise_id_for_email) if _ObjectId.is_valid(enterprise_id_for_email) else enterprise_id_for_email
+                        except Exception:
+                            ent_oid = enterprise_id_for_email
+                        enterprise_doc = await db['enterprises'].find_one({"_id": ent_oid})
+                        if enterprise_doc and enterprise_doc.get("email"):
+                            ok = await GmailOAuthClient.send_email(
+                                enterprise_id=str(enterprise_id_for_email),
+                                sender_email=enterprise_doc.get("email"),
+                                sender_name=enterprise_doc.get("userName") or "Chauwk",
+                                recipient_email=recipient_email, subject=subject, body=body,
+                                cc_list=[cc_recipient] if cc_recipient else [],
+                            )
+                            if ok:
+                                return f"Email successfully sent to {recipient_email}"
+            except Exception as gmail_err:
+                logger.warning(f"⚠️ [Browser Chat] Gmail OAuth send failed for '{enterprise_id_for_email}': {gmail_err}")
+
+        # 2) Per-agent SMTP creds, then 3) global Config.SMTP_*.
+        override = None
+        agent_cc_list = []
+        if agent_id_for_email:
+            try:
+                from core.mongo_manager import mongo_db
+                if mongo_db.client is not None:
+                    db = mongo_db.client.get_default_database()
+                    creds = await db['agent_email_credentials'].find_one({"agentId": agent_id_for_email})
+                    if creds and creds.get("smtp_user") and creds.get("smtp_password"):
+                        override = {
+                            "host": creds.get("smtp_host"), "port": creds.get("smtp_port"),
+                            "user": creds.get("smtp_user"), "password": creds.get("smtp_password"),
+                            "from_name": creds.get("senderName"), "from_email": creds.get("email"),
+                        }
+                        agent_cc_list = creds.get("ccList", [])
+            except Exception as cred_err:
+                logger.warning(f"⚠️ [Browser Chat] Failed to load per-agent email creds for '{agent_id_for_email}': {cred_err}")
+
+        ok = await SMTPClient.send_email(
+            recipient_email=recipient_email, subject=subject, body=body,
+            cc_recipient=cc_recipient, cc_list=agent_cc_list, override=override,
+        )
+        return (f"Email successfully sent to {recipient_email}" if ok
+                else f"Failed to send email to {recipient_email}. Please check SMTP configurations.")
+
+    async def schedule_meeting(attendee_email: str, meeting_date: str, meeting_time: str,
+                               duration_minutes: int = 30, summary: str = "Meeting with Chauwk") -> str:
+        """Check availability and book a real meeting on the connected Google Calendar.
+
+        Args:
+            attendee_email: The customer's email address to invite.
+            meeting_date: Date in YYYY-MM-DD format.
+            meeting_time: Time in 24-hour HH:MM format (IST).
+            duration_minutes: Meeting length in minutes. Defaults to 30.
+            summary: A short title for the meeting.
+        """
+        enterprise_id_for_meeting = agent_config.get("enterpriseId") or agent_config.get("enterprise") if agent_config else None
+        if not enterprise_id_for_meeting:
+            return "Unable to schedule: no enterprise is associated with this agent."
+        from core.calendar_client import CalendarClient
+        result = await CalendarClient.schedule_meeting(
+            enterprise_id=str(enterprise_id_for_meeting), attendee_email=attendee_email,
+            meeting_date=meeting_date, meeting_time=meeting_time,
+            duration_minutes=duration_minutes, summary=summary,
+        )
+        return (f"Meeting successfully booked for {meeting_date} at {meeting_time}." if result["success"]
+                else f"Meeting could not be booked: {result['reason']}")
+
     try:
         from google.genai import types
 
@@ -475,7 +646,7 @@ async def browser_chat_text_endpoint(request: Request):
             contents=history,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                tools=[query_knowledge_base],
+                tools=[query_knowledge_base, send_email, schedule_meeting, send_whatsapp],
             ),
         )
         reply_text = (response.text or "").strip()

@@ -95,11 +95,19 @@ class Config:
     SMTP_FROM_EMAIL = os.getenv('SMTP_FROM_EMAIL', '')
 
     # ===== WHATSAPP API CONFIGURATION =====
-    # Template-send endpoint accepting POST {"to", "templateName", "languageCode"}.
-    # The template (hello_world / en_US) is hardcoded in the send_whatsapp tool.
-    # Leave WHATSAPP_API_URL blank to run the WhatsApp tool in mock mode.
+    # Legacy single-tenant template-send endpoint accepting
+    # POST {"to", "templateName", "languageCode"}. Leave blank for mock mode.
     WHATSAPP_API_URL = os.getenv('WHATSAPP_API_URL', '')
     WHATSAPP_API_TOKEN = os.getenv('WHATSAPP_API_TOKEN', '')
+
+    # Internal multi-tenant voice-agent WhatsApp endpoint. The service resolves
+    # the enterprise's WhatsApp account + template (language, components) from
+    # tenantId server-side; we send only the template name + ordered body params:
+    #   POST {"customerPhone","type":"template","templateName","tenantId","bodyParameters"?}
+    #   Header: x-api-key: <INTERNAL_API_KEY>
+    # Leave INTERNAL_WHATSAPP_API_URL blank to run the WhatsApp tool in mock mode.
+    INTERNAL_WHATSAPP_API_URL = os.getenv('INTERNAL_WHATSAPP_API_URL', '')
+    INTERNAL_API_KEY = os.getenv('INTERNAL_API_KEY', '')
 
     # ===== GMAIL OAUTH (per-enterprise "send as me" — replaces App Passwords) =====
     # Must match the OAuth client used by ai-webhooks.chauwk.com's existing
