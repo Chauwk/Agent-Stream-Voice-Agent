@@ -187,14 +187,57 @@ app.include_router(calls_log_router)
 whatsapp_log_router = APIRouter(prefix="/api/v1/whatsapp", tags=["WhatsApp Logs"])
 
 @whatsapp_log_router.get("/logs")
-async def get_whatsapp_logs(limit: int = 100):
-    """Retrieve WhatsApp send logs from MongoDB, newest first."""
+async def get_whatsapp_logs(
+    request: Request,
+    limit: int = 100,
+    agent_id: Optional[str] = None,
+    enterprise_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+):
+    """Retrieve WhatsApp send logs from MongoDB, newest first.
+
+    Optional filters:
+      agent_id      - one id or a comma-separated list (agentId and/or Mongo _id)
+      enterprise_id - the enterprise the agent belongs to
+      start_date / end_date - YYYY-MM-DD, India days (logs are stored in UTC)
+    Every enterprise's logs at once (no agent_id / enterprise_id) needs the
+    x-admin-key header when WHATSAPP_LOGS_ADMIN_KEY is configured.
+    """
     from core.mongo_manager import mongo_db
     if mongo_db.client is None:
         return []
+
+    agent_ids = [a.strip() for a in (agent_id or "").split(",") if a.strip()]
+    if not agent_ids and not enterprise_id and Config.WHATSAPP_LOGS_ADMIN_KEY:
+        if request.headers.get("x-admin-key") != Config.WHATSAPP_LOGS_ADMIN_KEY:
+            return JSONResponse(
+                status_code=401,
+                content={"success": False, "message": "agent_id or enterprise_id is required"},
+            )
+
+    query: Dict[str, Any] = {}
+    if agent_ids:
+        query["agent_id"] = {"$in": agent_ids}
+    if enterprise_id:
+        query["enterprise_id"] = enterprise_id
+    # Timestamps are naive UTC; an India day starts at 18:30 UTC the day before.
+    ist_offset = datetime.timedelta(hours=5, minutes=30)
+    ts_range: Dict[str, Any] = {}
+    try:
+        if start_date:
+            ts_range["$gte"] = datetime.datetime.strptime(start_date, "%Y-%m-%d") - ist_offset
+        if end_date:
+            ts_range["$lt"] = datetime.datetime.strptime(end_date, "%Y-%m-%d") + datetime.timedelta(days=1) - ist_offset
+    except ValueError:
+        return JSONResponse(status_code=400, content={"success": False, "message": "Dates must be YYYY-MM-DD"})
+    if ts_range:
+        query["timestamp"] = ts_range
+    limit = max(1, min(int(limit or 100), 5000))
+
     try:
         db = mongo_db.client.get_default_database()
-        cursor = db["whatsapp_logs"].find({}).sort("timestamp", -1).limit(limit)
+        cursor = db["whatsapp_logs"].find(query).sort("timestamp", -1).limit(limit)
         logs = []
         async for doc in cursor:
             doc["_id"] = str(doc["_id"])

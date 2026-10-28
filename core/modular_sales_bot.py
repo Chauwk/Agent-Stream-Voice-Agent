@@ -1797,8 +1797,12 @@ class ModularSalesBot:
                                             raise TriggerToolRecallException()
                                         elif fc.name == "send_whatsapp":
                                             recipient_phone = fc.args.get("recipient_phone", "")
-                                            message = fc.args.get("message", "")
-                                            ans = await send_whatsapp(recipient_phone=recipient_phone, message=message)
+                                            # The message text comes from the agent's approved template,
+                                            # so only the number (and the name, if heard) is passed.
+                                            ans = await send_whatsapp(
+                                                recipient_phone=recipient_phone,
+                                                customer_name=fc.args.get("customer_name", ""),
+                                            )
                                             history.append(
                                                 types.Content(
                                                     role="model",

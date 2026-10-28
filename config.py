@@ -96,9 +96,18 @@ class Config:
 
     # ===== WHATSAPP API CONFIGURATION =====
     # Legacy single-tenant template-send endpoint accepting
-    # POST {"to", "templateName", "languageCode"}. Leave blank for mock mode.
+    # POST {"to", "templateName", "languageCode", "components"?}. Leave blank for mock mode.
+    # NOTE: the ACTIVE send path is the internal multi-tenant endpoint below
+    # (INTERNAL_WHATSAPP_API_URL). WHATSAPP_DEFAULT_TEMPLATE/LANGUAGE back the legacy
+    # send_template; WHATSAPP_LOGS_ADMIN_KEY guards the cross-tenant logs endpoint.
     WHATSAPP_API_URL = os.getenv('WHATSAPP_API_URL', '')
     WHATSAPP_API_TOKEN = os.getenv('WHATSAPP_API_TOKEN', '')
+    WHATSAPP_DEFAULT_TEMPLATE = os.getenv('WHATSAPP_DEFAULT_TEMPLATE', 'hello_world')
+    WHATSAPP_DEFAULT_LANGUAGE = os.getenv('WHATSAPP_DEFAULT_LANGUAGE', 'en_US')
+    # When set, GET /api/v1/whatsapp/logs without an agent_id / enterprise_id
+    # filter (i.e. every enterprise's logs) requires header x-admin-key with this
+    # value. Blank = no check (previous behaviour).
+    WHATSAPP_LOGS_ADMIN_KEY = os.getenv('WHATSAPP_LOGS_ADMIN_KEY', '')
 
     # Internal multi-tenant voice-agent WhatsApp endpoint. The service resolves
     # the enterprise's WhatsApp account + template (language, components) from
