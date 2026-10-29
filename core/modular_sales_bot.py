@@ -1796,11 +1796,15 @@ class ModularSalesBot:
                                             raise TriggerToolRecallException()
                                         elif fc.name == "send_whatsapp":
                                             recipient_phone = fc.args.get("recipient_phone", "")
-                                            # The message text comes from the agent's approved template,
-                                            # so only the number (and the name, if heard) is passed.
+                                            # The template itself is resolved server-side from the
+                                            # agent's enterprise; we only forward the recipient and
+                                            # the ordered body variable values (if the template needs
+                                            # any). Must match the send_whatsapp() closure signature
+                                            # (recipient_phone, body_parameters) — passing any other
+                                            # kwarg raises TypeError and silently kills the turn.
                                             ans = await send_whatsapp(
                                                 recipient_phone=recipient_phone,
-                                                customer_name=fc.args.get("customer_name", ""),
+                                                body_parameters=fc.args.get("body_parameters"),
                                             )
                                             history.append(
                                                 types.Content(
